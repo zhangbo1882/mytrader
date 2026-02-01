@@ -1,0 +1,38 @@
+# requirements.txt
+# 量化交易项目依赖
+
+# 数据源
+tushare>=1.4.0
+akshare>=1.18.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 数据库
+sqlalchemy>=2.0.0
+
+# 回测框架
+backtrader>=1.9.78
+
+# 可视化
+matplotlib>=3.7.0
+
+# 其他工具
+python-dateutil>=2.8.0
+requests>=2.31.0
+tqdm>=4.65.0
+
+# Web Framework
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Data Export
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# Scheduler
+apscheduler>=3.10.0
+flask-apscheduler>=1.13.0
+filelock>=3.12.0
+croniter>=1.4.0

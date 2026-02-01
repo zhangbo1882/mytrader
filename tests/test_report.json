@@ -1,0 +1,235 @@
+{
+  "timestamp": "2026-01-31T21:57:30.114536",
+  "summary": {
+    "total": 32,
+    "passed": 18,
+    "failed": 14,
+    "success_rate": "56.2%"
+  },
+  "results": [
+    {
+      "test_name": "1.1.2 删除pending任务",
+      "passed": true,
+      "message": "任务删除API调用",
+      "details": "{'success': True}",
+      "timestamp": "2026-01-31T21:54:16.354599"
+    },
+    {
+      "test_name": "1.1.3 验证任务从列表消失",
+      "passed": true,
+      "message": "pending任务数量: 1 -> 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:16.355714"
+    },
+    {
+      "test_name": "1.1.4 验证数据库持久化",
+      "passed": true,
+      "message": "数据库中任务记录数: 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:16.355899"
+    },
+    {
+      "test_name": "1.2.0 获取pending任务",
+      "passed": false,
+      "message": "没有可用的pending任务",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:16.356936"
+    },
+    {
+      "test_name": "1.3.0 获取stopped任务",
+      "passed": false,
+      "message": "没有可用的stopped任务",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:16.357936"
+    },
+    {
+      "test_name": "1.4.1 第一次获取任务列表",
+      "passed": true,
+      "message": "任务数量: 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.363254"
+    },
+    {
+      "test_name": "1.4.2 第二次获取任务列表（刷新）",
+      "passed": true,
+      "message": "任务数量: 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.363264"
+    },
+    {
+      "test_name": "1.4.3 验证列表结构一致性",
+      "passed": true,
+      "message": "任务数量: 0, 结构完整",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.363269"
+    },
+    {
+      "test_name": "1.5.1 获取第一页任务",
+      "passed": true,
+      "message": "本页: 0条, 总计: 0条",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.365250"
+    },
+    {
+      "test_name": "1.5.2 验证分页参数",
+      "passed": true,
+      "message": "每页最多10条，实际: 0条",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.365260"
+    },
+    {
+      "test_name": "2.1.1 创建更新任务",
+      "passed": true,
+      "message": "创建任务API调用",
+      "details": "{\"error\": \"收藏列表为空\", \"success\": false}",
+      "timestamp": "2026-01-31T21:54:17.368756"
+    },
+    {
+      "test_name": "2.1.2 获取任务ID",
+      "passed": false,
+      "message": "任务ID: None",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.368764"
+    },
+    {
+      "test_name": "2.2.0 获取运行中任务",
+      "passed": false,
+      "message": "没有运行中的任务",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.370298"
+    },
+    {
+      "test_name": "2.3.0 获取任务",
+      "passed": false,
+      "message": "没有运行中或暂停的任务",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.373196"
+    },
+    {
+      "test_name": "2.4.1 获取已完成任务",
+      "passed": false,
+      "message": "没有已完成的任务",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:17.374615"
+    },
+    {
+      "test_name": "2.5.1 检测任务冲突",
+      "passed": false,
+      "message": "未检测到冲突",
+      "details": "{\"error\": \"收藏列表为空\", \"success\": false}",
+      "timestamp": "2026-01-31T21:54:18.384729"
+    },
+    {
+      "test_name": "2.5.2 验证只有一个活动任务",
+      "passed": false,
+      "message": "活动任务数量: 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:18.385045"
+    },
+    {
+      "test_name": "3.1.1 创建任务",
+      "passed": true,
+      "message": "",
+      "details": "",
+      "timestamp": "2026-01-31T21:54:18.386923"
+    },
+    {
+      "test_name": "test_3_1_complete_workflow",
+      "passed": false,
+      "message": "测试异常: sequence item 0: expected str instance, NoneType found",
+      "details": "Traceback (most recent call last):\n  File \"/Users/zhangbo/Public/go/github.com/mytrader/tests/task_management_tests.py\", line 896, in main\n    test_func()\n    ~~~~~~~~~^^\n  File \"/Users/zhangbo/Public/go/github.com/mytrader/tests/task_management_tests.py\", line 490, in test_3_1_complete_workflow\n    f\"经历的状态: {' -> '.join(states_seen)}\")\n                   ~~~~~~~~~~~^^^^^^^^^^^^^\nTypeError: sequence item 0: expected str instance, NoneType found\n",
+      "timestamp": "2026-01-31T21:55:18.773328"
+    },
+    {
+      "test_name": "test_3_2_checkpoint_resume",
+      "passed": false,
+      "message": "测试异常: 'NoneType' object is not subscriptable",
+      "details": "Traceback (most recent call last):\n  File \"/Users/zhangbo/Public/go/github.com/mytrader/tests/task_management_tests.py\", line 896, in main\n    test_func()\n    ~~~~~~~~~^^\n  File \"/Users/zhangbo/Public/go/github.com/mytrader/tests/task_management_tests.py\", line 519, in test_3_2_checkpoint_resume\n    log_test(\"3.2.1 创建任务\", True, f\"任务ID: {task_id[:8]}...\")\n                                                ~~~~~~~^^^^\nTypeError: 'NoneType' object is not subscriptable\n",
+      "timestamp": "2026-01-31T21:55:18.776098"
+    },
+    {
+      "test_name": "3.3.2 空列表处理",
+      "passed": true,
+      "message": "正确拒绝",
+      "details": "{'error': '股票列表为空', 'success': False}",
+      "timestamp": "2026-01-31T21:55:48.997606"
+    },
+    {
+      "test_name": "4.1.1 删除运行中的任务（应失败）",
+      "passed": false,
+      "message": "不应允许删除",
+      "details": "{'error': '任务正在执行，无法删除。请先停止任务。', 'success': False}",
+      "timestamp": "2026-01-31T21:55:53.518344"
+    },
+    {
+      "test_name": "4.1.2 任务继续运行",
+      "passed": true,
+      "message": "任务状态: running",
+      "details": "",
+      "timestamp": "2026-01-31T21:55:53.521253"
+    },
+    {
+      "test_name": "4.2.1 API状态一致性",
+      "passed": true,
+      "message": "API: running, DB: running",
+      "details": "",
+      "timestamp": "2026-01-31T21:55:53.523819"
+    },
+    {
+      "test_name": "4.2.2 进度一致性",
+      "passed": true,
+      "message": "API: 0, DB: 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:55:53.523829"
+    },
+    {
+      "test_name": "4.2.3 统计数据一致性",
+      "passed": true,
+      "message": "当前索引: 0, 总数: 2",
+      "details": "",
+      "timestamp": "2026-01-31T21:55:53.523833"
+    },
+    {
+      "test_name": "4.2.4 stats字段",
+      "passed": true,
+      "message": "成功: 0, 失败: 0",
+      "details": "",
+      "timestamp": "2026-01-31T21:55:53.523838"
+    },
+    {
+      "test_name": "4.3.1 Python进程内存",
+      "passed": true,
+      "message": "找到 2 个进程, 内存: 109.8MB, 106.2MB",
+      "details": "",
+      "timestamp": "2026-01-31T21:55:53.571954"
+    },
+    {
+      "test_name": "5.1.1 停止后立即删除",
+      "passed": true,
+      "message": "删除耗时: 4.52秒",
+      "details": "",
+      "timestamp": "2026-01-31T21:56:29.100341"
+    },
+    {
+      "test_name": "5.2.1 取消pending任务",
+      "passed": false,
+      "message": "Request error: HTTPConnectionPool(host='localhost', port=5001): Read timed out. (read timeout=30)",
+      "details": "",
+      "timestamp": "2026-01-31T21:56:59.105910"
+    },
+    {
+      "test_name": "5.2.2 验证状态为stopped",
+      "passed": false,
+      "message": "状态: running, 消息: 正在更新 999999 (1/2)...",
+      "details": "",
+      "timestamp": "2026-01-31T21:57:00.111901"
+    },
+    {
+      "test_name": "5.3.1 清理旧任务API",
+      "passed": false,
+      "message": "清理结果: Request error: HTTPConnectionPool(host='localhost', port=5001): Read timed out. (read timeout=30)",
+      "details": "",
+      "timestamp": "2026-01-31T21:57:30.114205"
+    }
+  ]
+}

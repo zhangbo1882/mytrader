@@ -1,0 +1,836 @@
+{% extends "base.html" %}
+
+{% block title %}股票查询系统 - {% endblock %}
+
+{% block body %}
+<!-- Navigation -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+        <a class="navbar-brand" href="/">
+            <i class="bi bi-graph-up-arrow"></i> 股票查询系统
+        </a>
+    </div>
+</nav>
+
+<div class="container mt-4">
+    <!-- Tab导航 -->
+    <ul class="nav nav-tabs mb-4" id="mainTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="query-tab" data-bs-toggle="tab"
+                    data-bs-target="#query-pane" type="button" role="tab">
+                <i class="bi bi-search"></i> 股票查询
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="screen-tab" data-bs-toggle="tab"
+                    data-bs-target="#screen-pane" type="button" role="tab">
+                <i class="bi bi-robot"></i> AI智能筛选
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="favorites-tab" data-bs-toggle="tab"
+                    data-bs-target="#favorites-pane" type="button" role="tab">
+                <i class="bi bi-star-fill"></i> 我的收藏
+                <span class="badge bg-primary rounded-pill ms-1 d-none" id="favCountBadge">0</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="update-tab" data-bs-toggle="tab"
+                    data-bs-target="#update-pane" type="button" role="tab">
+                <i class="bi bi-arrow-clockwise"></i> 更新管理
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tasks-tab" data-bs-toggle="tab"
+                    data-bs-target="#tasks-pane" type="button" role="tab">
+                <i class="bi bi-list-task"></i> 任务历史
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="financial-tab" data-bs-toggle="tab"
+                    data-bs-target="#financial-pane" type="button" role="tab">
+                <i class="bi bi-file-earmark-text"></i> 财务数据
+            </button>
+        </li>
+    </ul>
+
+    <!-- Tab内容区域 -->
+    <div class="tab-content" id="mainTabContent">
+        <!-- Tab 1: 查询表单 -->
+        <div class="tab-pane fade show active" id="query-pane" role="tabpanel">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form id="queryForm">
+                <!-- 股票选择（支持多个） -->
+                <div class="mb-3">
+                    <label class="form-label">股票名称/代码</label>
+                    <select class="form-select" id="stockSelect" multiple style="width: 100%">
+                    </select>
+                    <small class="form-text text-muted">
+                        <i class="bi bi-info-circle"></i> 支持输入代码或名称搜索，可多选
+                    </small>
+                </div>
+
+                <!-- 时间选择 -->
+                <div class="row">
+                    <div class="col-md-5">
+                        <label class="form-label">开始日期</label>
+                        <input type="date" class="form-control" id="startDate" required>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label">结束日期</label>
+                        <input type="date" class="form-control" id="endDate" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">复权类型</label>
+                        <select class="form-select" id="priceType">
+                            <option value="">不复权</option>
+                            <option value="qfq">前复权</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 快捷时间按钮 -->
+                <div class="mb-3 mt-3">
+                    <label class="form-label">快捷选择</label>
+                    <div class="btn-group flex-wrap" role="group">
+                        <button type="button" class="btn btn-outline-primary" data-range="1M">1个月</button>
+                        <button type="button" class="btn btn-outline-primary" data-range="3M">3个月</button>
+                        <button type="button" class="btn btn-outline-primary" data-range="6M">6个月</button>
+                        <button type="button" class="btn btn-outline-primary" data-range="1Y">1年</button>
+                        <button type="button" class="btn btn-outline-primary" data-range="YTD">今年</button>
+                        <button type="button" class="btn btn-outline-primary" data-range="ALL">全部</button>
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search"></i> 查询
+                    </button>
+                    <button type="button" class="btn btn-success" id="exportCsv" disabled>
+                        <i class="bi bi-filetype-csv"></i> 导出CSV
+                    </button>
+                    <button type="button" class="btn btn-success" id="exportExcel" disabled>
+                        <i class="bi bi-filetype-xlsx"></i> 导出Excel
+                    </button>
+                </div>
+            </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: AI智能筛选 -->
+        <div class="tab-pane fade" id="screen-pane" role="tabpanel">
+            <!-- ChatGPT风格的对话界面 -->
+            <div class="chat-inline-container" id="chatInlineContainer">
+                <!-- 对话界面会由JavaScript自动创建 -->
+            </div>
+        </div>
+
+        <!-- Tab 3: 我的收藏 -->
+        <div class="tab-pane fade" id="favorites-pane" role="tabpanel">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-star-fill"></i> 我的收藏列表</h5>
+                </div>
+                <div class="card-body">
+                    <!-- 手动添加股票区域 -->
+                    <div class="mb-3">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="addFavStockInput"
+                                   placeholder="输入股票代码（如：000001 或 600000）">
+                            <button class="btn btn-success" type="button" id="btnAddToFavorites">
+                                <i class="bi bi-plus-circle"></i> 添加
+                            </button>
+                        </div>
+                        <small class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> 支持输入6位股票代码，会自动识别交易所
+                        </small>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="favoritesTable" class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th style="width: 50px;">
+                                        <input type="checkbox" class="form-check-input" id="selectAllFavorites">
+                                    </th>
+                                    <th>代码</th>
+                                    <th>名称</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted">暂无收藏，从筛选结果中添加股票</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button type="button" class="btn btn-primary btn-sm" id="btnQuerySelectedFavorites" disabled>
+                            <i class="bi bi-search"></i> 查询选中的收藏 (<span id="selectedCount">0</span>)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 4: 更新管理 -->
+        <div class="tab-pane fade" id="update-pane" role="tabpanel">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-sliders"></i> 更新设置</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info mb-3" role="alert">
+                                <i class="bi bi-info-circle"></i>
+                                <strong>更新内容：</strong>股价数据（开高低收） + 每日指标（PE、PB、市值、换手率等）
+                            </div>
+                            <form id="updateForm">
+                                <div class="mb-3">
+                                    <label class="form-label">更新模式</label>
+                                    <select class="form-select" id="updateMode" name="mode">
+                                        <option value="incremental" selected>增量更新（快速，日常使用）</option>
+                                        <option value="full">全量更新（较慢，首次或补全数据）</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">股票范围</label>
+                                    <select class="form-select" id="stockRange" name="stock_range">
+                                        <option value="all" selected>全部A股</option>
+                                        <option value="favorites">收藏列表</option>
+                                        <option value="custom">自定义</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-3" id="customStocksGroup" style="display:none;">
+                                    <label class="form-label">自定义股票代码</label>
+                                    <textarea class="form-control" id="customStocks" rows="3"
+                                        placeholder="每行一个股票代码，如：&#10;000001&#10;600000&#10;600519"></textarea>
+                                    <small class="text-muted">每行一个股票代码</small>
+                                </div>
+
+                                <div class="d-grid gap-2">
+                                    <button type="button" class="btn btn-primary btn-lg" id="startBtn">
+                                        <i class="bi bi-play-fill"></i> 开始更新
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-8">
+                    <!-- Current Task Status -->
+                    <div class="card mb-4" id="taskStatusCard" style="display:none;">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0"><i class="bi bi-activity"></i> 当前任务</h5>
+                            <span class="status-badge" id="taskStatusBadge">-</span>
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-3" id="taskMessage"></p>
+
+                            <!-- Progress Bar -->
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span id="progressLabel">进度: 0/0</span>
+                                    <span id="progressPercent">0%</span>
+                                </div>
+                                <div class="progress">
+                                    <div class="progress-bar" id="progressBar" role="progressbar"
+                                        style="width: 0%">0%</div>
+                                </div>
+                            </div>
+
+                            <!-- Control Buttons -->
+                            <div class="mb-3">
+                                <button class="btn btn-warning btn-control" id="pauseBtn" disabled>
+                                    <i class="bi bi-pause-fill"></i> 暂停
+                                </button>
+                                <button class="btn btn-success btn-control" id="resumeBtn" style="display:none;">
+                                    <i class="bi bi-play-fill"></i> 恢复
+                                </button>
+                                <button class="btn btn-danger btn-control" id="stopBtn" disabled>
+                                    <i class="bi bi-stop-fill"></i> 停止
+                                </button>
+                            </div>
+
+                            <!-- Statistics -->
+                            <div class="row">
+                                <div class="col-3">
+                                    <div class="stat-card">
+                                        <div class="stat-number stat-total" id="statTotal">0</div>
+                                        <div class="stat-label">总计</div>
+                                    </div>
+                                </div>
+                                <div class="col-3">
+                                    <div class="stat-card">
+                                        <div class="stat-number stat-success" id="statSuccess">0</div>
+                                        <div class="stat-label">成功</div>
+                                    </div>
+                                </div>
+                                <div class="col-3">
+                                    <div class="stat-card">
+                                        <div class="stat-number stat-failed" id="statFailed">0</div>
+                                        <div class="stat-label">失败</div>
+                                    </div>
+                                </div>
+                                <div class="col-3">
+                                    <div class="stat-card">
+                                        <div class="stat-number stat-skipped" id="statSkipped">0</div>
+                                        <div class="stat-label">跳过</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Detailed Results -->
+                            <div id="detailedResults" style="display:none; margin-top: 15px;">
+                                <!-- Failed Stocks -->
+                                <div id="failedStocksSection" style="display:none; margin-bottom: 10px;">
+                                    <h6 class="text-danger">
+                                        <i class="bi bi-x-circle"></i> 失败的股票 <span class="badge bg-danger" id="failedCount">0</span>
+                                    </h6>
+                                    <div class="alert alert-danger alert-sm" style="max-height: 150px; overflow-y: auto;">
+                                        <div id="failedStocksList" class="mb-0" style="font-size: 0.9rem;"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Skipped Stocks -->
+                                <div id="skippedStocksSection" style="display:none; margin-bottom: 10px;">
+                                    <h6 class="text-warning">
+                                        <i class="bi bi-dash-circle"></i> 跳过的股票 <span class="badge bg-warning" id="skippedCount">0</span>
+                                    </h6>
+                                    <div class="alert alert-warning alert-sm" style="max-height: 150px; overflow-y: auto;">
+                                        <div id="skippedStocksList" class="mb-0" style="font-size: 0.9rem;"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Success Stocks (collapsible) -->
+                                <div id="successStocksSection" style="display:none;">
+                                    <h6 class="text-success">
+                                        <i class="bi bi-check-circle"></i> 成功的股票 <span class="badge bg-success" id="successCount">0</span>
+                                    </h6>
+                                    <div class="alert alert-success alert-sm" style="max-height: 150px; overflow-y: auto;">
+                                        <div id="successStocksList" class="mb-0" style="font-size: 0.9rem;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- No Task Message -->
+                    <div class="card" id="noTaskCard">
+                        <div class="card-body text-center text-muted py-5">
+                            <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                            <p class="mt-3">当前没有运行的任务</p>
+                            <p class="small">请在左侧配置更新选项后点击"开始更新"</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scheduled Jobs Section -->
+            <div class="card mt-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-clock"></i> 定时任务列表</h5>
+                    <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#addScheduleModal">
+                        <i class="bi bi-plus-lg"></i> 添加任务
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="scheduledJobsTable">
+                            <thead>
+                                <tr>
+                                    <th>任务名称</th>
+                                    <th>Cron表达式</th>
+                                    <th>更新模式</th>
+                                    <th>下次执行时间</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scheduledJobsBody">
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted">加载中...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 5: 任务历史 -->
+        <div class="tab-pane fade" id="tasks-pane" role="tabpanel">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-clock-history"></i> 任务历史记录</h5>
+                    <div>
+                        <button class="btn btn-outline-secondary btn-sm me-2" id="refreshTasksBtn">
+                            <i class="bi bi-arrow-clockwise"></i> 刷新
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" id="clearOldTasksBtn">
+                            <i class="bi bi-trash"></i> 清理旧任务
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- 筛选器 -->
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" id="taskStatusFilter">
+                                <option value="">全部状态</option>
+                                <option value="pending">待执行</option>
+                                <option value="running">运行中</option>
+                                <option value="paused">已暂停</option>
+                                <option value="completed">已完成</option>
+                                <option value="failed">失败</option>
+                                <option value="stopped">已停止</option>
+                                <option value="cancelled">已取消</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select form-select-sm" id="taskTypeFilter">
+                                <option value="">全部类型</option>
+                                <option value="update_favorites">股票更新</option>
+                                <option value="update_all_stocks">股票更新</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-hover" id="tasksTable">
+                            <thead>
+                                <tr>
+                                    <th>任务ID</th>
+                                    <th>类型</th>
+                                    <th>状态</th>
+                                    <th>进度</th>
+                                    <th>统计</th>
+                                    <th>创建时间</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tasksBody">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">加载中...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- 分页 -->
+                    <nav aria-label="任务分页" class="mt-3">
+                        <ul class="pagination justify-content-center" id="tasksPagination">
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 6: 财务数据 -->
+        <div class="tab-pane fade" id="financial-pane" role="tabpanel">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <form id="financialForm" class="row g-3">
+                        <div class="col-md-5">
+                            <label class="form-label">股票名称/代码</label>
+                            <select class="form-select" id="financialStockSelect" style="width: 100%">
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">视图模式</label>
+                            <select class="form-select" id="financialViewMode">
+                                <option value="summary">摘要视图</option>
+                                <option value="full">完整报表</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary" id="financialQueryBtn">
+                                    <i class="bi bi-search"></i> 查询财务数据
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 加载状态 -->
+            <div id="financialLoading" style="display: none;" class="text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                </div>
+                <p class="mt-3 mb-0">正在加载财务数据...</p>
+            </div>
+
+            <!-- 无数据提示 -->
+            <div id="financialNoData" style="display: none;" class="card">
+                <div class="card-body text-center py-5">
+                    <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                    <p class="mt-3">暂无财务数据</p>
+                    <p class="small text-muted">该股票可能没有财务数据，请选择其他股票</p>
+                </div>
+            </div>
+
+            <!-- 摘要视图 -->
+            <div id="financialSummaryView" style="display: none;">
+                <div class="row g-3" id="financialSummaryGrid">
+                    <!-- 12个核心指标卡片将由JavaScript生成 -->
+                </div>
+            </div>
+
+            <!-- 完整报表视图 -->
+            <div id="financialFullView" style="display: none;">
+                <!-- 利润表 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="bi bi-graph-up-arrow"></i> 利润表</h6>
+                    </div>
+                    <div class="card-body">
+                        <table id="incomeTable" class="table table-striped table-hover" style="width: 100%">
+                            <thead>
+                                <tr>
+                                    <th>报告期</th>
+                                    <th>公告日期</th>
+                                    <th>营业收入</th>
+                                    <th>营业利润</th>
+                                    <th>净利润</th>
+                                    <th>每股收益</th>
+                                    <th>归属净利润</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 资产负债表 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="bi bi-balance-scale"></i> 资产负债表</h6>
+                    </div>
+                    <div class="card-body">
+                        <table id="balanceTable" class="table table-striped table-hover" style="width: 100%">
+                            <thead>
+                                <tr>
+                                    <th>报告期</th>
+                                    <th>公告日期</th>
+                                    <th>总资产</th>
+                                    <th>总负债</th>
+                                    <th>股东权益</th>
+                                    <th>总股本</th>
+                                    <th>货币资金</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 现金流量表 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="bi bi-cash-coin"></i> 现金流量表</h6>
+                    </div>
+                    <div class="card-body">
+                        <table id="cashflowTable" class="table table-striped table-hover" style="width: 100%">
+                            <thead>
+                                <tr>
+                                    <th>报告期</th>
+                                    <th>公告日期</th>
+                                    <th>经营现金流</th>
+                                    <th>自由现金流</th>
+                                    <th>销售收现</th>
+                                    <th>支付职工</th>
+                                    <th>支付税费</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Tab内容区域 -->
+
+    <!-- 加载提示 -->
+    <div id="loadingSection" style="display: none;">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                </div>
+                <p class="mt-3 mb-0">正在查询数据，请稍候...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 查询结果 -->
+    <div id="resultsSection" style="display: none;">
+        <!-- 数据表格 -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-table"></i> <span id="resultTitle">查询结果</span></h5>
+                <span class="badge bg-primary" id="recordCount">0 条记录</span>
+            </div>
+            <div class="card-body">
+                <table id="dataTable" class="table table-striped table-hover" style="width: 100%">
+                    <thead>
+                        <tr>
+                            <th>股票代码</th>
+                            <th>股票名称</th>
+                            <th>日期</th>
+                            <th>开盘价</th>
+                            <th>最高价</th>
+                            <th>最低价</th>
+                            <th>收盘价</th>
+                            <th>成交量</th>
+                            <th>换手率(%)</th>
+                            <th>涨跌幅(%)</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 对比图表（如果选择了多只股票） -->
+        <div class="card" id="chartCard" style="display: none;">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> 价格趋势对比</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="comparisonChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 提示消息 Toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="messageToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <strong class="me-auto" id="toastTitle">提示</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toastBody"></div>
+    </div>
+</div>
+
+<!-- AI智能筛选 Modal -->
+<div class="modal fade ai-screen-modal" id="aiScreenModal" tabindex="-1" aria-labelledby="aiScreenModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="ai-screen-header">
+                <h5 class="modal-title" id="aiScreenModalLabel">
+                    <i class="bi bi-magic"></i> AI智能筛选
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Query Input Section -->
+                <div class="mb-4">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-chat-left-text"></i> 描述您的筛选条件
+                    </label>
+                    <textarea
+                        class="form-control ai-query-textarea"
+                        id="aiQueryInput"
+                        placeholder="例如：查找最近5天涨幅超过5%的股票"
+                        rows="3"></textarea>
+                </div>
+
+                <!-- Example Queries -->
+                <div class="mb-4">
+                    <label class="form-label text-muted small">
+                        <i class="bi bi-lightbulb"></i> 点击示例快速填充：
+                    </label>
+                    <div class="ai-example-pills">
+                        <span class="ai-example-pill">查找最近5天涨幅超过5%的股票</span>
+                        <span class="ai-example-pill">价格低于20元且换手率大于3%的股票</span>
+                        <span class="ai-example-pill">最近10天成交量放大的股票</span>
+                        <span class="ai-example-pill">低价高换手率的股票</span>
+                        <span class="ai-example-pill">查找连续上涨的股票</span>
+                    </div>
+                </div>
+
+                <!-- Thinking State -->
+                <div id="aiThinkingContainer" style="display: none;">
+                    <div class="ai-thinking-container">
+                        <div class="ai-thinking-spinner"></div>
+                        <div class="ai-thinking-text">
+                            AI正在分析您的需求<span class="dots"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div id="aiEmptyState">
+                    <div class="ai-empty-state">
+                        <i class="bi bi-robot"></i>
+                        <p class="mb-1">用自然语言描述筛选条件</p>
+                        <small class="text-muted">例如："查找最近5天涨幅超过5%且换手率高的股票"</small>
+                    </div>
+                </div>
+
+                <!-- Extracted Parameters Display -->
+                <div id="aiParamsContainer" style="display: none;">
+                    <!-- Parameters will be displayed here -->
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="ai-action-buttons">
+                    <button type="button" class="btn btn-primary ai-submit-btn" id="aiSubmitBtn" disabled>
+                        <i class="bi bi-magic"></i> 解析筛选条件
+                    </button>
+                    <button type="button" class="btn btn-success ai-apply-btn" id="aiApplyBtn" disabled>
+                        <i class="bi bi-check-circle"></i> 应用条件并筛选
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Schedule Modal -->
+<div class="modal fade" id="addScheduleModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加定时任务</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="scheduleForm">
+                    <div class="mb-3">
+                        <label class="form-label">任务名称</label>
+                        <input type="text" class="form-control" id="scheduleName" required
+                            placeholder="例如：工作日收盘更新">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Cron表达式</label>
+                        <input type="text" class="form-control" id="cronExpression" required
+                            placeholder="0 18 * * 1-5">
+                        <div class="cron-help">
+                            <strong>格式说明：</strong> 分 时 日 月 周<br>
+                            <strong>示例：</strong>
+                            <ul class="mb-0">
+                                <li>0 18 * * 1-5 - 每个工作日18:00</li>
+                                <li>0 9 * * 1-5 - 每个工作日09:00</li>
+                                <li>0 */6 * * * - 每6小时一次</li>
+                            </ul>
+                        </div>
+                        <div class="cron-presets mt-2">
+                            <strong>快捷选择：</strong><br>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cron="0 18 * * 1-5">
+                                工作日18:00
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cron="0 9 * * 1-5">
+                                工作日09:00
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cron="0 */6 * * *">
+                                每6小时
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-cron="0 0 * * *">
+                                每天00:00
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">更新模式</label>
+                        <select class="form-select" id="scheduleMode">
+                            <option value="incremental" selected>增量更新</option>
+                            <option value="full">全量更新</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">股票范围</label>
+                        <select class="form-select" id="scheduleStockRange">
+                            <option value="all" selected>全部A股</option>
+                            <option value="favorites">收藏列表</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="saveScheduleBtn">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container position-fixed top-0 end-0 p-3" style="top: 70px; z-index: 9999;" id="toastContainer"></div>
+
+<style>
+    /* Stock Update Manager Styles */
+    .status-badge {
+        font-size: 0.85rem;
+        padding: 5px 10px;
+        border-radius: 20px;
+    }
+    .status-pending { background-color: #6c757d; color: white; }
+    .status-running { background-color: #007bff; color: white; }
+    .status-paused { background-color: #ffc107; color: #212529; }
+    .status-completed { background-color: #28a745; color: white; }
+    .status-failed { background-color: #dc3545; color: white; }
+    .status-stopped { background-color: #6c757d; color: white; }
+    .status-cancelled { background-color: #6c757d; color: white; }
+
+    .btn-control {
+        min-width: 100px;
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+
+    .stat-card {
+        text-align: center;
+        padding: 15px;
+    }
+    .stat-number {
+        font-size: 2rem;
+        font-weight: bold;
+    }
+    .stat-label {
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+    .stat-total { color: #007bff; }
+    .stat-success { color: #28a745; }
+    .stat-failed { color: #dc3545; }
+    .stat-skipped { color: #ffc107; }
+
+    .cron-help {
+        font-size: 0.85rem;
+        color: #6c757d;
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+
+    .cron-presets button {
+        margin: 2px;
+        font-size: 0.85rem;
+    }
+</style>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/stock-update-manager.js') }}"></script>
+<script src="{{ url_for('static', filename='js/tasks-history.js') }}"></script>
+{% endblock %}

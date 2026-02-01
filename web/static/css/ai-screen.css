@@ -1,0 +1,282 @@
+/* AI Stock Screening Modal Styles */
+
+/* Modal Header with Gradient */
+.ai-screen-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: calc(0.375rem - 1px) calc(0.375rem - 1px) 0 0;
+    padding: 1rem 1.5rem;
+}
+
+.ai-screen-header h5 {
+    margin: 0;
+    font-weight: 600;
+    color: white;
+}
+
+.ai-screen-header .btn-close {
+    filter: brightness(0) invert(1);
+}
+
+/* Example Pills */
+.ai-example-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.ai-example-pill {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 20px;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ai-example-pill:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+    transform: translateY(-1px);
+}
+
+.ai-example-pill.active {
+    background-color: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+/* Query Textarea */
+.ai-query-textarea {
+    min-height: 100px;
+    border: 2px solid #e9ecef;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    font-size: 1rem;
+    transition: border-color 0.2s ease;
+}
+
+.ai-query-textarea:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.15);
+}
+
+/* Loading/Thinking State */
+.ai-thinking-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+    margin: 1rem 0;
+}
+
+.ai-thinking-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 0.25rem solid #e9ecef;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: ai-spin 1s linear infinite;
+}
+
+@keyframes ai-spin {
+    to { transform: rotate(360deg); }
+}
+
+.ai-thinking-text {
+    margin-left: 1rem;
+    color: #6c757d;
+    font-size: 0.95rem;
+}
+
+.ai-thinking-text .dots::after {
+    content: '';
+    animation: ai-dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes ai-dots {
+    0%, 20% { content: ''; }
+    40% { content: '.'; }
+    60% { content: '..'; }
+    80%, 100% { content: '...'; }
+}
+
+/* Extracted Parameters Display */
+.ai-params-container {
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin: 1rem 0;
+}
+
+.ai-params-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+}
+
+.ai-params-title i {
+    margin-right: 0.5rem;
+    color: #667eea;
+}
+
+.ai-params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.75rem;
+}
+
+.ai-param-item {
+    background-color: white;
+    border-radius: 0.375rem;
+    padding: 0.625rem;
+    border-left: 3px solid #667eea;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.ai-param-label {
+    font-size: 0.75rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+}
+
+.ai-param-value {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #212529;
+}
+
+.ai-param-value.highlight {
+    color: #667eea;
+}
+
+/* Empty State */
+.ai-empty-state {
+    text-align: center;
+    padding: 1.5rem;
+    color: #6c757d;
+}
+
+.ai-empty-state i {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+    color: #dee2e6;
+}
+
+/* Error State */
+.ai-error-container {
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin: 1rem 0;
+    color: #721c24;
+}
+
+.ai-error-title {
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.ai-error-title i {
+    margin-right: 0.5rem;
+}
+
+.ai-error-message {
+    font-size: 0.9rem;
+}
+
+/* Button Styles */
+.ai-submit-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    transition: all 0.3s ease;
+}
+
+.ai-submit-btn:hover {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
+.ai-submit-btn:disabled {
+    background: linear-gradient(135deg, #adb5bd 0%, #868e96 100%);
+    transform: none;
+    box-shadow: none;
+}
+
+.ai-apply-btn {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    border: none;
+    color: white;
+    transition: all 0.3s ease;
+}
+
+.ai-apply-btn:hover {
+    background: linear-gradient(135deg, #218838 0%, #1aa87a 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+/* Action Buttons */
+.ai-action-buttons {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.ai-action-buttons .btn {
+    flex: 1;
+}
+
+/* Response Animation */
+@keyframes ai-fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.ai-params-container {
+    animation: ai-fadeIn 0.3s ease;
+}
+
+/* Modal Adjustments */
+.ai-screen-modal .modal-content {
+    border: none;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+}
+
+.ai-screen-modal .modal-body {
+    padding: 1.5rem;
+}
+
+/* Responsive */
+@media (max-width: 576px) {
+    .ai-params-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .ai-example-pills {
+        flex-direction: column;
+    }
+
+    .ai-example-pill {
+        width: 100%;
+        text-align: center;
+    }
+}

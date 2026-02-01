@@ -1,0 +1,233 @@
+/**
+ * Financial Data Display Styles
+ */
+
+/* 指标卡片样式 */
+.metric-card {
+    display: flex;
+    align-items: center;
+    padding: 20px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    height: 100%;
+}
+
+.metric-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.metric-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 15px;
+    flex-shrink: 0;
+}
+
+.metric-icon i {
+    font-size: 24px;
+    color: #fff;
+}
+
+.metric-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.metric-label {
+    font-size: 13px;
+    color: #6c757d;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+.metric-value {
+    font-size: 18px;
+    font-weight: bold;
+    color: #212529;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* DataTables 自定义样式 */
+#incomeTable,
+#balanceTable,
+#cashflowTable {
+    font-size: 14px;
+}
+
+#incomeTable_wrapper,
+#balanceTable_wrapper,
+#cashflowTable_wrapper {
+    padding: 0;
+}
+
+.dataTable thead th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.dataTable tbody td {
+    vertical-align: middle;
+}
+
+/* 响应式设计 */
+@media (max-width: 991px) {
+    .metric-card {
+        margin-bottom: 10px;
+    }
+}
+
+@media (max-width: 767px) {
+    .metric-icon {
+        width: 40px;
+        height: 40px;
+    }
+
+    .metric-icon i {
+        font-size: 20px;
+    }
+
+    .metric-label {
+        font-size: 12px;
+    }
+
+    .metric-value {
+        font-size: 16px;
+    }
+
+    #incomeTable,
+    #balanceTable,
+    #cashflowTable {
+        font-size: 12px;
+    }
+
+    /* 移动端表格横向滚动 */
+    .table-responsive {
+        border-radius: 8px;
+    }
+
+    .table-responsive::-webkit-scrollbar {
+        height: 6px;
+    }
+
+    .table-responsive::-webkit-scrollbar-thumb {
+        background-color: #dee2e6;
+        border-radius: 3px;
+    }
+
+    .table-responsive::-webkit-scrollbar-track {
+        background-color: #f8f9fa;
+    }
+}
+
+/* 正负值颜色 */
+.positive-value {
+    color: #28a745;
+}
+
+.negative-value {
+    color: #dc3545;
+}
+
+/* 加载动画 */
+#financialLoading .spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* 无数据状态 */
+#financialNoData {
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+#financialNoData i {
+    color: #dee2e6;
+}
+
+/* 表格卡片间距 */
+#financialFullView .card {
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border: 1px solid #dee2e6;
+}
+
+#financialFullView .card-header {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 600;
+}
+
+#financialFullView .card-header h6 {
+    color: #495057;
+}
+
+#financialFullView .card-header i {
+    color: #6c757d;
+    margin-right: 8px;
+}
+
+/* 表单样式优化 */
+#financialForm {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+#financialForm label {
+    font-weight: 500;
+    color: #495057;
+}
+
+/* Select2 下拉框样式适配 */
+.select2-container--default .select2-selection--single {
+    height: 38px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 36px;
+    padding-left: 12px;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 36px;
+}
+
+/* DataTables 分页样式 */
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+    padding: 6px 12px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white !important;
+    border: none;
+    border-radius: 4px;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: #e9ecef;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+}
+
+/* 长表格自适应 */
+@media (max-width: 767px) {
+    #incomeTable,
+    #balanceTable,
+    #cashflowTable {
+        min-width: 600px;
+    }
+}

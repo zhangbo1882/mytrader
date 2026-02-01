@@ -1,0 +1,78 @@
+<!-- ChatGPT风格的股票筛选对话界面 -->
+<div id="chatScreenOverlay" class="chat-overlay">
+    <div class="chat-container">
+        <!-- 头部 -->
+        <div class="chat-header">
+            <div class="chat-header-left">
+                <i class="bi bi-robot"></i>
+                <span>AI股票筛选助手</span>
+            </div>
+            <div class="chat-header-right">
+                <button class="btn-icon" id="chatClearBtn" title="清空对话">
+                    <i class="bi bi-trash"></i>
+                </button>
+                <button class="btn-icon" id="chatCloseBtn" title="关闭">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 对话历史区域 -->
+        <div class="chat-messages" id="chatMessages">
+            <!-- 欢迎消息 -->
+            <div class="message assistant">
+                <div class="message-avatar">
+                    <i class="bi bi-robot"></i>
+                </div>
+                <div class="message-content">
+                    <div class="message-text">
+                        <p>你好！我是AI股票筛选助手。我可以帮你筛选股票，比如：</p>
+                        <ul class="suggestion-list">
+                            <li><span class="suggestion-pill">查找最近5天涨幅超过5%的股票</span></li>
+                            <li><span class="suggestion-pill">价格低于20元且换手率大于3%的股票</span></li>
+                            <li><span class="suggestion-pill">最近10天成交量放大的股票</span></li>
+                            <li><span class="suggestion-pill">低价高换手率的股票</span></li>
+                        </ul>
+                        <p class="text-muted small">点击上方建议或直接输入你的筛选条件</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="chat-input-container">
+            <div class="chat-input-wrapper">
+                <textarea
+                    id="chatInput"
+                    placeholder="输入筛选条件，如：查找最近5天涨幅超过5%的股票"
+                    rows="1"
+                ></textarea>
+                <button class="send-button" id="chatSendBtn" disabled>
+                    <i class="bi bi-send-fill"></i>
+                </button>
+            </div>
+            <div class="chat-footer">
+                <small class="text-muted">
+                    <i class="bi bi-info-circle"></i>
+                    AI可能会出错，请仔细核对筛选结果
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 加载指示器模板（隐藏） -->
+<template id="typingIndicator">
+    <div class="message assistant typing">
+        <div class="message-avatar">
+            <i class="bi bi-robot"></i>
+        </div>
+        <div class="message-content">
+            <div class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </div>
+</template>
