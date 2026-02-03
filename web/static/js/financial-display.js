@@ -9,7 +9,7 @@ class FinancialDisplay {
         this.currentView = 'summary';
         this.dataTables = {};
 
-        // 12核心指标配置
+        // 核心指标配置（原有12个 + 新增8个财务指标 + 9个估值指标 = 29个）
         this.summaryMetrics = [
             // 基本信息
             { key: 'end_date', label: '报告期间', icon: 'bi-calendar3', category: 'basic', format: 'period' },
@@ -29,7 +29,33 @@ class FinancialDisplay {
             // 现金流
             { key: 'n_cashflow_act', label: '经营活动现金流', icon: 'bi-cash-coin', category: 'cashflow', format: 'currency' },
             { key: 'free_cashflow', label: '自由现金流', icon: 'bi-cash-stack', category: 'cashflow', format: 'currency' },
-            { key: 'sales_cash', label: '销售收现', icon: 'bi-cart-check', category: 'cashflow', format: 'currency' }
+            { key: 'sales_cash', label: '销售收现', icon: 'bi-cart-check', category: 'cashflow', format: 'currency' },
+
+            // 财务指标（新增）
+            // 盈利能力
+            { key: 'roe', label: '净资产收益率', icon: 'bi-percent', category: 'indicator', format: 'percent' },
+            { key: 'roa', label: '总资产报酬率', icon: 'bi-percent', category: 'indicator', format: 'percent' },
+            { key: 'netprofit_margin', label: '销售净利率', icon: 'bi-percent', category: 'indicator', format: 'percent' },
+            { key: 'grossprofit_margin', label: '销售毛利率', icon: 'bi-percent', category: 'indicator', format: 'percent' },
+
+            // 成长能力
+            { key: 'or_yoy', label: '营收增长率', icon: 'bi-graph-up-arrow', category: 'indicator', format: 'percent' },
+            { key: 'netprofit_yoy', label: '净利润增长率', icon: 'bi-graph-up', category: 'indicator', format: 'percent' },
+
+            // 偿债能力
+            { key: 'current_ratio', label: '流动比率', icon: 'bi-calculator', category: 'indicator', format: 'number', decimals: 2 },
+
+            // 营运能力
+            { key: 'assets_turn', label: '总资产周转率', icon: 'bi-arrow-clockwise', category: 'indicator', format: 'number', decimals: 2 },
+
+            // 估值指标（新增）
+            { key: 'valuation_date', label: '估值日期', icon: 'bi-calendar-check', category: 'valuation', format: 'date' },
+            { key: 'close', label: '收盘价', icon: 'bi-currency-yen', category: 'valuation', format: 'number', decimals: 2 },
+            { key: 'pe_ttm', label: '市盈率(TTM)', icon: 'bi-pie-chart', category: 'valuation', format: 'number', decimals: 2 },
+            { key: 'pb', label: '市净率', icon: 'bi-bar-chart', category: 'valuation', format: 'number', decimals: 2 },
+            { key: 'ps_ttm', label: '市销率(TTM)', icon: 'bi-graph-up', category: 'valuation', format: 'number', decimals: 2 },
+            { key: 'total_mv', label: '总市值', icon: 'bi-bank2', category: 'valuation', format: 'market_cap' },
+            { key: 'circ_mv', label: '流通市值', icon: 'bi-piggy-bank', category: 'valuation', format: 'market_cap' }
         ];
 
         this.init();
@@ -46,7 +72,15 @@ class FinancialDisplay {
             placeholder: '输入股票代码或名称搜索',
             ajax: {
                 url: '/api/stock/search',
+                dataType: 'json',
                 delay: 250,
+                data: function (params) {
+                    return {
+                        q: params.term,
+                        limit: 20,
+                        type: 'stock'  // 只搜索股票，不搜索指数
+                    };
+                },
                 processResults: function (data) {
                     return {
                         results: data.map(item => ({
@@ -56,7 +90,8 @@ class FinancialDisplay {
                     };
                 }
             },
-            minimumInputLength: 1
+            minimumInputLength: 1,
+            width: '100%'
         });
     }
 
@@ -216,6 +251,33 @@ class FinancialDisplay {
             { data: 'pay_staff_cash', render: (data) => this.formatCurrency(data) },
             { data: 'pay taxes', render: (data) => this.formatCurrency(data) }
         ]);
+
+        // 渲染财务指标表
+        this.renderDataTable('indicatorTable', data.fina_indicator || [], [
+            { data: 'end_date', render: (data) => this.formatPeriod(data) },
+            { data: 'ann_date', render: (data) => this.formatDate(data) },
+            { data: 'roe', render: (data) => this.formatPercent(data) },
+            { data: 'roa', render: (data) => this.formatPercent(data) },
+            { data: 'netprofit_margin', render: (data) => this.formatPercent(data) },
+            { data: 'grossprofit_margin', render: (data) => this.formatPercent(data) },
+            { data: 'or_yoy', render: (data) => this.formatPercent(data) },
+            { data: 'netprofit_yoy', render: (data) => this.formatPercent(data) },
+            { data: 'current_ratio', render: (data) => this.formatNumber(data, 2) },
+            { data: 'assets_turn', render: (data) => this.formatNumber(data, 2) }
+        ]);
+
+        // 渲染估值指标表
+        this.renderDataTable('valuationTable', data.valuation || [], [
+            { data: 'datetime', render: (data) => this.formatDate(data) },
+            { data: 'close', render: (data) => this.formatNumber(data, 2) },
+            { data: 'pe', render: (data) => this.formatNumber(data, 2) },
+            { data: 'pe_ttm', render: (data) => this.formatNumber(data, 2) },
+            { data: 'pb', render: (data) => this.formatNumber(data, 2) },
+            { data: 'ps', render: (data) => this.formatNumber(data, 2) },
+            { data: 'ps_ttm', render: (data) => this.formatNumber(data, 2) },
+            { data: 'total_mv_yi', render: (data) => this.formatNumber(data, 2) },
+            { data: 'circ_mv_yi', render: (data) => this.formatNumber(data, 2) }
+        ]);
     }
 
     renderDataTable(tableId, data, columns) {
@@ -299,8 +361,34 @@ class FinancialDisplay {
                 return this.formatDate(value);
             case 'period':
                 return this.formatPeriod(value);
+            case 'percent':
+                return this.formatPercent(value);
+            case 'market_cap':
+                return this.formatMarketCap(value);
             default:
                 return value !== null && value !== undefined ? value : '-';
+        }
+    }
+
+    formatPercent(value) {
+        if (value === null || value === undefined || isNaN(value)) {
+            return '-';
+        }
+        // 转换为百分比格式（如 0.15 -> 15.00%）
+        const num = parseFloat(value);
+        return (num * 100).toFixed(2) + '%';
+    }
+
+    formatMarketCap(value) {
+        if (value === null || value === undefined || isNaN(value)) {
+            return '-';
+        }
+        // 市值单位为万元，转换为亿元
+        const num = parseFloat(value);
+        if (num >= 100000) {
+            return (num / 100000).toFixed(2) + '万亿';
+        } else {
+            return (num / 10000).toFixed(2) + '亿';
         }
     }
 

@@ -374,9 +374,197 @@ class TasksHistory {
         }
     }
 
-    showTaskDetails(taskId) {
-        // TODO: 实现任务详情模态框
-        alert('任务详情功能开发中...\n任务ID: ' + taskId);
+    async showTaskDetails(taskId) {
+        const modal = new bootstrap.Modal(document.getElementById('taskDetailsModal'));
+        const contentDiv = document.getElementById('taskDetailsContent');
+
+        // Show modal with loading state
+        contentDiv.innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">加载中...</span>
+                </div>
+            </div>
+        `;
+        modal.show();
+
+        try {
+            const response = await fetch(`/api/tasks/${taskId}`);
+            const data = await response.json();
+
+            if (!data.success) {
+                contentDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        ${data.error || '加载任务详情失败'}
+                    </div>
+                `;
+                return;
+            }
+
+            const task = data.task;
+            contentDiv.innerHTML = this.renderTaskDetails(task);
+        } catch (error) {
+            console.error('Error loading task details:', error);
+            contentDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    加载失败: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    renderTaskDetails(task) {
+        const statusBadge = this.getStatusBadge(task.status);
+        const typeLabel = this.getTypeLabel(task.task_type);
+        const createdAt = new Date(task.created_at).toLocaleString('zh-CN');
+        const completedAt = task.completed_at ? new Date(task.completed_at).toLocaleString('zh-CN') : '-';
+
+        // Parse parameters
+        let paramsHtml = '';
+        if (task.params) {
+            const params = typeof task.params === 'string' ? JSON.parse(task.params) : task.params;
+            paramsHtml = Object.entries(params).map(([key, value]) => {
+                const labels = {
+                    'mode': '更新模式',
+                    'stock_range': '股票范围',
+                    'custom_stocks': '自定义股票',
+                    'include_indicators': '包含财务指标',
+                    'symbol': '股票代码',
+                    'start_date': '开始日期',
+                    'end_date': '结束日期',
+                    'target_type': '目标类型',
+                    'model_type': '模型类型'
+                };
+                const label = labels[key] || key;
+                let displayValue = value;
+                if (Array.isArray(value)) {
+                    displayValue = value.length > 0 ? value.join(', ') : '无';
+                } else if (value === true) {
+                    displayValue = '是';
+                } else if (value === false) {
+                    displayValue = '否';
+                }
+                return `<div class="row mb-2">
+                    <div class="col-sm-4 text-muted">${label}</div>
+                    <div class="col-sm-8">${displayValue}</div>
+                </div>`;
+            }).join('');
+        }
+
+        // Parse statistics
+        let statsHtml = '-';
+        if (task.stats) {
+            const stats = typeof task.stats === 'string' ? JSON.parse(task.stats) : task.stats;
+            statsHtml = `
+                成功: <span class="text-success">${stats.success || 0}</span> |
+                失败: <span class="text-danger">${stats.failed || 0}</span> |
+                跳过: <span class="text-warning">${stats.skipped || 0}</span>
+            `;
+        }
+
+        // Parse result if available
+        let resultHtml = '';
+        if (task.result) {
+            const result = typeof task.result === 'string' ? JSON.parse(task.result) : task.result;
+            if (result.details) {
+                const details = result.details;
+                if (details.success && details.success.length > 0) {
+                    resultHtml += `
+                        <div class="mb-3">
+                            <h6 class="text-success">成功 (${details.success.length})</h6>
+                            <div style="max-height: 100px; overflow-y: auto;" class="form-text">
+                                ${details.success.slice(0, 20).join(', ')}${details.success.length > 20 ? '...' : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                if (details.failed && details.failed.length > 0) {
+                    resultHtml += `
+                        <div class="mb-3">
+                            <h6 class="text-danger">失败 (${details.failed.length})</h6>
+                            <div style="max-height: 100px; overflow-y: auto;" class="form-text">
+                                ${details.failed.slice(0, 20).join(', ')}${details.failed.length > 20 ? '...' : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        return `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="border-bottom pb-2 mb-3">基本信息</h6>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">任务ID</div>
+                        <div class="col-sm-8"><small class="font-monospace">${task.task_id}</small></div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">任务类型</div>
+                        <div class="col-sm-8">${typeLabel}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">状态</div>
+                        <div class="col-sm-8">${statusBadge}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">创建时间</div>
+                        <div class="col-sm-8"><small>${createdAt}</small></div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">完成时间</div>
+                        <div class="col-sm-8"><small>${completedAt}</small></div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h6 class="border-bottom pb-2 mb-3">进度与统计</h6>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">进度</div>
+                        <div class="col-sm-8">
+                            ${task.current_stock_index || 0} / ${task.total_stocks || 0}
+                            ${task.progress > 0 ? `
+                                <div class="progress mt-1" style="height: 6px;">
+                                    <div class="progress-bar" style="width: ${task.progress}%"></div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">统计</div>
+                        <div class="col-sm-8">${statsHtml}</div>
+                    </div>
+                    <div class="row mb-2">
+                        <div class="col-sm-4 text-muted">当前消息</div>
+                        <div class="col-sm-8"><small>${task.message || '-'}</small></div>
+                    </div>
+                </div>
+            </div>
+
+            ${paramsHtml ? `
+                <div class="mt-3">
+                    <h6 class="border-bottom pb-2 mb-3">任务参数</h6>
+                    ${paramsHtml}
+                </div>
+            ` : ''}
+
+            ${resultHtml ? `
+                <div class="mt-3">
+                    <h6 class="border-bottom pb-2 mb-3">执行结果</h6>
+                    ${resultHtml}
+                </div>
+            ` : ''}
+
+            ${task.error ? `
+                <div class="mt-3">
+                    <h6 class="border-bottom pb-2 mb-3">错误信息</h6>
+                    <div class="alert alert-danger mb-0">
+                        <small>${task.error}</small>
+                    </div>
+                </div>
+            ` : ''}
+        `;
     }
 
     showToast(message, type = 'info') {

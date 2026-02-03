@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 # 创建 Blueprint
 bp = Blueprint('routes', __name__)
 
+# 导入 ML Blueprint 并注册
+from web import ml_routes
+bp.register_blueprint(ml_routes.ml_bp)
+
 
 def get_task_manager():
     """
@@ -89,16 +93,18 @@ def health_check():
 @bp.route('/api/stock/search')
 def api_stock_search():
     """
-    股票搜索 API（自动补全）
+    股票搜索 API（自动补全，支持股票和指数）
 
     Query params:
         q: 搜索关键词（代码或名称）
         limit: 返回结果数量（默认10）
+        type: 资产类型 ('stock', 'index', 'all')，默认 'all'
     """
     q = request.args.get('q', '')
     limit = int(request.args.get('limit', 10))
+    asset_type = request.args.get('type', 'all')
 
-    results = search_stocks(q, limit=limit)
+    results = search_stocks(q, limit=limit, asset_type=asset_type)
     return jsonify(results)
 
 
@@ -813,16 +819,20 @@ def update_all_stocks():
             favorites = session.get('favorites', [])
             stock_list = favorites if favorites else ["600382", "600711", "000001"]
     else:  # all
-        # Get all A-shares from database
+        # 从 Tushare API 获取股票列表（避免包含指数代码）
         try:
             db, query = get_db()
-            if db and query:
-                from sqlalchemy import text
-                with db.engine.connect() as conn:
-                    result = conn.execute(text(
-                        "SELECT DISTINCT symbol FROM bars WHERE symbol LIKE '____%'"
-                    ))
-                    stock_list = [row[0] for row in result.fetchall()]
+            if db:
+                stock_list_df = db._retry_api_call(
+                    db.pro.stock_basic,
+                    exchange='',
+                    list_status='L',
+                    fields='ts_code'
+                )
+                if stock_list_df is not None and not stock_list_df.empty:
+                    stock_list = stock_list_df['ts_code'].tolist()
+                else:
+                    return jsonify({'success': False, 'error': '获取股票列表失败'}), 500
         except Exception as e:
             return jsonify({'success': False, 'error': f'获取股票列表失败: {str(e)}'}), 500
 
@@ -1064,6 +1074,752 @@ def update_all_stocks():
     return jsonify({'success': True, 'task_id': task_id})
 
 
+@bp.route('/api/financial/update', methods=['POST'])
+def update_financial_data():
+    """
+    财务数据更新API - 自动检测并更新财务数据
+
+    Body (JSON):
+        stock_range: "all" | "favorites" | "custom"
+        custom_stocks: list of stock codes (for custom range)
+        include_indicators: bool (默认 True) - 是否同时更新财务指标
+    """
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+    stock_range = data.get('stock_range', 'all')
+    custom_stocks = data.get('custom_stocks', [])
+    include_indicators = data.get('include_indicators', True)
+
+    logger.info(f"/api/financial/update called: stock_range={stock_range}")
+
+    # Get stock list based on range (reuse logic from stock update)
+    stock_list = []
+    if stock_range == 'custom':
+        if isinstance(custom_stocks, str):
+            stock_list = [s.strip() for s in custom_stocks.split(',') if s.strip()]
+        else:
+            stock_list = custom_stocks
+    elif stock_range == 'favorites':
+        if custom_stocks:
+            if isinstance(custom_stocks, str):
+                stock_list = [s.strip() for s in custom_stocks.split(',') if s.strip()]
+            else:
+                stock_list = custom_stocks
+        else:
+            favorites = session.get('favorites', [])
+            stock_list = favorites if favorites else ["600382", "600711", "000001"]
+    else:  # all
+        # 从 Tushare API 获取股票列表（避免包含指数代码）
+        try:
+            db, query = get_db()
+            if db:
+                stock_list_df = db._retry_api_call(
+                    db.pro.stock_basic,
+                    exchange='',
+                    list_status='L',
+                    fields='ts_code'
+                )
+                if stock_list_df is not None and not stock_list_df.empty:
+                    stock_list = stock_list_df['ts_code'].tolist()
+                else:
+                    return jsonify({'success': False, 'error': '获取股票列表失败'}), 500
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'获取股票列表失败: {str(e)}'}), 500
+
+    if not stock_list:
+        return jsonify({'success': False, 'error': '股票列表为空'}), 400
+
+    # Create task with metadata
+    logger.info(f"Creating financial update task...")
+    try:
+        task_id = get_task_manager().create_task(
+            'update_financial_data',
+            {'stock_range': stock_range, 'custom_stocks': custom_stocks, 'include_indicators': include_indicators},
+            metadata={'total_stocks': len(stock_list)}
+        )
+        logger.info(f"Financial update task created: {task_id}")
+    except TaskExistsError as e:
+        existing = e.existing_task
+        task_id_short = existing['task_id'][:8]
+        status_label = {
+            'pending': '等待中',
+            'running': '运行中',
+            'paused': '已暂停'
+        }.get(existing['status'], existing['status'])
+
+        error_message = f"""无法创建新任务：系统中已有任务在{status_label}
+
+现有任务信息：
+  - 任务ID: {task_id_short}...
+  - 任务状态: {status_label}
+  - 创建时间: {existing.get('created_at', 'unknown')}
+  - 当前进度: {existing.get('current_stock_index', 0)}/{existing.get('total_stocks', 0)}
+
+请先在"任务历史"页面停止现有任务后再创建新任务。""".strip()
+
+        logger.warning(f"Task creation blocked: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': error_message,
+            'error_type': 'task_exists',
+            'existing_task': {
+                'task_id': existing['task_id'],
+                'status': existing['status'],
+                'created_at': existing.get('created_at'),
+                'progress': existing.get('progress', 0),
+                'current_stock_index': existing.get('current_stock_index', 0),
+                'total_stocks': existing.get('total_stocks', 0)
+            }
+        }), 409
+
+    # Start background thread
+    def run_financial_update():
+        try:
+            logger.info(f"[THREAD] Financial update thread started for task {task_id}")
+            tm = get_task_manager()
+            tm.update_task(task_id, status='running', message='正在更新财务数据...')
+
+            from src.data_sources.tushare import TushareDB
+            from src.utils.stock_lookup import get_stock_name_from_code
+
+            db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+            end_date = datetime.now().strftime('%Y%m%d')
+
+            # Track results for each stock
+            detailed_results = {
+                'success': [],
+                'failed': [],
+                'skipped': []
+            }
+
+            # Load checkpoint if resuming
+            checkpoint = get_task_manager().load_checkpoint(task_id)
+            start_index = 0
+            if checkpoint:
+                start_index = checkpoint.get('current_index', 0)
+                stats = checkpoint.get('stats', {'success': 0, 'failed': 0, 'skipped': 0})
+                get_task_manager().update_task(task_id, stats=stats)
+                print(f"[FINANCIAL UPDATE] Resuming from checkpoint: index {start_index}")
+
+            # Update each stock's financial data
+            tm = get_task_manager()
+            for i in range(start_index, len(stock_list)):
+                stock_code = stock_list[i]
+
+                # Check stop request (lock-free)
+                if tm.is_stop_requested(task_id):
+                    tm.save_checkpoint(task_id, i, tm.get_task(task_id).get('stats'))
+                    tm.update_task(task_id, status='stopped', message='任务已停止')
+                    tm.clear_stop_request(task_id)
+                    return
+
+                # Check pause request (lock-free)
+                if tm.is_pause_requested(task_id):
+                    tm.save_checkpoint(task_id, i, tm.get_task(task_id).get('stats'))
+                    tm.update_task(task_id, status='paused', message='任务已暂停')
+                    # Wait for resume
+                    while True:
+                        time.sleep(1)
+                        if tm.is_stop_requested(task_id):
+                            tm.update_task(task_id, status='stopped', message='任务已停止')
+                            tm.clear_stop_request(task_id)
+                            tm.clear_pause_request(task_id)
+                            return
+                        if not tm.is_pause_requested(task_id):
+                            tm.update_task(task_id, message='任务已恢复')
+                            break
+
+                try:
+                    # Update progress
+                    progress = int((i / len(stock_list)) * 100)
+                    get_task_manager().update_task(task_id,
+                        current_stock_index=i,
+                        progress=progress,
+                        message=f'正在更新财务数据 {stock_code} ({i+1}/{len(stock_list)})...'
+                    )
+
+                    # Save checkpoint every 10 stocks
+                    if i % 10 == 0:
+                        current_task = get_task_manager().get_task(task_id)
+                        get_task_manager().save_checkpoint(task_id, i, current_task.get('stats') if current_task else None)
+
+                    # Check stop request AGAIN before blocking DB operation
+                    if tm.is_stop_requested(task_id):
+                        print(f"[TASK-{task_id[:8]}] Stop requested before DB operation, stopping at index {i}")
+                        get_task_manager().update_task(task_id, status='stopped', message='任务已停止')
+                        tm.clear_stop_request(task_id)
+                        return
+
+                    # Check latest financial date and determine start_date
+                    print(f"[TASK-{task_id[:8]}] Checking latest financial date for {stock_code}...")
+                    latest_date = db.get_latest_financial_date(stock_code, 'income')
+
+                    if latest_date:
+                        # Has existing data, only download new reports
+                        start_date = latest_date
+                        update_type = "增量更新"
+                    else:
+                        # No existing data, download all
+                        start_date = '20200101'
+                        update_type = "首次下载"
+
+                    print(f"[TASK-{task_id[:8]}] {stock_code}: {update_type} (from {start_date})")
+
+                    # Download financial data (get include_indicators from task params)
+                    task_data = get_task_manager().get_task(task_id)
+                    include_indicators = task_data.get('params', {}).get('include_indicators', True) if task_data else True
+                    result = db.save_all_financial(stock_code, start_date, end_date, include_indicators=include_indicators)
+                    print(f"[TASK-{task_id[:8]}] Financial update for {stock_code} complete: {result} records")
+
+                    # Update stats and track detailed results
+                    stock_name = get_stock_name_from_code(stock_code)
+                    stock_display = f"{stock_code} {stock_name}" if stock_name else stock_code
+
+                    if result and result > 0:
+                        get_task_manager().increment_stats(task_id, 'success')
+                        detailed_results['success'].append(f"{stock_display}({update_type})")
+                    elif result == 0:
+                        get_task_manager().increment_stats(task_id, 'skipped')
+                        detailed_results['skipped'].append(f"{stock_display}(已是最新)")
+                    else:
+                        get_task_manager().increment_stats(task_id, 'failed')
+                        detailed_results['failed'].append(f"{stock_display}(无数据)")
+
+                except Exception as e:
+                    get_task_manager().increment_stats(task_id, 'failed')
+                    stock_name = get_stock_name_from_code(stock_code)
+                    stock_display = f"{stock_code} {stock_name}" if stock_name else stock_code
+                    detailed_results['failed'].append(f"{stock_display}(错误: {str(e)})")
+                    print(f"[ERROR] Failed to update financial data for {stock_code}: {e}")
+
+            # Complete
+            get_task_manager().delete_checkpoint(task_id)
+            final_stats = get_task_manager().get_task(task_id).get('stats', {})
+
+            # Add detailed results to final stats
+            summary_stats = {
+                'total': len(stock_list),
+                'success': final_stats.get('success', 0),
+                'failed': final_stats.get('failed', 0),
+                'skipped': final_stats.get('skipped', 0),
+                'details': detailed_results
+            }
+
+            get_task_manager().update_task(task_id,
+                status='completed',
+                message='财务数据更新完成',
+                current_stock_index=len(stock_list),
+                progress=100,
+                result=summary_stats
+            )
+            logger.info(f"[THREAD] Financial update task {task_id} completed")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            get_task_manager().update_task(task_id,
+                status='failed',
+                message=f'财务数据更新失败: {str(e)}'
+            )
+            logger.error(f"[THREAD] Financial update task {task_id} failed: {e}")
+
+    logger.info(f"Starting financial update background thread...")
+    thread = threading.Thread(target=run_financial_update)
+    thread.daemon = True
+    thread.start()
+    logger.info(f"Financial update background thread started")
+
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+@bp.route('/api/index/update', methods=['POST'])
+def update_indices():
+    """
+    指数数据更新API
+
+    Body (JSON):
+        start_date: 开始日期（默认 20240101，全量更新使用 20200101）
+        markets: 市场列表 ['SSE', 'SZSE']（默认全部）
+
+    更新模式:
+        - 增量更新: start_date='20240101'
+        - 全量更新: start_date='20200101'
+    """
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+    start_date = data.get('start_date', '20240101')
+    markets = data.get('markets', ['SSE', 'SZSE'])
+
+    logger.info(f"/api/index/update called: start_date={start_date}, markets={markets}")
+
+    # Create task
+    try:
+        task_id = get_task_manager().create_task('update_indices', {
+            'start_date': start_date,
+            'markets': markets
+        })
+    except TaskExistsError as e:
+        existing = e.existing_task
+        return jsonify({
+            'success': False,
+            'error': f'无法创建新任务：系统中已有任务在运行',
+            'error_type': 'task_exists',
+            'existing_task': existing
+        }), 409
+
+    # Start background thread
+    def run_index_update():
+        try:
+            logger.info(f"[THREAD] Index update thread started for task {task_id}")
+            tm = get_task_manager()
+            tm.update_task(task_id, status='running', message='正在更新指数数据...')
+
+            from src.data_sources.tushare import TushareDB
+
+            db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+            end_date = datetime.now().strftime('%Y%m%d')
+
+            # Track results
+            detailed_results = {
+                'success': [],
+                'failed': [],
+                'skipped': []
+            }
+
+            # Get index list
+            print(f"[TASK-{task_id[:8]}] Getting index list...")
+            all_indices = []
+
+            for market in markets:
+                try:
+                    count = db.save_index_basic(market=market)
+                    # 无论数据是新插入还是已存在，都从数据库读取指数代码
+                    if count >= 0:  # count >= 0 表示有数据（包括已存在的情况）
+                        # Read index codes from database
+                        query = "SELECT ts_code FROM index_names"
+                        if market == 'SSE':
+                            query += " WHERE ts_code LIKE '%.SH'"
+                        elif market == 'SZSE':
+                            query += " WHERE ts_code LIKE '%.SZ'"
+
+                        with db.engine.connect() as conn:
+                            df = pd.read_sql_query(query, conn)
+                            all_indices.extend(df['ts_code'].tolist())
+                        print(f"[TASK-{task_id[:8]}] {market}: 获取到 {len(df['ts_code'].tolist())} 个指数")
+                except Exception as e:
+                    print(f"  ❌ 获取 {market} 指数列表失败: {e}")
+
+            if not all_indices:
+                tm.update_task(task_id, status='failed', message='没有找到指数')
+                return
+
+            # Remove duplicates
+            all_indices = list(set(all_indices))
+            total_indices = len(all_indices)
+
+            tm.update_task(task_id, message=f'开始更新 {total_indices} 个指数...')
+
+            # Update each index
+            for i, ts_code in enumerate(all_indices):
+                # Check stop request
+                if tm.is_stop_requested(task_id):
+                    tm.update_task(task_id, status='stopped', message='任务已停止')
+                    tm.clear_stop_request(task_id)
+                    return
+
+                try:
+                    progress = int((i / total_indices) * 100)
+                    tm.update_task(task_id,
+                        progress=progress,
+                        message=f'正在更新 {ts_code} ({i+1}/{total_indices})...'
+                    )
+
+                    result = db.save_index_daily(ts_code, start_date, end_date)
+
+                    # Get index name from database
+                    clean_code = ts_code.split('.')[0]
+                    try:
+                        from src.utils.stock_lookup import _load_index_names
+                        index_names_dict = _load_index_names()
+                        index_name = index_names_dict.get(ts_code, ts_code)
+                    except:
+                        index_name = ts_code
+
+                    if result > 0:
+                        tm.increment_stats(task_id, 'success')
+                        detailed_results['success'].append(f"{clean_code} {index_name}")
+                    elif result == 0:
+                        tm.increment_stats(task_id, 'skipped')
+                        detailed_results['skipped'].append(f"{clean_code} {index_name}")
+                    else:
+                        tm.increment_stats(task_id, 'failed')
+                        detailed_results['failed'].append(f"{clean_code} {index_name}")
+
+                except Exception as e:
+                    tm.increment_stats(task_id, 'failed')
+                    detailed_results['failed'].append(f"{ts_code}(错误: {str(e)})")
+                    print(f"[ERROR] Failed to update index {ts_code}: {e}")
+
+            # Complete
+            final_stats = tm.get_task(task_id).get('stats', {})
+            summary_stats = {
+                'total': total_indices,
+                'success': final_stats.get('success', 0),
+                'failed': final_stats.get('failed', 0),
+                'skipped': final_stats.get('skipped', 0),
+                'details': detailed_results
+            }
+
+            tm.update_task(task_id,
+                status='completed',
+                message='指数数据更新完成',
+                progress=100,
+                result=summary_stats
+            )
+            logger.info(f"[THREAD] Index update task {task_id} completed")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            get_task_manager().update_task(task_id,
+                status='failed',
+                message=f'指数数据更新失败: {str(e)}'
+            )
+            logger.error(f"[THREAD] Index update task {task_id} failed: {e}")
+
+    logger.info(f"Starting index update background thread...")
+    thread = threading.Thread(target=run_index_update)
+    thread.daemon = True
+    thread.start()
+    logger.info(f"Index update background thread started")
+
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+@bp.route('/api/update/both', methods=['POST'])
+def update_both_data():
+    """
+    组合更新API - 先更新股价数据，再更新财务数据
+
+    Body (JSON):
+        stock_range: "all" | "favorites" | "custom"
+        mode: "incremental" | "full" (for stock data)
+        custom_stocks: list of stock codes
+    """
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': '请求数据为空'}), 400
+
+    mode = data.get('mode', 'incremental')
+    stock_range = data.get('stock_range', 'all')
+    custom_stocks = data.get('custom_stocks', [])
+
+    logger.info(f"/api/update/both called: mode={mode}, stock_range={stock_range}")
+
+    # Get stock list based on range (reuse logic from stock update)
+    stock_list = []
+    if stock_range == 'custom':
+        if isinstance(custom_stocks, str):
+            stock_list = [s.strip() for s in custom_stocks.split(',') if s.strip()]
+        else:
+            stock_list = custom_stocks
+    elif stock_range == 'favorites':
+        if custom_stocks:
+            if isinstance(custom_stocks, str):
+                stock_list = [s.strip() for s in custom_stocks.split(',') if s.strip()]
+            else:
+                stock_list = custom_stocks
+        else:
+            favorites = session.get('favorites', [])
+            stock_list = favorites if favorites else ["600382", "600711", "000001"]
+    else:  # all
+        # 从 Tushare API 获取股票列表（避免包含指数代码）
+        try:
+            db, query = get_db()
+            if db:
+                stock_list_df = db._retry_api_call(
+                    db.pro.stock_basic,
+                    exchange='',
+                    list_status='L',
+                    fields='ts_code'
+                )
+                if stock_list_df is not None and not stock_list_df.empty:
+                    stock_list = stock_list_df['ts_code'].tolist()
+                else:
+                    return jsonify({'success': False, 'error': '获取股票列表失败'}), 500
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'获取股票列表失败: {str(e)}'}), 500
+
+    if not stock_list:
+        return jsonify({'success': False, 'error': '股票列表为空'}), 400
+
+    # Create task with metadata
+    logger.info(f"Creating combined update task...")
+    try:
+        task_id = get_task_manager().create_task(
+            'update_both',
+            {'mode': mode, 'stock_range': stock_range, 'custom_stocks': custom_stocks},
+            metadata={'total_stocks': len(stock_list)}
+        )
+        logger.info(f"Combined update task created: {task_id}")
+    except TaskExistsError as e:
+        existing = e.existing_task
+        task_id_short = existing['task_id'][:8]
+        status_label = {
+            'pending': '等待中',
+            'running': '运行中',
+            'paused': '已暂停'
+        }.get(existing['status'], existing['status'])
+
+        error_message = f"""无法创建新任务：系统中已有任务在{status_label}
+
+现有任务信息：
+  - 任务ID: {task_id_short}...
+  - 任务状态: {status_label}
+  - 创建时间: {existing.get('created_at', 'unknown')}
+  - 当前进度: {existing.get('current_stock_index', 0)}/{existing.get('total_stocks', 0)}
+
+请先在"任务历史"页面停止现有任务后再创建新任务。""".strip()
+
+        logger.warning(f"Task creation blocked: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': error_message,
+            'error_type': 'task_exists',
+            'existing_task': {
+                'task_id': existing['task_id'],
+                'status': existing['status'],
+                'created_at': existing.get('created_at'),
+                'progress': existing.get('progress', 0),
+                'current_stock_index': existing.get('current_stock_index', 0),
+                'total_stocks': existing.get('total_stocks', 0)
+            }
+        }), 409
+
+    # Start background thread
+    def run_combined_update():
+        try:
+            logger.info(f"[THREAD] Combined update thread started for task {task_id}")
+            tm = get_task_manager()
+            tm.update_task(task_id, status='running', message='正在更新股价数据...')
+
+            from src.data_sources.tushare import TushareDB
+
+            db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+            end_date = datetime.now().strftime('%Y%m%d')
+
+            # Track results for each stock
+            detailed_results = {
+                'success': [],
+                'failed': [],
+                'skipped': []
+            }
+
+            # Load checkpoint if resuming
+            checkpoint = get_task_manager().load_checkpoint(task_id)
+            start_index = 0
+            stage = checkpoint.get('stage', 'stock') if checkpoint else 'stock'
+            stats = checkpoint.get('stats', {'success': 0, 'failed': 0, 'skipped': 0}) if checkpoint else {'success': 0, 'failed': 0, 'skipped': 0}
+            start_index = checkpoint.get('current_index', 0) if checkpoint else 0
+
+            get_task_manager().update_task(task_id, stats=stats)
+            print(f"[COMBINED UPDATE] Resuming from checkpoint: stage={stage}, index={start_index}")
+
+            # Stage 1: Stock data update
+            if stage == 'stock':
+                tm.update_task(task_id, message='阶段 1/2: 正在更新股价数据...')
+                for i in range(start_index, len(stock_list)):
+                    stock_code = stock_list[i]
+
+                    # Check stop request
+                    if tm.is_stop_requested(task_id):
+                        tm.save_checkpoint(task_id, i, tm.get_task(task_id).get('stats'), stage='stock')
+                        tm.update_task(task_id, status='stopped', message='任务已停止')
+                        tm.clear_stop_request(task_id)
+                        return
+
+                    # Check pause request
+                    if tm.is_pause_requested(task_id):
+                        tm.save_checkpoint(task_id, i, tm.get_task(task_id).get('stats'), stage='stock')
+                        tm.update_task(task_id, status='paused', message='任务已暂停')
+                        while True:
+                            time.sleep(1)
+                            if tm.is_stop_requested(task_id):
+                                tm.update_task(task_id, status='stopped', message='任务已停止')
+                                tm.clear_stop_request(task_id)
+                                tm.clear_pause_request(task_id)
+                                return
+                            if not tm.is_pause_requested(task_id):
+                                tm.update_task(task_id, message='任务已恢复')
+                                break
+
+                    try:
+                        progress = int((i / len(stock_list)) * 50)  # Stock update is 50% of total
+                        get_task_manager().update_task(task_id,
+                            current_stock_index=i,
+                            progress=progress,
+                            message=f'阶段 1/2: 正在更新股价 {stock_code} ({i+1}/{len(stock_list)})...'
+                        )
+
+                        if i % 10 == 0:
+                            current_task = get_task_manager().get_task(task_id)
+                            get_task_manager().save_checkpoint(task_id, i, current_task.get('stats') if current_task else None, stage='stock')
+
+                        if tm.is_stop_requested(task_id):
+                            get_task_manager().update_task(task_id, status='stopped', message='任务已停止')
+                            tm.clear_stop_request(task_id)
+                            return
+
+                        # Update stock data
+                        print(f"[TASK-{task_id[:8]}] Starting stock update for {stock_code}...")
+                        if mode == 'full':
+                            stats = db.save_all_stocks_by_code(
+                                default_start_date='20200101',
+                                end_date=end_date,
+                                stock_list=[stock_code]
+                            )
+                        else:  # incremental
+                            stats = db.save_all_stocks_by_code_incremental(
+                                default_start_date='20240101',
+                                end_date=end_date,
+                                stock_list=[stock_code]
+                            )
+                        print(f"[TASK-{task_id[:8]}] Stock update for {stock_code} complete")
+
+                        # Update stats
+                        if stats:
+                            if stats.get('success', 0) > 0:
+                                get_task_manager().increment_stats(task_id, 'success')
+                            if stats.get('failed', 0) > 0:
+                                get_task_manager().increment_stats(task_id, 'failed')
+                            if stats.get('skipped', 0) > 0:
+                                get_task_manager().increment_stats(task_id, 'skipped')
+                        else:
+                            get_task_manager().increment_stats(task_id, 'failed')
+
+                    except Exception as e:
+                        get_task_manager().increment_stats(task_id, 'failed')
+                        print(f"[ERROR] Failed to update stock data for {stock_code}: {e}")
+
+                # Reset index for financial update stage
+                start_index = 0
+
+            # Stage 2: Financial data update
+            tm.update_task(task_id, message='阶段 2/2: 正在更新财务数据...')
+            for i in range(start_index, len(stock_list)):
+                stock_code = stock_list[i]
+
+                # Check stop request
+                if tm.is_stop_requested(task_id):
+                    tm.save_checkpoint(task_id, i, tm.get_task(task_id).get('stats'), stage='financial')
+                    tm.update_task(task_id, status='stopped', message='任务已停止')
+                    tm.clear_stop_request(task_id)
+                    return
+
+                # Check pause request
+                if tm.is_pause_requested(task_id):
+                    tm.save_checkpoint(task_id, i, tm.get_task(task_id).get('stats'), stage='financial')
+                    tm.update_task(task_id, status='paused', message='任务已暂停')
+                    while True:
+                        time.sleep(1)
+                        if tm.is_stop_requested(task_id):
+                            tm.update_task(task_id, status='stopped', message='任务已停止')
+                            tm.clear_stop_request(task_id)
+                            tm.clear_pause_request(task_id)
+                            return
+                        if not tm.is_pause_requested(task_id):
+                            tm.update_task(task_id, message='任务已恢复')
+                            break
+
+                try:
+                    progress = 50 + int((i / len(stock_list)) * 50)  # Financial update is 50-100%
+                    get_task_manager().update_task(task_id,
+                        current_stock_index=i,
+                        progress=progress,
+                        message=f'阶段 2/2: 正在更新财务数据 {stock_code} ({i+1}/{len(stock_list)})...'
+                    )
+
+                    if i % 10 == 0:
+                        current_task = get_task_manager().get_task(task_id)
+                        get_task_manager().save_checkpoint(task_id, i, current_task.get('stats') if current_task else None, stage='financial')
+
+                    if tm.is_stop_requested(task_id):
+                        get_task_manager().update_task(task_id, status='stopped', message='任务已停止')
+                        tm.clear_stop_request(task_id)
+                        return
+
+                    # Check latest financial date and determine start_date
+                    print(f"[TASK-{task_id[:8]}] Checking latest financial date for {stock_code}...")
+                    latest_date = db.get_latest_financial_date(stock_code, 'income')
+
+                    if latest_date:
+                        start_date = latest_date
+                        update_type = "增量更新"
+                    else:
+                        start_date = '20200101'
+                        update_type = "首次下载"
+
+                    print(f"[TASK-{task_id[:8]}] {stock_code}: Financial {update_type} (from {start_date})")
+
+                    # Download financial data
+                    result = db.save_all_financial(stock_code, start_date, end_date)
+                    print(f"[TASK-{task_id[:8]}] Financial update for {stock_code} complete: {result} records")
+
+                    # Update stats
+                    if result and result > 0:
+                        get_task_manager().increment_stats(task_id, 'success')
+                    elif result == 0:
+                        get_task_manager().increment_stats(task_id, 'skipped')
+                    else:
+                        get_task_manager().increment_stats(task_id, 'failed')
+
+                except Exception as e:
+                    get_task_manager().increment_stats(task_id, 'failed')
+                    print(f"[ERROR] Failed to update financial data for {stock_code}: {e}")
+
+            # Complete
+            get_task_manager().delete_checkpoint(task_id)
+            final_stats = get_task_manager().get_task(task_id).get('stats', {})
+
+            summary_stats = {
+                'total': len(stock_list),
+                'success': final_stats.get('success', 0),
+                'failed': final_stats.get('failed', 0),
+                'skipped': final_stats.get('skipped', 0),
+                'details': detailed_results
+            }
+
+            get_task_manager().update_task(task_id,
+                status='completed',
+                message='股价和财务数据更新完成',
+                current_stock_index=len(stock_list),
+                progress=100,
+                result=summary_stats
+            )
+            logger.info(f"[THREAD] Combined update task {task_id} completed")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            get_task_manager().update_task(task_id,
+                status='failed',
+                message=f'组合更新失败: {str(e)}'
+            )
+            logger.error(f"[THREAD] Combined update task {task_id} failed: {e}")
+
+    logger.info(f"Starting combined update background thread...")
+    thread = threading.Thread(target=run_combined_update)
+    thread.daemon = True
+    thread.start()
+    logger.info(f"Combined update background thread started")
+
+    return jsonify({'success': True, 'task_id': task_id})
+
+
 # ==================== Scheduled Jobs API ====================
 
 @bp.route('/api/schedule/jobs', methods=['GET'])
@@ -1085,9 +1841,11 @@ def create_scheduled_job():
     Body (JSON):
         name: 任务名称
         cron_expression: Cron表达式
+        content_type: 内容类型 (stock/index) - 默认为stock
         mode: 更新模式 (incremental/full)
-        stock_range: 股票范围 (all/favorites/custom)
-        custom_stocks: 自定义股票列表 (可选)
+        stock_range: 股票范围 (all/favorites/custom) - 仅股票类型
+        custom_stocks: 自定义股票列表 (可选) - 仅股票类型
+        markets: 市场选择 (['SSE', 'SZSE']) - 仅指数类型
     """
     try:
         from web.scheduler import init_scheduler, add_scheduled_job
@@ -1099,6 +1857,7 @@ def create_scheduled_job():
 
         name = data.get('name')
         cron_expression = data.get('cron_expression')
+        content_type = data.get('content_type', 'stock')  # 默认为stock
 
         if not name or not cron_expression:
             return jsonify({'success': False, 'error': '任务名称和Cron表达式必填'}), 400
@@ -1107,20 +1866,27 @@ def create_scheduled_job():
         sched = init_scheduler(str(SCHEDULE_DB_PATH), timezone=SCHEDULER_TIMEZONE)
 
         # Register job config
-        job_id = f"stock_update_{name}"
+        job_id = f"{content_type}_update_{name}"
         config = {
             'name': name,
-            'mode': data.get('mode', 'incremental'),
-            'stock_range': data.get('stock_range', 'all'),
-            'custom_stocks': data.get('custom_stocks', [])
+            'content_type': content_type,
+            'mode': data.get('mode', 'incremental')
         }
+
+        # 根据内容类型添加不同的配置
+        if content_type == 'index':
+            config['markets'] = data.get('markets', ['SSE', 'SZSE'])
+        else:  # stock
+            config['stock_range'] = data.get('stock_range', 'all')
+            config['custom_stocks'] = data.get('custom_stocks', [])
+
         register_job_config(job_id, config)
 
-        # Add the scheduled job using string reference
-        logger.info(f"[Schedule] Adding job: {job_id}, cron: {cron_expression}")
+        # Add the scheduled job using dispatcher function
+        logger.info(f"[Schedule] Adding job: {job_id}, cron: {cron_expression}, type: {content_type}")
         success = add_scheduled_job(
             job_id=job_id,
-            func='web.scheduled_jobs:run_stock_update_job',
+            func='web.scheduled_jobs:run_scheduled_job_dispatcher',
             cron_expression=cron_expression,
             name=name,
             func_kwargs={'job_id': job_id}
@@ -1143,7 +1909,11 @@ def delete_scheduled_job(job_id):
     """删除定时任务"""
     try:
         from web.scheduler import remove_scheduled_job
+        from web.scheduled_jobs import unregister_job_config
+
+        # Remove from scheduler and unregister config
         if remove_scheduled_job(job_id):
+            unregister_job_config(job_id)  # Also remove from config storage
             return jsonify({'success': True})
         return jsonify({'success': False, 'error': '删除任务失败'}), 500
     except Exception as e:
@@ -1178,14 +1948,14 @@ def resume_scheduled_job(job_id):
 
 @bp.route('/api/financial/summary/<symbol>', methods=['GET'])
 def api_financial_summary(symbol):
-    """获取股票财务摘要数据（最新期核心指标）"""
+    """获取股票财务摘要数据（最新期核心指标，包括财务指标和估值指标）"""
     try:
         from src.data_sources.query.financial_query import FinancialQuery
         import numpy as np
         fq = FinancialQuery('data/tushare_data.db')
 
-        # 获取完整财务数据
-        data = fq.query_all_financial(symbol)
+        # 获取完整财务数据（包含财务指标）
+        data = fq.query_all_financial(symbol, include_indicators=True)
         if not data or data['income'].empty:
             return jsonify({'success': False, 'error': '暂无财务数据'}), 404
 
@@ -1194,6 +1964,11 @@ def api_financial_summary(symbol):
         income_filtered = data['income'][data['income']['report_type'] == 1] if not data['income'].empty else pd.DataFrame()
         balance_filtered = data['balancesheet'][data['balancesheet']['report_type'] == 1] if not data['balancesheet'].empty else pd.DataFrame()
         cashflow_filtered = data['cashflow'][data['cashflow']['report_type'] == 1] if not data['cashflow'].empty else pd.DataFrame()
+
+        # 处理财务指标数据（如果存在）
+        indicator_df = data.get('fina_indicator', pd.DataFrame())
+        indicator_filtered = indicator_df[indicator_df['report_type'] == 1] if not indicator_df.empty else pd.DataFrame()
+        indicator = indicator_filtered.iloc[0] if not indicator_filtered.empty else None
 
         income = income_filtered.iloc[0] if not income_filtered.empty else None
         balance = balance_filtered.iloc[0] if not balance_filtered.empty else None
@@ -1226,6 +2001,53 @@ def api_financial_summary(symbol):
             summary['free_cashflow'] = cashflow.get('free_cashflow')
             summary['sales_cash'] = cashflow.get('c_fr_sale_sg')  # 销售收现
 
+        # 财务指标（8个核心指标）
+        if indicator is not None:
+            # 盈利能力
+            summary['roe'] = indicator.get('roe')  # 净资产收益率
+            summary['roa'] = indicator.get('roa')  # 总资产报酬率
+            summary['netprofit_margin'] = indicator.get('netprofit_margin')  # 销售净利率
+            summary['grossprofit_margin'] = indicator.get('grossprofit_margin')  # 销售毛利率
+
+            # 成长能力
+            summary['or_yoy'] = indicator.get('or_yoy')  # 营业收入同比增长率
+            summary['netprofit_yoy'] = indicator.get('netprofit_yoy')  # 净利润同比增长率
+
+            # 偿债能力
+            summary['current_ratio'] = indicator.get('current_ratio')  # 流动比率
+
+            # 营运能力
+            summary['assets_turn'] = indicator.get('assets_turn')  # 总资产周转率
+
+        # 获取估值指标（PE、PB、市值等）
+        try:
+            code = fq._standardize_code(symbol)
+            valuation_query = """
+            SELECT datetime, close, pe, pe_ttm, pb, ps, ps_ttm, total_mv, circ_mv
+            FROM bars
+            WHERE symbol LIKE :symbol
+            AND pe IS NOT NULL
+            ORDER BY datetime DESC
+            LIMIT 1
+            """
+            with fq.engine.connect() as conn:
+                valuation_df = pd.read_sql_query(valuation_query, conn, params={'symbol': f'{code}%'})
+
+            if not valuation_df.empty:
+                valuation = valuation_df.iloc[0]
+                summary['valuation_date'] = valuation.get('datetime')
+                summary['close'] = valuation.get('close')
+                summary['pe'] = valuation.get('pe')
+                summary['pe_ttm'] = valuation.get('pe_ttm')
+                summary['pb'] = valuation.get('pb')
+                summary['ps'] = valuation.get('ps')
+                summary['ps_ttm'] = valuation.get('ps_ttm')
+                summary['total_mv'] = valuation.get('total_mv')
+                summary['circ_mv'] = valuation.get('circ_mv')
+        except Exception as e:
+            # 估值指标获取失败不影响整体结果
+            logger.warning(f"Failed to get valuation for {symbol}: {e}")
+
         # 清理NaN值
         for key, value in summary.items():
             if isinstance(value, float) and (np.isnan(value) or str(value) == 'nan'):
@@ -1244,7 +2066,7 @@ def api_financial_summary(symbol):
 
 @bp.route('/api/financial/full/<symbol>', methods=['GET'])
 def api_financial_full(symbol):
-    """获取完整财务报表（最近8个季度）"""
+    """获取完整财务报表（最近8个季度）和估值指标（最近30天）"""
     try:
         from src.data_sources.query.financial_query import FinancialQuery
         import numpy as np
@@ -1262,12 +2084,39 @@ def api_financial_full(symbol):
             df_clean = df_sorted.replace({np.nan: None})
             result[table_type] = df_clean.to_dict('records')
 
+        # 获取估值指标（最近30天的数据）
+        try:
+            code = fq._standardize_code(symbol)
+            valuation_query = """
+            SELECT datetime, close, pe, pe_ttm, pb, ps, ps_ttm,
+                   total_mv / 10000 as total_mv_yi,
+                   circ_mv / 10000 as circ_mv_yi
+            FROM bars
+            WHERE symbol LIKE :symbol
+            AND pe IS NOT NULL
+            ORDER BY datetime DESC
+            LIMIT 30
+            """
+            with fq.engine.connect() as conn:
+                valuation_df = pd.read_sql_query(valuation_query, conn, params={'symbol': f'{code}%'})
+
+            if not valuation_df.empty:
+                # 将NaN替换为None
+                valuation_df = valuation_df.replace({np.nan: None})
+                result['valuation'] = valuation_df.to_dict('records')
+        except Exception as e:
+            # 估值指标获取失败不影响整体结果
+            logger.warning(f"Failed to get valuation for {symbol}: {e}")
+            result['valuation'] = []
+
         return jsonify({
             'success': True,
             'symbol': symbol,
             'data': result
         })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -1289,5 +2138,79 @@ def api_financial_check(symbol):
         })
     except Exception as e:
         return jsonify({'success': True, 'has_data': False})
+
+
+@bp.route('/api/financial/indicators/<symbol>', methods=['GET'])
+def api_financial_indicators(symbol):
+    """获取股票财务指标数据（最近8个季度）"""
+    try:
+        from src.data_sources.query.financial_query import FinancialQuery
+        import numpy as np
+        fq = FinancialQuery('data/tushare_data.db')
+
+        # 查询财务指标数据
+        df = fq.query_fina_indicator(symbol)
+        if df.empty:
+            return jsonify({'success': False, 'error': '暂无财务指标数据'}), 404
+
+        # 限制最近8条，并处理NaN值
+        df_sorted = df.sort_values('end_date', ascending=False).head(8)
+        df_clean = df_sorted.replace({np.nan: None})
+
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'data': df_clean.to_dict('records')
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/financial/valuation/<symbol>', methods=['GET'])
+def api_financial_valuation(symbol):
+    """获取股票最新估值指标（PE、PB、市值等）"""
+    try:
+        from src.data_sources.tushare import TushareDB
+        db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+        # 标准化代码
+        code = db._extract_stock_code(symbol)
+        ts_code_std = db._standardize_code(symbol)
+
+        # 查询最新的估值指标（日线数据）
+        query = f"""
+        SELECT datetime, close, pe, pe_ttm, pb, ps, ps_ttm, total_mv, circ_mv
+        FROM bars
+        WHERE symbol LIKE :symbol
+        AND pe IS NOT NULL
+        ORDER BY datetime DESC
+        LIMIT 1
+        """
+
+        import pandas as pd
+        with db.engine.connect() as conn:
+            df = pd.read_sql_query(query, conn, params={'symbol': f'{code}%'})
+
+        if df.empty:
+            return jsonify({'success': False, 'error': '暂无估值数据'}), 404
+
+        # 转换为字典并处理NaN值
+        import numpy as np
+        result = df.iloc[0].to_dict()
+        for key, value in result.items():
+            if isinstance(value, float) and (np.isnan(value) or str(value) == 'nan'):
+                result[key] = None
+
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'valuation': result
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 

@@ -77,10 +77,17 @@ class TaskManager:
                 task_id TEXT PRIMARY KEY,
                 current_index INTEGER NOT NULL,
                 stats TEXT,
+                stage TEXT DEFAULT 'stock',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (task_id) REFERENCES tasks(task_id)
             )
         ''')
+
+        # Add stage column to existing table if not exists (for backward compatibility)
+        try:
+            cursor.execute('ALTER TABLE task_checkpoints ADD COLUMN stage TEXT DEFAULT "stock"')
+        except Exception:
+            pass  # Column already exists
 
         # Create indexes for performance
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
@@ -244,8 +251,21 @@ class TaskManager:
                     'total_stocks': existing_task[5],
                     'progress': existing_task[6]
                 }
+                # 根据任务状态提供更清晰的错误消息
+                status = task_dict['status']
+                status_cn = {
+                    'pending': '等待中',
+                    'running': '运行中',
+                    'paused': '已暂停'
+                }.get(status, status)
+
+                if status == 'paused':
+                    message = f"无法创建新任务：系统中有任务已暂停（任务ID: {task_dict['task_id'][:8]}...）。请先在「任务历史」页面停止或恢复该任务。"
+                else:
+                    message = f"无法创建新任务：系统中有{status_cn}任务（任务ID: {task_dict['task_id'][:8]}...）。请等待完成或停止该任务。"
+
                 raise TaskExistsError(
-                    message=f"无法创建新任务：活动任务 {task_dict['task_id'][:8]}... 状态为 '{task_dict['status']}'",
+                    message=message,
                     existing_task=task_dict
                 )
 
@@ -700,7 +720,7 @@ class TaskManager:
 
         return tasks
 
-    def save_checkpoint(self, task_id, current_index, stats=None):
+    def save_checkpoint(self, task_id, current_index, stats=None, stage='stock'):
         """
         Save task checkpoint to database for resume capability
 
@@ -708,6 +728,7 @@ class TaskManager:
             task_id: Task identifier
             current_index: Current stock index
             stats: Optional stats dict (success, failed, skipped counts)
+            stage: Optional stage identifier for multi-stage tasks (e.g., 'stock', 'financial')
         """
         with self.lock:
             conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -717,9 +738,9 @@ class TaskManager:
                 checkpoint_data = json.dumps(stats or {})
                 now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 cursor.execute('''
-                    INSERT OR REPLACE INTO task_checkpoints (task_id, current_index, stats, created_at)
-                    VALUES (?, ?, ?, ?)
-                ''', (task_id, current_index, checkpoint_data, now))
+                    INSERT OR REPLACE INTO task_checkpoints (task_id, current_index, stats, stage, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (task_id, current_index, checkpoint_data, stage, now))
 
                 conn.commit()
                 return True
@@ -737,7 +758,7 @@ class TaskManager:
             task_id: Task identifier
 
         Returns:
-            dict with 'current_index' and 'stats', or None if not found
+            dict with 'current_index', 'stats', and 'stage', or None if not found
         """
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -749,10 +770,12 @@ class TaskManager:
 
             if row:
                 stats_json = row['stats']
+                stage = row.get('stage', 'stock') if 'stage' in row.keys() else 'stock'
                 return {
                     'task_id': row['task_id'],
                     'current_index': row['current_index'],
                     'stats': json.loads(stats_json) if stats_json else {},
+                    'stage': stage,
                     'timestamp': row['created_at']
                 }
             return None

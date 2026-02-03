@@ -127,9 +127,9 @@ class ClaudeClient:
             # Build prompt
             prompt = self._build_prompt(query, language)
 
-            # Call Claude CLI via subprocess
+            # Call Claude CLI via subprocess with --print flag for non-interactive output
             result = subprocess.run(
-                [self.cli_path, prompt],
+                [self.cli_path, '--print', prompt],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -194,9 +194,9 @@ class ClaudeClient:
             # Build conversational prompt
             prompt = self._build_chat_prompt(query, history, language)
 
-            # Call Claude CLI via subprocess
+            # Call Claude CLI via subprocess with --print flag for non-interactive output
             result = subprocess.run(
-                [self.cli_path, prompt],
+                [self.cli_path, '--print', prompt],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,

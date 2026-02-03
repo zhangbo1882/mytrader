@@ -308,7 +308,16 @@
             });
 
             if (!response.ok) {
-                throw new Error('网络请求失败');
+                // Try to get error message from response body
+                let errorMsg = '网络请求失败';
+                try {
+                    const errData = await response.json();
+                    errorMsg = errData.error || errorMsg;
+                } catch (e) {
+                    // If parsing fails, use status text
+                    errorMsg = `请求失败 (${response.status})`;
+                }
+                throw new Error(errorMsg);
             }
 
             const data = await response.json();

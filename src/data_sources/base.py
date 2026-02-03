@@ -86,6 +86,71 @@ class BaseStockDB(ABC):
             conn.execute(text(stock_names_sql))
             conn.commit()
 
+        # 创建指数名称表
+        index_names_sql = """
+        CREATE TABLE IF NOT EXISTS index_names (
+            ts_code TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            market TEXT,
+            publisher TEXT,
+            index_type TEXT,
+            category TEXT,
+            base_date TEXT,
+            base_point REAL,
+            list_date TEXT,
+            weight_rule TEXT,
+            desc TEXT,
+            updated_at TEXT
+        );
+        """
+        with self.engine.connect() as conn:
+            conn.execute(text(index_names_sql))
+            conn.commit()
+
+        # 创建财务指标表（统一表结构，非动态表）
+        fina_indicator_sql = """
+        CREATE TABLE IF NOT EXISTS fina_indicator (
+            ts_code TEXT NOT NULL,
+            ann_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            report_type TEXT,
+
+            -- 盈利能力 (12个指标)
+            eps REAL, basic_eps REAL, diluted_eps REAL,
+            roe REAL, roa REAL, roic REAL,
+            netprofit_margin REAL, grossprofit_margin REAL, operateprofit_margin REAL,
+            core_roe REAL, core_roa REAL, q_eps REAL,
+
+            -- 成长能力 (10个指标)
+            or_yoy REAL, tr_yoy REAL, netprofit_yoy REAL, assets_yoy REAL,
+            ebt_yoy REAL, ocf_yoy REAL, roe_yoy REAL,
+            q_or_yoy REAL, q_tr_yoy REAL, q_netprofit_yoy REAL,
+
+            -- 营运能力 (8个指标)
+            assets_turn REAL, ar_turn REAL, inv_turn REAL,
+            ca_turn REAL, fa_turn REAL, current_assets_turn REAL,
+            equity_turn REAL, op_npta REAL,
+
+            -- 偿债能力 (8个指标)
+            current_ratio REAL, quick_ratio REAL, cash_ratio REAL,
+            debt_to_assets REAL, debt_to_eqt REAL, equity_multiplier REAL,
+            ebit_to_interest REAL, op_to_ebit REAL,
+
+            -- 现金流指标 (7个指标)
+            ocfps REAL, ocf_to_debt REAL, ocf_to_shortdebt REAL,
+            ocf_to_liability REAL, ocf_to_interest REAL,
+            cf_to_debt REAL, free_cf REAL,
+
+            -- 每股指标 (3个指标)
+            bps REAL, tangible_asset_to_share REAL, capital_reserv_to_share REAL,
+
+            PRIMARY KEY (ts_code, ann_date, end_date, report_type)
+        );
+        """
+        with self.engine.connect() as conn:
+            conn.execute(text(fina_indicator_sql))
+            conn.commit()
+
         # 创建索引以提升查询性能
         index_sqls = [
             "CREATE INDEX IF NOT EXISTS idx_bars_symbol ON bars(symbol);",
@@ -93,6 +158,7 @@ class BaseStockDB(ABC):
             "CREATE INDEX IF NOT EXISTS idx_bars_symbol_datetime ON bars(symbol, datetime);",
             "CREATE INDEX IF NOT EXISTS idx_bars_turnover ON bars(turnover);",
             "CREATE INDEX IF NOT EXISTS idx_stock_names_name ON stock_names(name);",
+            "CREATE INDEX IF NOT EXISTS idx_index_names_name ON index_names(name);",
             # Daily basic 指标索引
             "CREATE INDEX IF NOT EXISTS idx_bars_pe ON bars(pe);",
             "CREATE INDEX IF NOT EXISTS idx_bars_pb ON bars(pb);",
@@ -100,6 +166,11 @@ class BaseStockDB(ABC):
             "CREATE INDEX IF NOT EXISTS idx_bars_circ_mv ON bars(circ_mv);",
             "CREATE INDEX IF NOT EXISTS idx_bars_volume_ratio ON bars(volume_ratio);",
             "CREATE INDEX IF NOT EXISTS idx_bars_turnover_rate_f ON bars(turnover_rate_f);",
+            # 财务指标表索引
+            "CREATE INDEX IF NOT EXISTS idx_fina_indicator_ts_code ON fina_indicator(ts_code);",
+            "CREATE INDEX IF NOT EXISTS idx_fina_indicator_end_date ON fina_indicator(end_date);",
+            "CREATE INDEX IF NOT EXISTS idx_fina_indicator_ann_date ON fina_indicator(ann_date);",
+            "CREATE INDEX IF NOT EXISTS idx_fina_indicator_roe ON fina_indicator(roe);",
         ]
         with self.engine.connect() as conn:
             for index_sql in index_sqls:

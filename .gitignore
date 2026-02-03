@@ -29,6 +29,7 @@ __pycache__/
 
 # Configuration files with sensitive data
 config/settings.py
+scripts/docker_run.sh
 
 # Checkpoint file locks
 data/checkpoints/*.lock

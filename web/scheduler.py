@@ -207,32 +207,44 @@ def resume_scheduled_job(job_id):
 
 def get_scheduled_jobs():
     """
-    Get all scheduled jobs
+    Get all scheduled jobs with their custom configurations
 
     Returns:
-        List of job info dictionaries
+        List of job info dictionaries with merged config data
     """
     global scheduler
 
     if scheduler is None:
         return []
 
+    # Import job_configs from scheduled_jobs module
+    try:
+        from web.scheduled_jobs import job_configs
+    except ImportError:
+        job_configs = {}
+
     jobs = []
     for job in scheduler.get_jobs():
-        jobs.append({
+        job_info = {
             'id': job.id,
             'name': job.name,
             'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
             'trigger': str(job.trigger),
             'enabled': not job.next_run_time == None  # Jobs are enabled if they have a next run time
-        })
+        }
+
+        # Merge custom config if available
+        if job.id in job_configs:
+            job_info.update(job_configs[job.id])
+
+        jobs.append(job_info)
 
     return jobs
 
 
 def get_job_info(job_id):
     """
-    Get info about a specific job
+    Get info about a specific job with custom configuration
 
     Args:
         job_id: Job identifier
@@ -245,16 +257,28 @@ def get_job_info(job_id):
     if scheduler is None:
         return None
 
+    # Import job_configs from scheduled_jobs module
+    try:
+        from web.scheduled_jobs import job_configs
+    except ImportError:
+        job_configs = {}
+
     try:
         job = scheduler.get_job(job_id)
         if job:
-            return {
+            job_info = {
                 'id': job.id,
                 'name': job.name,
                 'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
                 'trigger': str(job.trigger),
                 'enabled': True
             }
+
+            # Merge custom config if available
+            if job_id in job_configs:
+                job_info.update(job_configs[job_id])
+
+            return job_info
     except Exception as e:
         print(f"[Scheduler] Error getting job {job_id}: {e}")
 

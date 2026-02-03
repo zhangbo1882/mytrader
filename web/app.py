@@ -384,6 +384,12 @@ def initialize():
         print("[Init] 清理陈旧任务...")
         tm.cleanup_stale_tasks(stale_threshold_hours=24)
 
+        # Initialize scheduled job configs storage
+        print("[Init] Initializing scheduled job configs...")
+        from web.scheduled_jobs import _init_configs_db, _load_configs_from_db
+        _init_configs_db(str(SCHEDULE_DB_PATH))  # Use same DB as scheduler
+        _load_configs_from_db()  # Load configs into memory
+
         # Initialize scheduler
         print("[Init] Initializing scheduler...")
         init_scheduler(str(SCHEDULE_DB_PATH), timezone=SCHEDULER_TIMEZONE)
@@ -396,4 +402,16 @@ def initialize():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    import os
+    # 从环境变量读取配置，支持开发和生产环境
+    # 默认开发环境: 端口5001, debug模式
+    # 生产环境: 端口8000, 非debug模式
+    env = os.getenv('FLASK_ENV', 'development')
+    if env == 'production':
+        port = int(os.getenv('PORT', 8000))
+        debug = False
+    else:
+        port = int(os.getenv('PORT', 5001))
+        debug = True
+
+    app.run(host='0.0.0.0', port=port, debug=debug)

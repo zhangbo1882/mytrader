@@ -73,6 +73,52 @@ function checkForRunningTasks() {
  * Initialize event handlers - scoped to update-manager pane only
  */
 function initializeEventHandlers() {
+    // Update content type change handler
+    $('#updateContentType').on('change', function() {
+        const contentType = $(this).val();
+
+        // Show/hide info alerts
+        if (contentType === 'stock') {
+            $('#stockInfoAlert').show();
+            $('#financialInfoAlert').hide();
+            $('#indexInfoAlert').hide();
+        } else if (contentType === 'financial') {
+            $('#stockInfoAlert').hide();
+            $('#financialInfoAlert').show();
+            $('#indexInfoAlert').hide();
+        } else if (contentType === 'index') {
+            $('#stockInfoAlert').hide();
+            $('#financialInfoAlert').hide();
+            $('#indexInfoAlert').show();
+        }
+
+        // Show/hide update mode selector (only for stock and index)
+        if (contentType === 'financial') {
+            $('#updateModeGroup').hide();
+        } else {
+            $('#updateModeGroup').show();
+        }
+
+        // Show/hide market selector (only for index)
+        if (contentType === 'index') {
+            $('#indexMarketGroup').show();
+        } else {
+            $('#indexMarketGroup').hide();
+        }
+
+        // Show/hide stock range selector (hide for index)
+        if (contentType === 'index') {
+            $('#stockRange').closest('.mb-3').hide();
+            $('#customStocksGroup').hide();
+        } else {
+            $('#stockRange').closest('.mb-3').show();
+            // Handle custom stocks visibility
+            if ($('#stockRange').val() === 'custom') {
+                $('#customStocksGroup').show();
+            }
+        }
+    });
+
     // Stock range change handler
     $('#stockRange').on('change', function() {
         if ($(this).val() === 'custom') {
@@ -103,6 +149,23 @@ function initializeEventHandlers() {
     $('.cron-presets button').on('click', function() {
         const cron = $(this).data('cron');
         $('#cronExpression').val(cron);
+    });
+
+    // Schedule content type change handler
+    $('#scheduleContentType').on('change', function() {
+        const contentType = $(this).val();
+
+        if (contentType === 'index') {
+            // 指数：显示市场选择，显示更新模式，隐藏股票范围
+            $('#scheduleMarketGroup').show();
+            $('#scheduleModeGroup').show();
+            $('#scheduleStockRangeGroup').hide();
+        } else {
+            // 股票：隐藏市场选择，显示更新模式和股票范围
+            $('#scheduleMarketGroup').hide();
+            $('#scheduleModeGroup').show();
+            $('#scheduleStockRangeGroup').show();
+        }
     });
 
     // Save schedule button
@@ -147,6 +210,7 @@ function showUpdateToast(message, type = 'info') {
  * Start stock update
  */
 async function startUpdate() {
+    const contentType = $('#updateContentType').val();
     const mode = $('#updateMode').val();
     const stockRange = $('#stockRange').val();
     const customStocks = $('#customStocks').val()
@@ -172,14 +236,89 @@ async function startUpdate() {
         return;
     }
 
-    try {
-        const requestBody = {
+    // Handle index updates
+    if (contentType === 'index') {
+        // Get selected markets
+        const markets = [];
+        if ($('#marketSSE').is(':checked')) {
+            markets.push('SSE');
+        }
+        if ($('#marketSZSE').is(':checked')) {
+            markets.push('SZSE');
+        }
+
+        if (markets.length === 0) {
+            showUpdateToast('请至少选择一个市场', 'error');
+            return;
+        }
+
+        // Determine start_date based on mode
+        const startDate = (mode === 'full') ? '20200101' : '20240101';
+
+        try {
+            const response = await fetch('/api/index/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start_date: startDate,
+                    markets: markets
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                currentTaskId = data.task_id;
+                showUpdateToast('指数数据更新任务已启动', 'success');
+                startPolling();
+            } else {
+                if (data.error_type === 'task_exists') {
+                    showTaskExistsErrorDialog(data);
+                } else {
+                    showUpdateToast(data.error || '启动失败', 'error');
+                }
+            }
+        } catch (error) {
+            console.error('Error starting index update:', error);
+            showUpdateToast('请求失败: ' + error.message, 'error');
+        }
+        return;
+    }
+
+    // Get stock list based on range
+    let stockList = [];
+    if (stockRange === 'custom') {
+        stockList = customStocks;
+    } else if (stockRange === 'favorites') {
+        stockList = favoritesStocks;
+    } else {
+        // For 'all', let the backend determine the list
+        stockList = [];
+    }
+
+    // Determine endpoint and request body based on content type
+    let endpoint, requestBody;
+
+    if (contentType === 'stock') {
+        // Original stock update endpoint
+        endpoint = '/api/stock/update-all';
+        requestBody = {
             mode: mode,
             stock_range: stockRange,
-            custom_stocks: stockRange === 'favorites' ? favoritesStocks : customStocks
+            custom_stocks: stockList
         };
+    } else if (contentType === 'financial') {
+        // New financial update endpoint
+        endpoint = '/api/financial/update';
+        requestBody = {
+            stock_range: stockRange,
+            custom_stocks: stockList,
+            include_indicators: true  // 默认包含财务指标
+        };
+    }
 
-        const response = await fetch('/api/stock/update-all', {
+    try {
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody)
@@ -189,7 +328,11 @@ async function startUpdate() {
 
         if (data.success) {
             currentTaskId = data.task_id;
-            showUpdateToast('更新任务已启动', 'success');
+            const taskTypeLabels = {
+                'stock': '股价数据',
+                'financial': '财务数据'
+            };
+            showUpdateToast(`${taskTypeLabels[contentType]}更新任务已启动`, 'success');
             startPolling();
         } else {
             // 检查错误类型并显示详细对话框
@@ -567,13 +710,32 @@ async function loadScheduledJobs() {
                 const cronMatch = job.trigger.match(/cron\((.*?)\)/);
                 const cron = cronMatch ? cronMatch[1] : job.trigger;
 
+                // Use content_type from job config (provided by backend)
+                const contentType = job.content_type || 'stock';
+                let contentTypeLabel, contentTypeClass;
+                if (contentType === 'index') {
+                    contentTypeLabel = '指数数据';
+                    contentTypeClass = 'bg-info';
+                } else if (contentType === 'financial') {
+                    contentTypeLabel = '财务数据';
+                    contentTypeClass = 'bg-warning';
+                } else {
+                    contentTypeLabel = '股价数据';
+                    contentTypeClass = 'bg-primary';
+                }
+
+                // Use mode from job config (provided by backend)
+                const mode = job.mode || 'incremental';
+                const modeLabel = mode === 'full' ? '全量更新' : '增量更新';
+
                 const enabled = job.enabled !== false;
 
                 const row = $(`
                     <tr>
                         <td>${escapeHtml(job.name)}</td>
+                        <td><span class="badge ${contentTypeClass}">${contentTypeLabel}</span></td>
+                        <td>${contentType === 'financial' ? '-' : modeLabel}</td>
                         <td><code>${escapeHtml(cron)}</code></td>
-                        <td>-</td>
                         <td>${job.next_run_time ? formatDateTime(job.next_run_time) : '-'}</td>
                         <td>
                             <span class="badge ${enabled ? 'bg-success' : 'bg-secondary'}">
@@ -593,11 +755,11 @@ async function loadScheduledJobs() {
                 $tbody.append(row);
             });
         } else {
-            $tbody.html('<tr><td colspan="6" class="text-center text-muted">暂无定时任务</td></tr>');
+            $tbody.html('<tr><td colspan="7" class="text-center text-muted">暂无定时任务</td></tr>');
         }
     } catch (error) {
         console.error('Error loading scheduled jobs:', error);
-        $('#scheduledJobsBody').html('<tr><td colspan="6" class="text-center text-danger">加载失败</td></tr>');
+        $('#scheduledJobsBody').html('<tr><td colspan="7" class="text-center text-danger">加载失败</td></tr>');
     }
 }
 
@@ -607,6 +769,7 @@ async function loadScheduledJobs() {
 async function saveScheduledJob() {
     const name = $('#scheduleName').val().trim();
     const cron = $('#cronExpression').val().trim();
+    const contentType = $('#scheduleContentType').val();
     const mode = $('#scheduleMode').val();
     const stockRange = $('#scheduleStockRange').val();
 
@@ -615,16 +778,40 @@ async function saveScheduledJob() {
         return;
     }
 
+    // Build request body based on content type
+    const requestBody = {
+        name: name,
+        cron_expression: cron,
+        content_type: contentType,
+        mode: mode
+    };
+
+    if (contentType === 'index') {
+        // Get selected markets
+        const markets = [];
+        if ($('#scheduleMarketSSE').is(':checked')) {
+            markets.push('SSE');
+        }
+        if ($('#scheduleMarketSZSE').is(':checked')) {
+            markets.push('SZSE');
+        }
+
+        if (markets.length === 0) {
+            showUpdateToast('请至少选择一个市场', 'error');
+            return;
+        }
+
+        requestBody.markets = markets;
+    } else {
+        // Stock type
+        requestBody.stock_range = stockRange;
+    }
+
     try {
         const response = await fetch('/api/schedule/jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: name,
-                cron_expression: cron,
-                mode: mode,
-                stock_range: stockRange
-            })
+            body: JSON.stringify(requestBody)
         });
 
         const data = await response.json();
@@ -633,6 +820,9 @@ async function saveScheduledJob() {
             showUpdateToast('定时任务已创建', 'success');
             bootstrap.Modal.getInstance($('#addScheduleModal')).hide();
             $('#scheduleForm')[0].reset();
+            // Reset market group visibility
+            $('#scheduleMarketGroup').hide();
+            $('#scheduleStockRangeGroup').show();
             loadScheduledJobs();
         } else {
             showUpdateToast(data.error || '创建失败', 'error');

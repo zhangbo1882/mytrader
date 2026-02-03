@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/checkpoints/
+data/download_checkpoint.json
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Documentation
+*.md
+!requirements.txt
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ML models (if any)
+ml_models/
+*.pkl
+*.joblib

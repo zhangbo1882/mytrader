@@ -197,11 +197,73 @@ class FinancialQuery:
             print(f"查询现金流量表失败: {e}")
             return pd.DataFrame()
 
+    def query_fina_indicator(
+        self,
+        symbol: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        report_type: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        查询财务指标数据
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始公告日期（格式 YYYYMMDD）
+            end_date: 结束公告日期（格式 YYYYMMDD）
+            report_type: 报告类型
+
+        Returns:
+            财务指标数据 DataFrame
+        """
+        code = self._standardize_code(symbol)
+        table_name = "fina_indicator"
+
+        # 构建查询条件
+        conditions = ["ts_code LIKE :ts_code"]
+        params = {"ts_code": f"{code}%"}
+
+        if start_date:
+            conditions.append("ann_date >= :start_date")
+            params["start_date"] = start_date
+
+        if end_date:
+            conditions.append("ann_date <= :end_date")
+            params["end_date"] = end_date
+
+        if report_type:
+            conditions.append("report_type = :report_type")
+            params["report_type"] = report_type
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+        SELECT * FROM {table_name}
+        WHERE {where_clause}
+        ORDER BY ann_date DESC
+        """
+
+        try:
+            with self.engine.connect() as conn:
+                # 检查表是否存在
+                result = conn.execute(text(
+                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+                ))
+                if not result.fetchone():
+                    return pd.DataFrame()
+
+                df = pd.read_sql_query(query, conn, params=params)
+                return df
+        except Exception as e:
+            print(f"查询财务指标失败: {e}")
+            return pd.DataFrame()
+
     def query_all_financial(
         self,
         symbol: str,
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
+        include_indicators: bool = True
     ) -> dict:
         """
         查询所有财务数据
@@ -210,20 +272,27 @@ class FinancialQuery:
             symbol: 股票代码
             start_date: 开始公告日期（格式 YYYYMMDD）
             end_date: 结束公告日期（格式 YYYYMMDD）
+            include_indicators: 是否包含财务指标（默认 True）
 
         Returns:
-            包含三张报表的字典
+            包含财务报表的字典
             {
                 'income': DataFrame,
                 'balancesheet': DataFrame,
-                'cashflow': DataFrame
+                'cashflow': DataFrame,
+                'fina_indicator': DataFrame  # 可选
             }
         """
-        return {
+        result = {
             'income': self.query_income(symbol, start_date, end_date),
             'balancesheet': self.query_balancesheet(symbol, start_date, end_date),
             'cashflow': self.query_cashflow(symbol, start_date, end_date)
         }
+
+        if include_indicators:
+            result['fina_indicator'] = self.query_fina_indicator(symbol, start_date, end_date)
+
+        return result
 
     def get_latest_report_date(self, symbol: str, table_type: str = 'income') -> Optional[str]:
         """
@@ -408,7 +477,7 @@ class FinancialQuery:
                 query = """
                 SELECT name FROM sqlite_master
                 WHERE type='table'
-                AND (name LIKE 'income_%' OR name LIKE 'balancesheet_%' OR name LIKE 'cashflow_%')
+                AND (name LIKE 'income_%' OR name LIKE 'balancesheet_%' OR name LIKE 'cashflow_%' OR name = 'fina_indicator')
                 ORDER BY name
                 """
                 df = pd.read_sql_query(query, conn)

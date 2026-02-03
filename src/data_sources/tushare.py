@@ -54,7 +54,16 @@ class TushareDB(BaseStockDB):
 
     def _detect_exchange(self, symbol: str) -> str:
         """自动识别交易所"""
-        code = symbol.split('.')[0]
+        # 如果包含交易所后缀，直接使用
+        if '.' in symbol:
+            suffix = symbol.split('.')[1].upper()
+            if suffix == 'SH':
+                return 'SSE'
+            elif suffix == 'SZ':
+                return 'SZSE'
+
+        # 否则根据代码前缀判断
+        code = symbol.split('.')[0] if '.' in symbol else symbol
         if code.startswith(('600', '601', '603', '604', '605', '688', '689')):
             return 'SSE'
         elif code.startswith(('000', '001', '002', '003', '300', '301')):
@@ -1324,14 +1333,126 @@ class TushareDB(BaseStockDB):
                 print(f"  ❌ 保存现金流量表失败: {e}")
             return 0
 
-    def save_all_financial(self, ts_code: str, start_date: str = None, end_date: str = None):
+    def save_fina_indicator(self, ts_code: str, start_date: str = None, end_date: str = None) -> int:
         """
-        获取并保存所有财务报表数据（利润表、资产负债表、现金流量表）
+        获取并保存财务指标数据
 
         Args:
             ts_code: 股票代码（如 000001.SZ 或 000001）
             start_date: 公告开始日期（格式 YYYYMMDD）
             end_date: 公告结束日期（格式 YYYYMMDD）
+
+        Returns:
+            保存的记录数，失败返回 0
+        """
+        try:
+            # 标准化代码
+            ts_code_std = self._standardize_code(ts_code)
+            table_name = "fina_indicator"
+
+            # 核心指标列（50个）
+            core_columns = [
+                # 基础字段
+                'ts_code', 'ann_date', 'end_date', 'report_type',
+                # 盈利能力 (12个指标)
+                'eps', 'basic_eps', 'diluted_eps',
+                'roe', 'roa', 'roic',
+                'netprofit_margin', 'grossprofit_margin', 'operateprofit_margin',
+                'core_roe', 'core_roa', 'q_eps',
+                # 成长能力 (10个指标)
+                'or_yoy', 'tr_yoy', 'netprofit_yoy', 'assets_yoy',
+                'ebt_yoy', 'ocf_yoy', 'roe_yoy',
+                'q_or_yoy', 'q_tr_yoy', 'q_netprofit_yoy',
+                # 营运能力 (8个指标)
+                'assets_turn', 'ar_turn', 'inv_turn',
+                'ca_turn', 'fa_turn', 'current_assets_turn',
+                'equity_turn', 'op_npta',
+                # 偿债能力 (8个指标)
+                'current_ratio', 'quick_ratio', 'cash_ratio',
+                'debt_to_assets', 'debt_to_eqt', 'equity_multiplier',
+                'ebit_to_interest', 'op_to_ebit',
+                # 现金流指标 (7个指标)
+                'ocfps', 'ocf_to_debt', 'ocf_to_shortdebt',
+                'ocf_to_liability', 'ocf_to_interest',
+                'cf_to_debt', 'free_cf',
+                # 每股指标 (3个指标)
+                'bps', 'tangible_asset_to_share', 'capital_reserv_to_share'
+            ]
+
+            # 获取数据
+            print(f"  📥 获取财务指标数据 {ts_code_std}...")
+            df = self._retry_api_call(
+                self.pro.fina_indicator,
+                ts_code=ts_code_std,
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if df is None or df.empty:
+                print(f"  ⚠️  {ts_code_std} 无财务指标数据")
+                return 0
+
+            # 去重处理
+            df_before = len(df)
+            df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date', 'report_type'], keep='last')
+            if len(df) < df_before:
+                print(f"  🔄 去除重复数据: {df_before} -> {len(df)} 条")
+
+            # 选择核心指标列（只保留存在的列）
+            available_columns = [col for col in core_columns if col in df.columns]
+            df = df[available_columns]
+
+            # 先删除重复数据（如果存在）
+            with self.engine.connect() as conn:
+                # 获取API返回数据的公告日期列表
+                ann_dates = df['ann_date'].tolist()
+                placeholders = ','.join([':ann_date_' + str(i) for i in range(len(ann_dates))])
+                params = {'ts_code': ts_code_std}
+                params.update({f'ann_date_{i}': date for i, date in enumerate(ann_dates)})
+
+                delete_sql = f"""
+                DELETE FROM fina_indicator
+                WHERE ts_code = :ts_code AND ann_date IN ({placeholders})
+                """
+                conn.execute(text(delete_sql), params)
+                conn.commit()
+
+            # 保存到数据库
+            df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
+            print(f"  ✅ 已保存财务指标 {len(df)} 条记录")
+            return len(df)
+
+        except Exception as e:
+            error_msg = str(e)
+            # 权限不足时优雅降级
+            if "无权限" in error_msg or "权限" in error_msg or "403" in error_msg or "权限不足" in error_msg:
+                print(f"  ⚠️  无权限获取财务指标数据（需要2000+积分）")
+            else:
+                print(f"  ❌ 保存财务指标失败: {e}")
+            return 0
+
+    def check_fina_indicator_access(self) -> bool:
+        """
+        检查是否有财务指标接口访问权限
+
+        Returns:
+            True 表示有权限，False 表示无权限
+        """
+        try:
+            test_df = self.pro.fina_indicator(ts_code='000001.SZ', limit=1)
+            return test_df is not None and not test_df.empty
+        except:
+            return False
+
+    def save_all_financial(self, ts_code: str, start_date: str = None, end_date: str = None, include_indicators: bool = True):
+        """
+        获取并保存所有财务报表数据（利润表、资产负债表、现金流量表、财务指标）
+
+        Args:
+            ts_code: 股票代码（如 000001.SZ 或 000001）
+            start_date: 公告开始日期（格式 YYYYMMDD）
+            end_date: 公告结束日期（格式 YYYYMMDD）
+            include_indicators: 是否包含财务指标（默认 True）
 
         Returns:
             保存的记录总数
@@ -1357,11 +1478,19 @@ class TushareDB(BaseStockDB):
             cashflow_count = self.save_cashflow(ts_code_std, start_date, end_date)
             total_records += cashflow_count
 
+            # 4. 财务指标（可选）
+            indicator_count = 0
+            if include_indicators:
+                indicator_count = self.save_fina_indicator(ts_code_std, start_date, end_date)
+                total_records += indicator_count
+
             print(f"\n{'='*60}")
             print(f"✅ {ts_code_std} 财务数据下载完成")
             print(f"  利润表: {income_count} 条")
             print(f"  资产负债表: {balance_count} 条")
             print(f"  现金流量表: {cashflow_count} 条")
+            if include_indicators:
+                print(f"  财务指标: {indicator_count} 条")
             print(f"  总计: {total_records} 条")
             print(f"{'='*60}")
 
@@ -1376,7 +1505,7 @@ class TushareDB(BaseStockDB):
 
         Args:
             ts_code: 股票代码（如 000001.SZ 或 000001）
-            table_type: 报表类型（income/balancesheet/cashflow）
+            table_type: 报表类型（income/balancesheet/cashflow/fina_indicator）
 
         Returns:
             最新公告日期（格式 YYYYMMDD），无数据则返回 None
@@ -1384,8 +1513,13 @@ class TushareDB(BaseStockDB):
         try:
             # 标准化代码
             ts_code_std = self._standardize_code(ts_code)
-            code = self._extract_stock_code(ts_code_std)
-            table_name = f"{table_type}_{code}"
+
+            # fina_indicator 使用统一表名
+            if table_type == 'fina_indicator':
+                table_name = 'fina_indicator'
+            else:
+                code = self._extract_stock_code(ts_code_std)
+                table_name = f"{table_type}_{code}"
 
             # 检查表是否存在
             with self.engine.connect() as conn:
@@ -1414,3 +1548,244 @@ class TushareDB(BaseStockDB):
         except Exception as e:
             print(f"  ⚠️  查询最新财报日期失败: {e}")
             return None
+
+    # ==================== 指数数据相关方法 ====================
+
+    def save_index_basic(self, market: str = None):
+        """
+        获取并保存指数基本信息
+
+        Args:
+            market: 市场代码 ('SSE' 上交所, 'SZSE' 深交所)，None 表示全部
+
+        Returns:
+            保存的指数数量（总是返回正数，表示数据库中的指数数量）
+        """
+        # 先获取数据
+        print(f"  📥 获取指数基本信息 (market={market or '全部'})...")
+        df = self._retry_api_call(
+            self.pro.index_basic,
+            market=market or ''
+        )
+
+        if df is None or df.empty:
+            print(f"  ⚠️  无指数基本信息")
+            # 即使 API 返回空，也检查数据库中是否已有数据
+            with self.engine.connect() as conn:
+                query = "SELECT COUNT(*) FROM index_names"
+                if market == 'SSE':
+                    query += " WHERE ts_code LIKE '%.SH'"
+                elif market == 'SZSE':
+                    query += " WHERE ts_code LIKE '%.SZ'"
+                result = conn.execute(text(query))
+                count = result.fetchone()[0]
+                return count
+
+        # 准备数据
+        df = df.copy()
+        df['updated_at'] = datetime.now().isoformat()
+
+        # 尝试保存到数据库
+        try:
+            df.to_sql('index_names', self.engine, if_exists='append', index=False, method='multi')
+            print(f"  ✅ 已保存 {len(df)} 条指数基本信息")
+            return len(df)
+        except Exception as e:
+            error_msg = str(e)
+            if "UNIQUE constraint" in error_msg or "duplicate" in error_msg.lower():
+                # 数据已存在，不需要更新（基本信息通常不变）
+                # 直接返回数据库中的数量
+                with self.engine.connect() as conn:
+                    query = "SELECT COUNT(*) FROM index_names"
+                    if market == 'SSE':
+                        query += " WHERE ts_code LIKE '%.SH'"
+                    elif market == 'SZSE':
+                        query += " WHERE ts_code LIKE '%.SZ'"
+                    result = conn.execute(text(query))
+                    count = result.fetchone()[0]
+                print(f"  ℹ️  指数基本信息已存在，数据库中共有 {count} 条")
+                return count
+            else:
+                print(f"  ❌ 保存指数基本信息失败: {e}")
+                return 0
+
+    def save_index_daily(self, ts_code: str, start_date: str = "20200101", end_date: str = None):
+        """
+        保存指数日线数据
+
+        Args:
+            ts_code: 指数代码（如 000001.SH）
+            start_date: 开始日期，格式 YYYYMMDD
+            end_date: 结束日期，格式 YYYYMMDD，None则使用今天
+
+        Returns:
+            保存的记录数，失败返回 0
+        """
+        try:
+            # 如果未指定结束日期，使用当前日期
+            if end_date is None:
+                end_date = datetime.today().strftime("%Y%m%d")
+
+            # 标准化代码
+            if '.' not in ts_code:
+                raise ValueError(f"指数代码格式错误: {ts_code}，应为 000001.SH 格式")
+
+            # 获取指数日线数据
+            print(f"  📥 获取指数日线数据 {ts_code} ({start_date} - {end_date})...")
+            df = self._retry_api_call(
+                self.pro.index_daily,
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if df is None or df.empty:
+                print(f"  ⚠️  {ts_code} 无指数日线数据")
+                return 0
+
+            # 重命名列以匹配 bars 表结构
+            df = df.rename(columns={
+                "trade_date": "datetime",
+                "vol": "volume"
+            })
+
+            # 添加元数据
+            # 指数使用完整的 ts_code 作为 symbol（如 000001.SH），避免与股票代码冲突
+            df["symbol"] = ts_code
+            df["exchange"] = self._detect_exchange(ts_code)
+            df["interval"] = "1d"
+            df["datetime"] = pd.to_datetime(df["datetime"]).dt.strftime("%Y-%m-%d")
+
+            # 指数数据没有的股票字段，设为 None
+            stock_only_fields = [
+                'open_qfq', 'high_qfq', 'low_qfq', 'close_qfq',  # 前复权价格
+                'turnover',  # 换手率
+                # 估值指标
+                'pe', 'pe_ttm', 'pb', 'ps', 'ps_ttm',
+                # 市值指标
+                'total_mv', 'circ_mv',
+                # 股本结构
+                'total_share', 'float_share', 'free_share',
+                # 流动性指标
+                'volume_ratio', 'turnover_rate_f',
+                # 分红指标
+                'dv_ratio', 'dv_ttm'
+            ]
+            for field in stock_only_fields:
+                df[field] = None
+
+            # 选择要保存的列
+            columns = ["symbol", "exchange", "interval", "datetime",
+                      "open", "high", "low", "close",
+                      "open_qfq", "high_qfq", "low_qfq", "close_qfq",
+                      "pre_close", "change", "pct_chg",
+                      "volume", "turnover", "amount",
+                      # Daily basic 指标
+                      "turnover_rate_f", "volume_ratio",
+                      "pe", "pe_ttm", "pb", "ps", "ps_ttm",
+                      "total_mv", "circ_mv",
+                      "total_share", "float_share", "free_share",
+                      "dv_ratio", "dv_ttm"]
+
+            # 确保所有列都存在
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = None
+
+            # 保存到数据库
+            df[columns].to_sql("bars", self.engine, if_exists="append", index=False, method="multi")
+            print(f"  ✅ 已保存 {ts_code} 共 {len(df)} 条记录")
+            return len(df)
+
+        except Exception as e:
+            # 数据库操作失败
+            if "UNIQUE constraint" in str(e) or "duplicate" in str(e).lower():
+                # 数据已存在，跳过
+                print(f"  ⏭️  {ts_code} 指数数据已存在，跳过")
+                return 0
+            else:
+                print(f"  ❌ {ts_code} 指数数据保存失败: {e}")
+                return 0
+
+    def save_all_indices(self, start_date: str = "20240101", end_date: str = None, markets: list = None):
+        """
+        批量下载所有指数数据
+
+        Args:
+            start_date: 开始日期，格式 YYYYMMDD
+            end_date: 结束日期，格式 YYYYMMDD，None则使用今天
+            markets: 市场列表 ['SSE', 'SZSE']，None则表示全部
+
+        Returns:
+            统计信息字典
+        """
+        # 如果未指定结束日期，使用当前日期
+        if end_date is None:
+            end_date = datetime.today().strftime("%Y%m%d")
+
+        # 默认市场
+        if markets is None:
+            markets = ['SSE', 'SZSE']
+
+        # 第一步：获取指数基本信息
+        print("📋 正在获取指数列表...")
+        all_indices = []
+
+        for market in markets:
+            try:
+                count = self.save_index_basic(market=market)
+                if count > 0:
+                    # 从数据库读取指数代码
+                    query = "SELECT ts_code FROM index_names"
+                    if market == 'SSE':
+                        query += " WHERE ts_code LIKE '%.SH'"
+                    elif market == 'SZSE':
+                        query += " WHERE ts_code LIKE '%.SZ'"
+
+                    with self.engine.connect() as conn:
+                        df = pd.read_sql_query(query, conn)
+                        all_indices.extend(df['ts_code'].tolist())
+            except Exception as e:
+                print(f"  ❌ 获取 {market} 指数列表失败: {e}")
+
+        if not all_indices:
+            print("❌ 没有找到指数")
+            return {'total': 0, 'success': 0, 'failed': 0}
+
+        # 去重
+        all_indices = list(set(all_indices))
+        print(f"📋 共 {len(all_indices)} 个指数")
+
+        # 第二步：逐个下载指数行情数据
+        stats = {'total': len(all_indices), 'success': 0, 'failed': 0, 'skipped': 0}
+
+        for i, ts_code in enumerate(all_indices):
+            # 定期显示进度
+            if (i + 1) % 10 == 1 or i == len(all_indices) - 1:
+                print(f"\n{'='*60}")
+                print(f"进度: [{i + 1}/{stats['total']}]")
+                print(f"成功: {stats['success']} | 失败: {stats['failed']} | 跳过: {stats['skipped']}")
+                print(f"{'='*60}")
+
+            try:
+                result = self.save_index_daily(ts_code, start_date, end_date)
+                if result > 0:
+                    stats['success'] += 1
+                elif result == 0:
+                    stats['skipped'] += 1
+                else:
+                    stats['failed'] += 1
+            except Exception as e:
+                print(f"  ❌ {ts_code} 处理失败: {e}")
+                stats['failed'] += 1
+
+        # 输出统计信息
+        print(f"\n{'='*60}")
+        print(f"指数数据下载完成:")
+        print(f"  总计: {stats['total']} 个指数")
+        print(f"  成功: {stats['success']}")
+        print(f"  失败: {stats['failed']}")
+        print(f"  跳过: {stats['skipped']}")
+        print(f"{'='*60}")
+
+        return stats
