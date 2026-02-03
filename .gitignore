@@ -33,3 +33,5 @@ scripts/docker_run.sh
 
 # Checkpoint file locks
 data/checkpoints/*.lock
+.gitignore
+nohup.out
