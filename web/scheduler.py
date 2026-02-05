@@ -67,6 +67,39 @@ def get_scheduler():
     return scheduler
 
 
+def run_scheduled_task(task_type, params):
+    """
+    定时任务执行函数（模块级函数，可被APScheduler序列化）
+
+    Args:
+        task_type: 任务类型 (update_stock_prices/update_financial_reports/update_industry_classification/update_index_data)
+        params: 任务参数字典
+    """
+    try:
+        from web.services.task_creation_service import create_task
+
+        logging.info(f"[ScheduledJob] Executing task: {task_type} with params: {params}")
+
+        # 创建任务
+        result, status_code = create_task({
+            'task_type': task_type,
+            'params': params
+        })
+
+        if status_code != 201:
+            logging.error(f"[ScheduledJob] Task creation failed: {result}")
+            return False
+
+        logging.info(f"[ScheduledJob] Task created successfully: {result.get('task_id')}")
+        return True
+
+    except Exception as e:
+        logging.error(f"[ScheduledJob] Error executing task {task_type}: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return False
+
+
 def add_scheduled_job(job_id, func, cron_expression, func_args=None, func_kwargs=None, name=None):
     """
     Add a scheduled cron job
@@ -80,7 +113,7 @@ def add_scheduled_job(job_id, func, cron_expression, func_args=None, func_kwargs
         name: Human-readable name for the job
 
     Returns:
-        True if job was added successfully
+        job_id if job was added successfully, False otherwise
     """
     global scheduler
 
@@ -99,8 +132,8 @@ def add_scheduled_job(job_id, func, cron_expression, func_args=None, func_kwargs
 
         # Handle string reference to function
         if isinstance(func, str):
-            # String reference format: 'module.submodule:function_name'
-            # Convert to 'module.submodule:function_name' format for APScheduler
+            # String reference format: 'web.scheduler:run_scheduled_task'
+            # APScheduler can import and use this
             func_ref = func
         else:
             func_ref = func
@@ -124,7 +157,7 @@ def add_scheduled_job(job_id, func, cron_expression, func_args=None, func_kwargs
         )
 
         logging.info(f"[Scheduler] Added job: {job_id} with cron: {cron_expression}")
-        return True
+        return job_id
 
     except Exception as e:
         logging.error(f"[Scheduler] Error adding job {job_id}: {e}")
@@ -207,36 +240,35 @@ def resume_scheduled_job(job_id):
 
 def get_scheduled_jobs():
     """
-    Get all scheduled jobs with their custom configurations
+    Get all scheduled jobs
 
     Returns:
-        List of job info dictionaries with merged config data
+        List of job info dictionaries
     """
     global scheduler
 
     if scheduler is None:
         return []
 
-    # Import job_configs from scheduled_jobs module
-    try:
-        from web.scheduled_jobs import job_configs
-    except ImportError:
-        job_configs = {}
-
     jobs = []
     for job in scheduler.get_jobs():
+        # Extract task_type from job.id (format: "{task_type}_{name}")
+        # Use last underscore as separator since task_type contains underscores
+        job_id = job.id
+        task_type = None
+        if '_' in job_id:
+            # Split by last underscore to separate task_type from name
+            last_underscore_idx = job_id.rfind('_')
+            task_type = job_id[:last_underscore_idx] if last_underscore_idx > 0 else None
+
         job_info = {
             'id': job.id,
             'name': job.name,
             'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
             'trigger': str(job.trigger),
-            'enabled': not job.next_run_time == None  # Jobs are enabled if they have a next run time
+            'enabled': not job.next_run_time == None,
+            'task_type': task_type  # Extract task_type from job_id
         }
-
-        # Merge custom config if available
-        if job.id in job_configs:
-            job_info.update(job_configs[job.id])
-
         jobs.append(job_info)
 
     return jobs
@@ -244,7 +276,7 @@ def get_scheduled_jobs():
 
 def get_job_info(job_id):
     """
-    Get info about a specific job with custom configuration
+    Get info about a specific job
 
     Args:
         job_id: Job identifier
@@ -257,28 +289,16 @@ def get_job_info(job_id):
     if scheduler is None:
         return None
 
-    # Import job_configs from scheduled_jobs module
-    try:
-        from web.scheduled_jobs import job_configs
-    except ImportError:
-        job_configs = {}
-
     try:
         job = scheduler.get_job(job_id)
         if job:
-            job_info = {
+            return {
                 'id': job.id,
                 'name': job.name,
                 'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
                 'trigger': str(job.trigger),
                 'enabled': True
             }
-
-            # Merge custom config if available
-            if job_id in job_configs:
-                job_info.update(job_configs[job_id])
-
-            return job_info
     except Exception as e:
         print(f"[Scheduler] Error getting job {job_id}: {e}")
 

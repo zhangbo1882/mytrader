@@ -1789,3 +1789,411 @@ class TushareDB(BaseStockDB):
         print(f"{'='*60}")
 
         return stats
+
+    # ==================== 申万行业分类相关方法 ====================
+
+    def save_sw_classify(self, src: str = 'SW2021', level: str = None,
+                         update_timestamp: bool = True) -> int:
+        """
+        获取并保存申万行业分类数据
+
+        Args:
+            src: 行业分类来源，SW2014=申万2014版本，SW2021=申万2021版本（默认）
+            level: 行业分级，L1=一级，L2=二级，L3=三级，None=全部
+            update_timestamp: 是否更新时间戳，False时保留旧时间戳用于增量更新
+
+        Returns:
+            保存的记录数
+        """
+        try:
+            print(f"  📥 获取申万行业分类数据 (src={src}, level={level or '全部'})...")
+
+            # 获取数据
+            params = {'src': src}
+            if level:
+                params['level'] = level
+
+            df = self._retry_api_call(
+                self.pro.index_classify,
+                **params
+            )
+
+            if df is None or df.empty:
+                print(f"  ⚠️  无申万行业分类数据")
+                return 0
+
+            # 准备数据
+            df = df.copy()
+            df['src'] = src
+            df['updated_at'] = datetime.now().isoformat()
+
+            # 选择列并保存
+            columns = ['index_code', 'industry_name', 'parent_code', 'level', 'industry_code', 'is_pub', 'src', 'updated_at']
+
+            # 确保所有列都存在
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = None
+
+            df = df[columns]
+
+            if update_timestamp:
+                # 删除旧数据并重新插入
+                delete_sql = "DELETE FROM sw_classify WHERE src = :src"
+                with self.engine.connect() as conn:
+                    conn.execute(text(delete_sql), {"src": src})
+                    conn.commit()
+
+                df.to_sql('sw_classify', self.engine, if_exists='append', index=False, method='multi')
+            else:
+                # 使用 upsert 保留旧时间戳
+                upsert_sql = """
+                INSERT INTO sw_classify (index_code, industry_name, parent_code, level, industry_code, is_pub, src, updated_at)
+                VALUES (:index_code, :industry_name, :parent_code, :level, :industry_code, :is_pub, :src, :updated_at)
+                ON CONFLICT(index_code) DO UPDATE SET
+                    industry_name = :industry_name,
+                    parent_code = :parent_code,
+                    level = :level,
+                    industry_code = :industry_code,
+                    is_pub = :is_pub,
+                    src = :src
+                """
+
+                with self.engine.connect() as conn:
+                    for _, row in df.iterrows():
+                        conn.execute(text(upsert_sql), {
+                            "index_code": row['index_code'],
+                            "industry_name": row['industry_name'],
+                            "parent_code": row['parent_code'],
+                            "level": row['level'],
+                            "industry_code": row['industry_code'],
+                            "is_pub": row['is_pub'],
+                            "src": row['src'],
+                            "updated_at": row['updated_at']
+                        })
+                    conn.commit()
+
+            print(f"  ✅ 已保存申万行业分类 {len(df)} 条记录")
+            return len(df)
+
+        except Exception as e:
+            error_msg = str(e)
+            if "无权限" in error_msg or "权限" in error_msg or "403" in error_msg:
+                print(f"  ⚠️  无权限获取申万行业分类数据（需要2000+积分）")
+            else:
+                print(f"  ❌ 保存申万行业分类失败: {e}")
+            return 0
+
+    def save_sw_members(self, index_code: str = None, ts_code: str = None,
+                       is_new: str = 'Y', force_update: bool = False) -> int:
+        """
+        获取并保存申万行业成分股数据
+
+        Args:
+            index_code: 行业指数代码，None表示获取所有
+            ts_code: 股票代码，与index_code二选一
+            is_new: 是否最新成分，Y=是（默认），N=否
+            force_update: 是否强制更新（删除旧数据）
+
+        Returns:
+            保存的记录数
+        """
+        try:
+            # 构建查询参数
+            params = {'is_new': is_new}
+            if index_code:
+                params['index_code'] = index_code
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            desc = f"index_code={index_code}" if index_code else f"ts_code={ts_code}" if ts_code else "全部"
+            print(f"  📥 获取申万行业成分股数据 ({desc}, is_new={is_new})...")
+
+            # 获取数据
+            df = self._retry_api_call(
+                self.pro.index_member_all,
+                **params
+            )
+
+            if df is None or df.empty:
+                print(f"  ⚠️  无申万行业成分股数据")
+                return 0
+
+            # 如果指定了 index_code，删除旧数据
+            if index_code and force_update:
+                delete_sql = "DELETE FROM sw_members WHERE index_code = :index_code"
+                with self.engine.connect() as conn:
+                    conn.execute(text(delete_sql), {"index_code": index_code})
+                    conn.commit()
+
+            # 准备数据
+            df = df.copy()
+            df['is_new'] = is_new
+
+            # API 返回的数据中没有 index_code 字段，需要手动添加
+            if index_code and 'index_code' not in df.columns:
+                df['index_code'] = index_code
+
+            # 选择列
+            columns = ['index_code', 'ts_code', 'name', 'in_date', 'out_date', 'is_new']
+
+            # 确保所有列都存在
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = None
+
+            df = df[columns]
+
+            # 保存到数据库 - 使用 upsert 避免重复插入
+            upsert_sql = """
+            INSERT INTO sw_members (index_code, ts_code, name, in_date, out_date, is_new)
+            VALUES (:index_code, :ts_code, :name, :in_date, :out_date, :is_new)
+            ON CONFLICT(index_code, ts_code) DO UPDATE SET
+                name = :name,
+                in_date = :in_date,
+                out_date = :out_date,
+                is_new = :is_new
+            """
+
+            with self.engine.connect() as conn:
+                for _, row in df.iterrows():
+                    conn.execute(text(upsert_sql), {
+                        "index_code": row['index_code'],
+                        "ts_code": row['ts_code'],
+                        "name": row['name'],
+                        "in_date": row['in_date'],
+                        "out_date": row['out_date'],
+                        "is_new": row['is_new']
+                    })
+                conn.commit()
+
+            print(f"  ✅ 已保存申万行业成分股 {len(df)} 条记录")
+            return len(df)
+
+        except Exception as e:
+            error_msg = str(e)
+            if "无权限" in error_msg or "权限" in error_msg or "403" in error_msg:
+                print(f"  ⚠️  无权限获取申万行业成分股数据（需要2000+积分）")
+            else:
+                print(f"  ❌ 保存申万行业成分股失败: {e}")
+            return 0
+
+    def get_outdated_indices(self, src: str = 'SW2021', days: int = 7) -> list:
+        """
+        获取需要更新的行业代码列表（根据 updated_at 判断）
+
+        Args:
+            src: 行业分类来源
+            days: 超过多少天未更新则需要更新
+
+        Returns:
+            需要更新的行业代码列表
+        """
+        import pandas as pd
+        cutoff_date = (datetime.now() - pd.Timedelta(days=days)).isoformat()
+
+        query = """
+        SELECT index_code FROM sw_classify
+        WHERE src = :src
+        AND (updated_at IS NULL OR updated_at < :cutoff_date)
+        """
+
+        with self.engine.connect() as conn:
+            df = pd.read_sql_query(query, conn, params={"src": src, "cutoff_date": cutoff_date})
+
+        return df['index_code'].tolist() if not df.empty else []
+
+    def update_indices_timestamp(self, index_codes: list, src: str = 'SW2021'):
+        """
+        更新指定行业的 updated_at 时间戳
+
+        Args:
+            index_codes: 行业代码列表
+            src: 行业分类来源
+        """
+        if not index_codes:
+            return
+
+        now = datetime.now().isoformat()
+        placeholders = ','.join([f':code{i}' for i in range(len(index_codes))])
+        params = {f'code{i}': code for i, code in enumerate(index_codes)}
+        params['src'] = src
+        params['now'] = now
+
+        update_sql = f"""
+        UPDATE sw_classify
+        SET updated_at = :now
+        WHERE index_code IN ({placeholders})
+        AND src = :src
+        """
+
+        with self.engine.connect() as conn:
+            conn.execute(text(update_sql), params)
+            conn.commit()
+
+    def save_all_sw_industry(self, src: str = 'SW2021', is_new: str = 'Y',
+                            force_update: bool = False, incremental: bool = False,
+                            incremental_days: int = 7) -> dict:
+        """
+        获取并保存所有申万行业分类和成分股数据
+
+        Args:
+            src: 行业分类来源，SW2014=申万2014版本，SW2021=申万2021版本（默认）
+            is_new: 是否最新成分，Y=是（默认），N=否
+            force_update: 是否强制更新
+            incremental: 是否增量更新（只更新超过指定天数的行业）
+            incremental_days: 增量更新时，超过多少天未更新则需要更新
+
+        Returns:
+            统计信息字典
+        """
+        print(f"\n{'='*60}")
+        if incremental:
+            print(f"开始增量更新申万行业数据 (src={src}, days={incremental_days})")
+        else:
+            print(f"开始获取申万行业数据 (src={src})")
+        print(f"{'='*60}")
+
+        stats = {
+            'classify_count': 0,
+            'members_count': 0,
+            'total_indices': 0,
+            'skipped_indices': 0,
+            'failed_indices': []
+        }
+
+        # 1. 获取行业分类（增量模式下不更新时间戳）
+        print("\n1. 获取申万行业分类...")
+        update_ts = not incremental  # 增量模式下不更新时间戳
+        classify_count = self.save_sw_classify(src=src, update_timestamp=update_ts)
+        stats['classify_count'] = classify_count
+
+        if classify_count == 0:
+            print("❌ 获取行业分类失败")
+            return stats
+
+        # 2. 获取需要更新的行业代码
+        if incremental:
+            outdated_indices = self.get_outdated_indices(src=src, days=incremental_days)
+            if not outdated_indices:
+                print(f"\n✅ 所有行业数据都是最新的（{incremental_days}天内已更新）")
+                return stats
+
+            all_indices = outdated_indices
+            print(f"\n2. 增量更新行业成分股（{len(all_indices)}/{classify_count} 个行业需要更新）...")
+        else:
+            query = "SELECT index_code FROM sw_classify WHERE src = :src"
+            with self.engine.connect() as conn:
+                df_indices = pd.read_sql_query(query, conn, params={"src": src})
+
+            if df_indices.empty:
+                print("❌ 没有找到行业分类")
+                return stats
+
+            all_indices = df_indices['index_code'].tolist()
+            print(f"\n2. 获取行业成分股（共 {len(all_indices)} 个行业）...")
+
+        stats['total_indices'] = len(all_indices)
+
+        # 3. 遍历每个行业获取成分股
+        updated_indices = []  # 记录成功更新的行业
+        for i, index_code in enumerate(all_indices):
+            # 定期显示进度
+            if (i + 1) % 20 == 1 or i == len(all_indices) - 1:
+                print(f"\n{'='*60}")
+                print(f"进度: [{i + 1}/{stats['total_indices']}]")
+                print(f"成功: {stats['members_count']} | 失败: {len(stats['failed_indices'])}")
+                print(f"{'='*60}")
+
+            try:
+                count = self.save_sw_members(index_code=index_code, is_new=is_new, force_update=force_update)
+                if count > 0:
+                    stats['members_count'] += count
+                    updated_indices.append(index_code)
+                else:
+                    stats['failed_indices'].append(index_code)
+
+            except Exception as e:
+                print(f"  ❌ {index_code} 处理失败: {e}")
+                stats['failed_indices'].append(index_code)
+
+        # 4. 更新成功更新的行业的时间戳
+        if incremental and updated_indices:
+            self.update_indices_timestamp(updated_indices, src=src)
+
+        # 5. 输出统计信息
+        print(f"\n{'='*60}")
+        if incremental:
+            print(f"申万行业数据增量更新完成:")
+            print(f"  总行业数: {classify_count} 个")
+            print(f"  需要更新: {stats['total_indices']} 个")
+            print(f"  跳过: {classify_count - stats['total_indices']} 个（已最新）")
+        else:
+            print(f"申万行业数据获取完成:")
+            print(f"  行业分类: {stats['classify_count']} 条")
+        print(f"  成分股: {stats['members_count']} 条")
+        if stats['failed_indices']:
+            print(f"  失败行业: {len(stats['failed_indices'])} 个")
+        print(f"{'='*60}")
+
+        return stats
+
+    def get_sw_industry_members(self, index_code: str) -> pd.DataFrame:
+        """
+        从数据库获取指定申万行业的成分股
+
+        Args:
+            index_code: 行业指数代码
+
+        Returns:
+            成分股DataFrame
+        """
+        query = """
+        SELECT m.index_code, c.industry_name, c.level, m.ts_code, m.name, m.in_date, m.out_date, m.is_new
+        FROM sw_members m
+        JOIN sw_classify c ON m.index_code = c.index_code
+        WHERE m.index_code = :index_code
+        ORDER BY m.ts_code
+        """
+        return pd.read_sql_query(query, self.engine, params={"index_code": index_code})
+
+    def get_stock_sw_industry(self, ts_code: str) -> pd.DataFrame:
+        """
+        从数据库获取指定股票所属的申万行业
+
+        Args:
+            ts_code: 股票代码（如 000001.SZ）
+
+        Returns:
+            行业信息DataFrame
+        """
+        query = """
+        SELECT m.index_code, c.industry_name, c.level, c.parent_code, m.ts_code, m.name, m.in_date, m.out_date, m.is_new
+        FROM sw_members m
+        JOIN sw_classify c ON m.index_code = c.index_code
+        WHERE m.ts_code = :ts_code AND m.is_new = 'Y'
+        ORDER BY c.level
+        """
+        return pd.read_sql_query(query, self.engine, params={"ts_code": ts_code})
+
+    def get_sw_classify(self, src: str = 'SW2021', level: str = None) -> pd.DataFrame:
+        """
+        从数据库获取申万行业分类
+
+        Args:
+            src: 行业分类来源
+            level: 行业级别，None=全部
+
+        Returns:
+            行业分类DataFrame
+        """
+        query = "SELECT * FROM sw_classify WHERE src = :src"
+        params = {"src": src}
+
+        if level:
+            query += " AND level = :level"
+            params["level"] = level
+
+        query += " ORDER BY industry_code"
+
+        return pd.read_sql_query(query, self.engine, params=params)

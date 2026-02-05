@@ -157,8 +157,10 @@ class TasksHistory {
 
     getTypeLabel(type) {
         const labels = {
-            'update_favorites': '股票更新',
-            'update_all_stocks': '股票更新'
+            'update_stock_prices': '股票价格更新',
+            'update_financial_reports': '财务报表更新',
+            'update_industry_classification': '申万行业分类更新',
+            'update_index_data': '指数数据更新'
         };
         return labels[type] || type;
     }

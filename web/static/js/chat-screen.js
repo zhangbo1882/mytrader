@@ -577,6 +577,26 @@
     function displayResults(symbols) {
         if (!elements.messages) return;
 
+        /**
+         * 获取板块对应的样式类
+         */
+        function getBoardClass(board) {
+            switch(board) {
+                case '科创板':
+                    return 'bg-danger';  // 红色
+                case '创业板':
+                    return 'bg-warning text-dark';  // 黄色
+                case '上海主板':
+                    return 'bg-primary';  // 蓝色
+                case '深圳主板':
+                    return 'bg-info text-dark';  // 青色
+                case '北交所':
+                    return 'bg-secondary';  // 灰色
+                default:
+                    return 'bg-light text-dark';  // 浅灰色
+            }
+        }
+
         // 在对话界面中添加结果消息
         const msgDiv = document.createElement('div');
         msgDiv.className = 'message assistant';
@@ -624,6 +644,7 @@
                 <tr>
                     <th>代码</th>
                     <th>名称</th>
+                    <th>板块</th>
                     <th>最新日期</th>
                     <th>最新收盘价</th>
                     <th>平均换手率(%)</th>
@@ -634,10 +655,14 @@
         `;
 
         symbols.forEach(symbol => {
+            // 板块标签样式
+            const boardClass = getBoardClass(symbol.board);
+
             tableHtml += `
                 <tr>
                     <td><strong>${symbol.code}</strong></td>
                     <td>${symbol.name}</td>
+                    <td><span class="badge ${boardClass}">${symbol.board || '未知'}</span></td>
                     <td>${symbol.latest_date}</td>
                     <td>${symbol.latest_close}</td>
                     <td>${symbol.avg_turnover}</td>

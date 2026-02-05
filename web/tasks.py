@@ -18,13 +18,16 @@ class TaskManager:
     Tasks persist across application restarts.
     """
 
-    def __init__(self, db_path=None, checkpoint_dir=None):
+    def __init__(self, db_path=None, checkpoint_dir=None, init_db=True):
         """
         Initialize TaskManager with database path
 
         Args:
             db_path: Path to SQLite database (default: ./data/tasks.db)
             checkpoint_dir: Path to checkpoint files directory
+            init_db: Whether to initialize the database schema.
+                     Should be False for web service, True for worker.
+                     (default: True)
         """
         self.db_path = db_path or Path("./data/tasks.db")
         self.lock = threading.RLock()  # 可重入锁，防止死锁
@@ -39,73 +42,143 @@ class TaskManager:
         # Ensure parent directory exists
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Initialize database schema
-        self._init_db()
+        # Initialize database schema (only if requested)
+        # Web service should NOT init_db to avoid lock conflicts with worker
+        if init_db:
+            self._init_db()
+
+    def _get_db_connection(self, timeout=30):
+        """
+        Create a database connection with proper settings for concurrency.
+
+        Args:
+            timeout: Busy timeout in seconds (default: 30)
+
+        Returns:
+            SQLite connection object
+        """
+        conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=timeout)
+        # Set longer busy timeout for this connection
+        conn.execute('PRAGMA busy_timeout=30000')  # 30 seconds
+        return conn
 
     def _init_db(self):
         """Create task tables if they don't exist"""
-        conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        cursor = conn.cursor()
+        import time
+        max_retries = 5
+        retry_delay = 0.5
 
-        # Create tasks table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS tasks (
-                task_id TEXT PRIMARY KEY,
-                task_type TEXT NOT NULL,
-                status TEXT NOT NULL,
-                progress INTEGER DEFAULT 0,
-                message TEXT,
-                result TEXT,
-                error TEXT,
-                current_stock_index INTEGER DEFAULT 0,
-                total_stocks INTEGER DEFAULT 0,
-                stats TEXT,
-                params TEXT,
-                metadata TEXT,
-                checkpoint_path TEXT,
-                stop_requested INTEGER DEFAULT 0,
-                pause_requested INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                completed_at TIMESTAMP
-            )
-        ''')
+        for attempt in range(max_retries):
+            try:
+                conn = self._get_db_connection(timeout=30)
+                cursor = conn.cursor()
 
-        # Create checkpoints table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS task_checkpoints (
-                task_id TEXT PRIMARY KEY,
-                current_index INTEGER NOT NULL,
-                stats TEXT,
-                stage TEXT DEFAULT 'stock',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (task_id) REFERENCES tasks(task_id)
-            )
-        ''')
+                # Create tasks table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        task_id TEXT PRIMARY KEY,
+                        task_type TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        progress INTEGER DEFAULT 0,
+                        message TEXT,
+                        result TEXT,
+                        error TEXT,
+                        current_stock_index INTEGER DEFAULT 0,
+                        total_stocks INTEGER DEFAULT 0,
+                        stats TEXT,
+                        params TEXT,
+                        metadata TEXT,
+                        checkpoint_path TEXT,
+                        stop_requested INTEGER DEFAULT 0,
+                        pause_requested INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        completed_at TIMESTAMP
+                    )
+                ''')
 
-        # Add stage column to existing table if not exists (for backward compatibility)
-        try:
-            cursor.execute('ALTER TABLE task_checkpoints ADD COLUMN stage TEXT DEFAULT "stock"')
-        except Exception:
-            pass  # Column already exists
+                # Create checkpoints table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS task_checkpoints (
+                        task_id TEXT PRIMARY KEY,
+                        current_index INTEGER NOT NULL,
+                        stats TEXT,
+                        stage TEXT DEFAULT 'stock',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+                    )
+                ''')
 
-        # Create indexes for performance
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type)')
+                # Add stage column to existing table if not exists (for backward compatibility)
+                try:
+                    cursor.execute('ALTER TABLE task_checkpoints ADD COLUMN stage TEXT DEFAULT "stock"')
+                except Exception:
+                    pass  # Column already exists
 
-        conn.commit()
-        conn.close()
+                # Create indexes for performance
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(task_type)')
+
+                # Enable WAL mode for better concurrency (allows multiple readers + one writer)
+                cursor.execute('PRAGMA journal_mode=WAL')
+                cursor.execute('PRAGMA synchronous=NORMAL')  # Faster writes with good safety
+
+                conn.commit()
+                conn.close()
+                return
+
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e).lower() and attempt < max_retries - 1:
+                    print(f"[TaskManager._init_db] 数据库锁定，重试 {attempt + 1}/{max_retries}...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 1.5
+                else:
+                    print(f"[TaskManager._init_db] 初始化数据库失败: {e}")
+                    raise
+            except Exception as e:
+                print(f"[TaskManager._init_db] 初始化数据库时发生错误: {e}")
+                raise
 
     def is_stop_requested(self, task_id):
-        """Check if task stop has been requested (lock-free)"""
+        """Check if task stop has been requested (lock-free with DB fallback)"""
+        # Check in-memory set first (fast)
         with self._memory_lock:
-            return task_id in self._stop_requested
+            if task_id in self._stop_requested:
+                return True
+
+        # Also check database (for worker process with separate memory)
+        try:
+            task = self.get_task(task_id)
+            if task and task.get('stop_requested', False):
+                # Also update memory set for faster future checks
+                with self._memory_lock:
+                    self._stop_requested.add(task_id)
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def is_pause_requested(self, task_id):
-        """Check if task pause has been requested (lock-free)"""
-        with self._memory_lock:
-            return task_id in self._pause_requested
+        """Check if task pause has been requested (lock-free with DB fallback)"""
+        # Also check database (for worker process with separate memory)
+        try:
+            task = self.get_task(task_id)
+            if task:
+                db_pause_requested = task.get('pause_requested', False)
+                # Sync in-memory set with database state
+                with self._memory_lock:
+                    if db_pause_requested:
+                        self._pause_requested.add(task_id)
+                    else:
+                        self._pause_requested.discard(task_id)
+                if db_pause_requested:
+                    return True
+        except Exception:
+            pass
+
+        return False
 
     def request_stop(self, task_id):
         """Request task to stop (lock-free, also updates DB directly)"""
@@ -209,7 +282,7 @@ class TaskManager:
         创建新任务并保存到数据库
 
         Args:
-            task_type: 任务类型（如 'update_favorites'）
+            task_type: 任务类型（如 'update_stock_prices'）
             params: 任务参数
             metadata: 可选元数据（如 total_stocks）
 
@@ -217,28 +290,29 @@ class TaskManager:
             task_id: 任务唯一标识符
 
         Raises:
-            TaskExistsError: 如果活动任务已存在
+            TaskExistsError: 如果同类型的活动任务已存在
         """
         # 关键：先获取锁防止竞态条件
         with self.lock:
-            # 检查现有活动任务（原子操作）
+            # 检查现有同类型活动任务（原子操作）
             conn = sqlite3.connect(self.db_path, check_same_thread=False)
             cursor = conn.cursor()
 
-            # 查询活动任务（pending, running, paused）
+            # 查询同类型的活动任务（pending, running, paused）
             cursor.execute('''
                 SELECT task_id, task_type, status, created_at,
                        current_stock_index, total_stocks, progress
                 FROM tasks
-                WHERE status IN ('pending', 'running', 'paused')
+                WHERE task_type = ?
+                  AND status IN ('pending', 'running', 'paused')
                 ORDER BY created_at DESC
                 LIMIT 1
-            ''')
+            ''', (task_type,))
 
             existing_task = cursor.fetchone()
             conn.close()
 
-            # 如果活动任务存在，抛出详细错误
+            # 如果同类型活动任务存在，抛出详细错误
             if existing_task:
                 from web.exceptions import TaskExistsError
 
@@ -259,10 +333,19 @@ class TaskManager:
                     'paused': '已暂停'
                 }.get(status, status)
 
+                # 获取任务类型的中文名称
+                task_type_cn = {
+                    'update_stock_prices': '股价更新',
+                    'update_financial_reports': '财务报表更新',
+                    'update_industry_classification': '行业分类更新',
+                    'update_index_data': '指数数据更新',
+                    'test_handler': '测试任务'
+                }.get(task_type, task_type)
+
                 if status == 'paused':
-                    message = f"无法创建新任务：系统中有任务已暂停（任务ID: {task_dict['task_id'][:8]}...）。请先在「任务历史」页面停止或恢复该任务。"
+                    message = f"无法创建新任务：系统中有{task_type_cn}任务已暂停（任务ID: {task_dict['task_id'][:8]}...）。请先在「任务历史」页面停止或恢复该任务。"
                 else:
-                    message = f"无法创建新任务：系统中有{status_cn}任务（任务ID: {task_dict['task_id'][:8]}...）。请等待完成或停止该任务。"
+                    message = f"无法创建新任务：系统中有{status_cn}的{task_type_cn}任务（任务ID: {task_dict['task_id'][:8]}...）。请等待完成或停止该任务。"
 
                 raise TaskExistsError(
                     message=message,
@@ -274,7 +357,7 @@ class TaskManager:
             checkpoint_path = str(self.checkpoint_dir / f"{task_id}.json")
             created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            conn = self._get_db_connection(timeout=30)
             cursor = conn.cursor()
 
             try:
@@ -614,30 +697,48 @@ class TaskManager:
         Returns:
             int: 清理的任务数量
         """
-        with self.lock:
-            conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            cursor = conn.cursor()
+        import time
+        max_retries = 3
+        retry_delay = 1
 
-            cutoff = (datetime.now() - timedelta(hours=stale_threshold_hours)).strftime('%Y-%m-%d %H:%M:%S')
+        for attempt in range(max_retries):
+            try:
+                with self.lock:
+                    conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=10)
+                    cursor = conn.cursor()
 
-            # 查找陈旧任务
-            cursor.execute('''
-                UPDATE tasks
-                SET status = 'failed',
-                    message = '任务已超时',
-                    completed_at = ?
-                WHERE status IN ('pending', 'running', 'paused')
-                AND created_at < ?
-            ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), cutoff))
+                    cutoff = (datetime.now() - timedelta(hours=stale_threshold_hours)).strftime('%Y-%m-%d %H:%M:%S')
 
-            cleaned_count = cursor.rowcount
-            conn.commit()
-            conn.close()
+                    # 查找陈旧任务
+                    cursor.execute('''
+                        UPDATE tasks
+                        SET status = 'failed',
+                            message = '任务已超时',
+                            completed_at = ?
+                        WHERE status IN ('pending', 'running', 'paused')
+                        AND created_at < ?
+                    ''', (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), cutoff))
 
-            if cleaned_count > 0:
-                print(f"[TaskManager] 清理了 {cleaned_count} 个陈旧任务")
+                    cleaned_count = cursor.rowcount
+                    conn.commit()
+                    conn.close()
 
-            return cleaned_count
+                    if cleaned_count > 0:
+                        print(f"[TaskManager] 清理了 {cleaned_count} 个陈旧任务")
+
+                    return cleaned_count
+
+            except sqlite3.OperationalError as e:
+                if 'database is locked' in str(e).lower() and attempt < max_retries - 1:
+                    print(f"[TaskManager] 数据库锁定，重试 {attempt + 1}/{max_retries}...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    print(f"[TaskManager] 清理陈旧任务失败: {e}")
+                    return 0
+            except Exception as e:
+                print(f"[TaskManager] 清理陈旧任务时发生错误: {e}")
+                return 0
 
     def pause_task(self, task_id):
         """
@@ -666,6 +767,10 @@ class TaskManager:
         Returns:
             bool: True if task was resumed, False otherwise
         """
+        # Clear memory flag first (lock-free, ensures worker sees the change)
+        with self._memory_lock:
+            self._pause_requested.discard(task_id)
+
         with self.lock:
             task = self.get_task(task_id)
             if task and task['status'] == 'paused':
@@ -770,7 +875,9 @@ class TaskManager:
 
             if row:
                 stats_json = row['stats']
-                stage = row.get('stage', 'stock') if 'stage' in row.keys() else 'stock'
+                # Convert row to dict to use .get() method
+                row_dict = dict(row)
+                stage = row_dict.get('stage', 'stock')
                 return {
                     'task_id': row['task_id'],
                     'current_index': row['current_index'],
@@ -825,15 +932,20 @@ class TaskManager:
 task_manager = None
 
 
-def init_task_manager(db_path=None, checkpoint_dir=None):
+def init_task_manager(db_path=None, checkpoint_dir=None, init_db=True):
     """
     Initialize the global task manager
 
     Args:
         db_path: Path to task database (optional)
         checkpoint_dir: Path to checkpoint directory (optional)
+        init_db: Whether to initialize database schema (default: True)
+                 Should be False for web service to avoid lock conflicts
+
+    Returns:
+        TaskManager instance
     """
     global task_manager
     if task_manager is None:
-        task_manager = TaskManager(db_path=db_path, checkpoint_dir=checkpoint_dir)
+        task_manager = TaskManager(db_path=db_path, checkpoint_dir=checkpoint_dir, init_db=init_db)
     return task_manager

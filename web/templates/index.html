@@ -2,6 +2,10 @@
 
 {% block title %}股票查询系统 - {% endblock %}
 
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/boards.css') }}" rel="stylesheet">
+{% endblock %}
+
 {% block body %}
 <!-- Navigation -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -56,6 +60,12 @@
             <button class="nav-link" id="financial-tab" data-bs-toggle="tab"
                     data-bs-target="#financial-pane" type="button" role="tab">
                 <i class="bi bi-file-earmark-text"></i> 财务数据
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="boards-tab" data-bs-toggle="tab"
+                    data-bs-target="#boards-pane" type="button" role="tab">
+                <i class="bi bi-layers"></i> 板块中心
             </button>
         </li>
     </ul>
@@ -555,10 +565,10 @@
                         <div class="col-md-3">
                             <select class="form-select form-select-sm" id="taskTypeFilter">
                                 <option value="">全部类型</option>
-                                <option value="update_favorites">股票更新</option>
-                                <option value="update_all_stocks">股票更新</option>
-                                <option value="update_financial_data">财务数据更新</option>
-                                <option value="update_both">股价+财务更新</option>
+                                <option value="update_stock_prices">股票价格更新</option>
+                                <option value="update_financial_reports">财务报表更新</option>
+                                <option value="update_industry_classification">申万行业分类更新</option>
+                                <option value="update_index_data">指数数据更新</option>
                             </select>
                         </div>
                     </div>
@@ -769,6 +779,62 @@
                 </div>
             </div>
         </div>
+
+        <!-- Tab 7: 板块中心 -->
+        <div class="tab-pane fade" id="boards-pane" role="tabpanel">
+            <!-- 统计卡片 -->
+            <div class="row mb-4" id="boardsStatsRow">
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number stat-total" id="boardTotalBoards">-</div>
+                        <div class="stat-label">总板块数</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number stat-success" id="boardTotalStocks">-</div>
+                        <div class="stat-label">总成分股数</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number" id="boardAvgStocks">-</div>
+                        <div class="stat-label">平均成分股</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 搜索和筛选 -->
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="input-group">
+                        <span class="input-group-text">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input type="text" class="form-control" id="boardSearchInput"
+                               placeholder="搜索板块名称或代码...">
+                    </div>
+                </div>
+                <div class="col-md-6 text-end">
+                    <button class="btn btn-outline-primary" id="collapseAllBoardsBtn">
+                        <i class="bi bi-arrows-collapse"></i> 全部收起
+                    </button>
+                    <button class="btn btn-outline-primary" id="expandAllBoardsBtn">
+                        <i class="bi bi-arrows-expand"></i> 全部展开
+                    </button>
+                </div>
+            </div>
+
+            <!-- 板块列表 -->
+            <div class="row" id="boardsContainer">
+                <div class="col-12 text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                    <p class="mt-2 text-muted">正在加载板块数据...</p>
+                </div>
+            </div>
+        </div>
     </div>
     <!-- End Tab内容区域 -->
 
@@ -798,6 +864,7 @@
                         <tr>
                             <th>股票代码</th>
                             <th>股票名称</th>
+                            <th>板块</th>
                             <th>日期</th>
                             <th>开盘价</th>
                             <th>最高价</th>
@@ -1094,4 +1161,5 @@
 <script src="{{ url_for('static', filename='js/financial-update-manager.js') }}"></script>
 <script src="{{ url_for('static', filename='js/stock-update-manager.js') }}"></script>
 <script src="{{ url_for('static', filename='js/tasks-history.js') }}"></script>
+<script src="{{ url_for('static', filename='js/boards-tab.js') }}"></script>
 {% endblock %}

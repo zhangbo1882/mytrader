@@ -13,4 +13,10 @@ Core workflow:
 3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
 4. Re-snapshot after page changes
 
+## Test
+You must run the browse automation after you complete the implementation.
+
+## Doc
+Do not create extras document except the README.
+
 

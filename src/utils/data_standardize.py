@@ -162,6 +162,34 @@ def _detect_exchange(code: str) -> str:
         return 'UNKNOWN'
 
 
+def detect_board(code: str) -> str:
+    """
+    根据股票代码判断板块
+
+    Args:
+        code: 股票代码
+
+    Returns:
+        板块名称：'上海主板', '科创板', '深圳主板', '创业板', '北交所', '未知'
+    """
+    code = str(code).strip().upper()
+
+    if code.startswith(('600', '601', '603', '604', '605')):
+        return '上海主板'
+    elif code.startswith(('688', '689')):
+        return '科创板'
+    elif code.startswith(('000', '001')):
+        return '深圳主板'
+    elif code.startswith(('002', '003')):
+        return '中小板'  # 已合并到深圳主板
+    elif code.startswith(('300', '301')):
+        return '创业板'
+    elif code.startswith(('8', '4')):
+        return '北交所'
+    else:
+        return '未知'
+
+
 def merge_data_sources(akshare_df: pd.DataFrame, tushare_df: pd.DataFrame) -> pd.DataFrame:
     """
     合并两个数据源的数据，优先使用 AKShare，缺失数据用 Tushare 填充

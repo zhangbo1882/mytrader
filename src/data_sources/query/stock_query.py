@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from .base_query import BaseQuery
+from src.utils.data_standardize import detect_board
 
 
 class StockQuery(BaseQuery):
@@ -539,5 +540,15 @@ class StockQuery(BaseQuery):
                     'required_trading_days': int(days * 0.8)  # 允许20%停牌
                 }
             )
+
+        # 添加板块信息
+        if not df.empty:
+            df['board'] = df['symbol'].apply(detect_board)
+            # 调整列顺序，将板块放在代码和名称之后
+            cols = list(df.columns)
+            cols.remove('board')
+            board_idx = cols.index('name') + 1
+            cols.insert(board_idx, 'board')
+            df = df[cols]
 
         return df

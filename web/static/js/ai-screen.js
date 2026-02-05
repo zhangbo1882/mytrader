@@ -1,5 +1,5 @@
 /**
- * AI Stock Screening Module
+ * AI Stock Screening Module with WebSocket
  * Handles natural language query parsing and parameter extraction
  */
 
@@ -18,16 +18,78 @@
     // State
     let aiModal = null;
     let extractedParams = null;
+    let socket = null;
+    let socketConnected = false;
+    let chatHistory = [];
 
     /**
      * Initialize AI screening functionality
      */
     function initAIScreen() {
+        // Initialize WebSocket connection
+        initWebSocket();
+
         // Wait for DOM to be ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', setupAIScreen);
         } else {
             setupAIScreen();
+        }
+    }
+
+    /**
+     * Initialize WebSocket connection
+     */
+    function initWebSocket() {
+        try {
+            socket = io();
+
+            socket.on('connect', function() {
+                console.log('[WebSocket] AI Screen connected');
+                socketConnected = true;
+            });
+
+            socket.on('disconnect', function() {
+                console.log('[WebSocket] AI Screen disconnected');
+                socketConnected = false;
+            });
+
+            socket.on('ai_screen_status', function(data) {
+                console.log('[WebSocket] Status:', data);
+            });
+
+            socket.on('ai_screen_progress', function(data) {
+                updateProgress(data.message);
+            });
+
+            socket.on('ai_screen_result', function(data) {
+                if (data.success) {
+                    extractedParams = data.params;
+                    displayExtractedParams(data.params, data.query);
+                } else {
+                    showError(data.error || '未能提取筛选参数');
+                }
+            });
+
+            socket.on('ai_screen_chat_result', function(data) {
+                hideThinking();
+                if (data.response) {
+                    displayChatResponse(data.response);
+                }
+                if (data.params) {
+                    extractedParams = data.params;
+                    displayExtractedParams(data.params);
+                }
+            });
+
+            socket.on('ai_screen_error', function(data) {
+                hideThinking();
+                showError(data.error || '处理失败');
+            });
+
+        } catch (error) {
+            console.error('[WebSocket] Initialization failed:', error);
+            socketConnected = false;
         }
     }
 
@@ -120,6 +182,11 @@
                 textarea.focus();
             }
         }, 500);
+
+        // Check WebSocket connection
+        if (!socketConnected) {
+            updateProgress('正在连接 AI 服务...');
+        }
     }
 
     /**
@@ -134,45 +201,83 @@
             return;
         }
 
+        if (!socketConnected || !socket) {
+            showError('AI 服务未连接，请刷新页面重试');
+            return;
+        }
+
         // Show thinking state
         showThinking();
+        updateProgress('正在分析查询...');
 
-        // Make API call
-        fetch('/api/stock/ai-screen', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ query: query })
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => {
-                    throw new Error(err.error || '处理失败');
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            hideThinking();
+        // Add to chat history
+        chatHistory.push({ role: 'user', content: query });
 
-            if (data.success && data.params) {
-                extractedParams = data.params;
-                displayExtractedParams(data.params, data.query);
-            } else {
-                showError(data.error || '未能提取筛选参数，请尝试更具体的描述');
-            }
-        })
-        .catch(error => {
-            hideThinking();
-            showError('处理失败: ' + error.message);
+        // Send via WebSocket
+        socket.emit('ai_screen_query', { query: query });
+    }
+
+    /**
+     * Submit AI chat query
+     */
+    function submitAIChat() {
+        const textarea = document.getElementById('aiChatInput');
+        const query = textarea ? textarea.value.trim() : '';
+
+        if (!query) {
+            showMessage('请输入消息', 'warning');
+            return;
+        }
+
+        if (!socketConnected || !socket) {
+            showError('AI 服务未连接，请刷新页面重试');
+            return;
+        }
+
+        // Show thinking state
+        showThinking();
+        updateProgress('正在思考...');
+
+        // Add to chat history
+        chatHistory.push({ role: 'user', content: query });
+
+        // Send via WebSocket
+        socket.emit('ai_screen_chat', {
+            query: query,
+            history: chatHistory
         });
+    }
+
+    /**
+     * Update progress message
+     */
+    function updateProgress(message) {
+        const progressDiv = document.getElementById('aiProgressMessage');
+        if (progressDiv) {
+            progressDiv.textContent = message;
+        }
+    }
+
+    /**
+     * Display chat response
+     */
+    function displayChatResponse(response) {
+        const container = document.getElementById('aiChatResponse');
+        if (container) {
+            container.innerHTML = `<div class="ai-chat-bubble">${escapeHtml(response)}</div>`;
+            container.style.display = 'block';
+        }
+
+        // Add to chat history
+        chatHistory.push({ role: 'assistant', content: response });
     }
 
     /**
      * Display extracted parameters
      */
     function displayExtractedParams(params, originalQuery) {
+        hideThinking();
+
         const container = document.getElementById('aiParamsContainer');
         const emptyState = document.getElementById('aiEmptyState');
         const applyBtn = document.getElementById('aiApplyBtn');
@@ -205,7 +310,7 @@
         // Display each parameter
         let hasParams = false;
         for (const [key, value] of Object.entries(params)) {
-            if (value !== null && value !== undefined) {
+            if (value !== null && value !== undefined && key !== 'days' || (key === 'days' && value !== 5)) {
                 hasParams = true;
                 html += `
                     <div class="ai-param-item">
@@ -501,7 +606,9 @@
         if (emptyState) {
             emptyState.style.display = 'none';
         }
-        container.style.display = 'block';
+        if (container) {
+            container.style.display = 'block';
+        }
 
         container.innerHTML = `
             <div class="ai-error-container">
@@ -557,13 +664,20 @@
             paramsContainer.innerHTML = '';
         }
 
+        const chatResponse = document.getElementById('aiChatResponse');
+        if (chatResponse) {
+            chatResponse.style.display = 'none';
+            chatResponse.innerHTML = '';
+        }
+
         const emptyState = document.getElementById('aiEmptyState');
         if (emptyState) {
             emptyState.style.display = 'block';
         }
 
-        // Reset extracted params
+        // Reset extracted params and history
         extractedParams = null;
+        chatHistory = [];
     }
 
     /**

@@ -189,8 +189,8 @@ function querySelectedFavorites() {
 
         // Wait for tab to complete transition, then set values
         setTimeout(function() {
-            // Set default date range (3 months)
-            const dates = calculateDateRange('3M');
+            // Set default date range (1 month)
+            const dates = calculateDateRange('1M');
             $('#startDate').val(dates.start);
             $('#endDate').val(dates.end);
 
@@ -338,20 +338,13 @@ function initDefaultDates() {
     const today = new Date();
     $('#endDate').val(today.toISOString().split('T')[0]);
 
-    // 从API获取数据库中最早的日期
-    $.ajax({
-        url: '/api/stock/min-date',
-        method: 'GET',
-        success: function(response) {
-            $('#startDate').val(response.date);
-        },
-        error: function() {
-            // 如果API调用失败，使用默认的1个月前
-            const oneMonthAgo = new Date();
-            oneMonthAgo.setMonth(today.getMonth() - 1);
-            $('#startDate').val(oneMonthAgo.toISOString().split('T')[0]);
-        }
-    });
+    // 默认使用1个月前的日期
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(today.getMonth() - 1);
+    $('#startDate').val(oneMonthAgo.toISOString().split('T')[0]);
+
+    // 默认复权类型为不复权
+    $('#priceType').val('');
 }
 
 /**
@@ -379,6 +372,80 @@ function initStockSelector() {
         language: 'zh-CN',
         width: '100%'
     });
+}
+
+/**
+ * Handle URL parameter ?stock=CODE for navigation from boards page
+ */
+function handleUrlStockParam() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const stockCode = urlParams.get('stock');
+
+    if (stockCode) {
+        console.log('[URL Param] Found stock code:', stockCode);
+
+        // 立即切换到查询标签页（在 Bootstrap 初始化之前）
+        const queryTabEl = document.querySelector('#query-tab');
+        const boardsTabEl = document.querySelector('#boards-tab');
+
+        if (queryTabEl && boardsTabEl) {
+            // 移除 boards tab 的 active 类，添加到 query tab
+            boardsTabEl.classList.remove('active');
+            queryTabEl.classList.add('active');
+
+            // 同样处理 pane
+            const boardsPane = document.querySelector('#boards-pane');
+            const queryPane = document.querySelector('#query-pane');
+            if (boardsPane && queryPane) {
+                boardsPane.classList.remove('active', 'show');
+                queryPane.classList.add('active', 'show');
+            }
+        }
+
+        // 通过 API 获取股票信息
+        $.ajax({
+            url: '/api/stock/search',
+            method: 'GET',
+            data: { q: stockCode },
+            success: function(data) {
+                // API 返回的是数组 [{code, name, type}]
+                const stocks = Array.isArray(data) ? data : (data.stocks || []);
+
+                if (stocks.length > 0) {
+                    // 查找匹配的股票（优先精确匹配代码）
+                    let stock = stocks.find(s => s.code === stockCode);
+                    if (!stock) {
+                        // 如果没有精确匹配，使用第一个结果
+                        stock = stocks[0];
+                    }
+
+                    console.log('[URL Param] Selected stock:', stock);
+
+                    // 转换为 Select2 格式 {id, text}
+                    const stockId = stock.code;
+                    const stockText = `${stock.name} (${stock.code})`;
+
+                    // 等待 DOM 更新后设置股票值
+                    setTimeout(function() {
+                        // 创建新的 Option 并设置为选中状态
+                        const newOption = new Option(stockText, stockId, true, true);
+                        $('#stockSelect').append(newOption).trigger('change');
+
+                        // 自动执行查询（使用按钮文本选择器）
+                        setTimeout(function() {
+                            // 查找包含"查询"文本的按钮（排除其他tab的查询按钮）
+                            $('button.btn-primary:contains("查询"):not([id])').first().click();
+                        }, 300);
+                    }, 100);
+                } else {
+                    console.warn('[URL Param] No stock found for code:', stockCode);
+                }
+            },
+            error: function() {
+                console.error('[URL Param] Failed to search stock:', stockCode);
+            }
+        });
+    }
 }
 
 /**
@@ -441,6 +508,51 @@ function formatPercent(value) {
         return value.toFixed(2) + '%';
     }
     return value;
+}
+
+/**
+ * Get stock board based on code
+ */
+function getBoard(code) {
+    if (!code) return '未知';
+    const codeStr = String(code).trim();
+
+    if (codeStr.startsWith('688') || codeStr.startsWith('689')) {
+        return '科创板';
+    } else if (codeStr.startsWith('600') || codeStr.startsWith('601') ||
+               codeStr.startsWith('603') || codeStr.startsWith('604') ||
+               codeStr.startsWith('605')) {
+        return '上海主板';
+    } else if (codeStr.startsWith('000') || codeStr.startsWith('001')) {
+        return '深圳主板';
+    } else if (codeStr.startsWith('002') || codeStr.startsWith('003')) {
+        return '中小板';
+    } else if (codeStr.startsWith('300') || codeStr.startsWith('301')) {
+        return '创业板';
+    } else if (codeStr.startsWith('8') || codeStr.startsWith('4')) {
+        return '北交所';
+    }
+    return '未知';
+}
+
+/**
+ * Get board badge class
+ */
+function getBoardClass(board) {
+    switch(board) {
+        case '科创板':
+            return 'bg-danger';
+        case '创业板':
+            return 'bg-warning text-dark';
+        case '上海主板':
+            return 'bg-primary';
+        case '深圳主板':
+            return 'bg-info text-dark';
+        case '北交所':
+            return 'bg-secondary';
+        default:
+            return 'bg-light text-dark';
+    }
 }
 
 /**
@@ -559,6 +671,7 @@ function displayResults(data, symbols, source = 'query') {
             tableData.push({
                 code: symbol,
                 name: getStockName(symbol),
+                board: getBoard(symbol),
                 date: record.datetime,
                 open: record.open,
                 high: record.high,
@@ -583,7 +696,7 @@ function displayResults(data, symbols, source = 'query') {
     dataTableInstance = $('#dataTable').DataTable({
         data: tableData,
         pageLength: 25,
-        order: [[2, 'desc']],
+        order: [[3, 'desc']],  // 按日期降序排序（索引3是date列）
         language: {
             url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/zh.json'
         },
@@ -595,6 +708,13 @@ function displayResults(data, symbols, source = 'query') {
             {
                 data: 'name',
                 className: 'text-nowrap'
+            },
+            {
+                data: 'board',
+                className: 'text-nowrap',
+                render: function(data, type, row) {
+                    return '<span class="badge ' + getBoardClass(data) + '">' + data + '</span>';
+                }
             },
             {
                 data: 'date',
@@ -800,6 +920,9 @@ $(document).ready(function() {
     // Initialize Select2 for stock search
     initStockSelector();
 
+    // Handle URL parameter ?stock=CODE for navigation from boards page
+    handleUrlStockParam();
+
     // Tab切换事件处理
     $('button[data-bs-toggle="tab"]').on('show.bs.tab', function(e) {
         const targetId = $(e.target).attr('data-bs-target');
@@ -815,12 +938,16 @@ $(document).ready(function() {
         } else if (targetId === '#screen-pane') {
             // 筛选tab：隐藏查询结果
             $('#resultsSection').hide();
+        } else if (targetId === '#boards-pane') {
+            // 板块中心：隐藏所有结果区域
+            $('#resultsSection').hide();
+            $('#screenResultsSection').hide();
         } else if (targetId === '#favorites-pane') {
             // 收藏tab：隐藏所有结果区域
             $('#resultsSection').hide();
             $('#screenResultsSection').hide();
-        } else if (targetId === '#update-pane' || targetId === '#tasks-pane' || targetId === '#financial-pane') {
-            // 更新管理、任务历史、财务数据：隐藏所有结果区域
+        } else if (targetId === '#ml-train-pane' || targetId === '#update-pane' || targetId === '#tasks-pane' || targetId === '#financial-pane') {
+            // AI预测、更新管理、任务历史、财务数据：隐藏所有结果区域
             $('#resultsSection').hide();
             $('#screenResultsSection').hide();
         }

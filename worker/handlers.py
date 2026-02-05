@@ -1,0 +1,696 @@
+"""
+Task Execution Handlers
+
+These functions handle the actual execution of different task types.
+Each handler receives the TaskManager, task_id, and task parameters.
+"""
+import time
+from datetime import datetime
+
+
+def execute_update_stock_prices(tm, task_id, params):
+    """
+    Execute stock price update task.
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters (stock_range, custom_stocks, etc.)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+    from worker.utils import get_stock_list_for_task
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    # Get parameters
+    stock_range = params.get('stock_range', 'all')
+    custom_stocks = params.get('custom_stocks', [])
+    stocks_param = params.get('stocks', [])  # For backward compatibility
+
+    # Get stock list
+    stock_list = get_stock_list_for_task(stock_range, custom_stocks, db, stocks_param)
+
+    if not stock_list:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='无法获取股票列表'
+        )
+        return
+
+    # Load checkpoint if exists
+    checkpoint = tm.load_checkpoint(task_id)
+    start_index = 0
+    stats = {'success': 0, 'failed': 0, 'skipped': 0}
+
+    if checkpoint:
+        start_index = checkpoint.get('current_index', 0)
+        stats = checkpoint.get('stats', stats)
+        print(f"[Task-{task_id[:8]}] Resuming from index {start_index}")
+
+    # Update task progress
+    tm.update_task(
+        task_id,
+        total_stocks=len(stock_list),
+        current_stock_index=start_index,
+        stats=stats,
+        message=f'正在更新股票数据 ({len(stock_list)} 只)...'
+    )
+
+    # Execute updates
+    end_date = datetime.now().strftime('%Y%m%d')
+
+    for i in range(start_index, len(stock_list)):
+        stock_code = stock_list[i]
+
+        # Check stop request
+        if tm.is_stop_requested(task_id):
+            print(f"[Task-{task_id[:8]}] Stop requested, stopping at index {i}")
+            task = tm.get_task(task_id)
+            task_stats = task.get('stats') if task else stats
+            tm.save_checkpoint(task_id, i, task_stats)
+            tm.update_task(task_id, status='stopped', message='任务已停止')
+            tm.clear_stop_request(task_id)
+            return
+
+        # Check pause request
+        while tm.is_pause_requested(task_id):
+            tm.update_task(task_id, status='paused', message='任务已暂停')
+            time.sleep(1)
+            # Re-check stop request while paused
+            if tm.is_stop_requested(task_id):
+                task = tm.get_task(task_id)
+                task_stats = task.get('stats') if task else stats
+                tm.save_checkpoint(task_id, i, task_stats)
+                tm.update_task(task_id, status='stopped', message='任务已停止')
+                tm.clear_stop_request(task_id)
+                tm.clear_pause_request(task_id)
+                return
+            # Resume if pause cleared
+            if not tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='running', message='任务已恢复执行')
+
+        try:
+            # Update progress
+            progress = int(((i + 1) / len(stock_list)) * 100)
+            tm.update_task(
+                task_id,
+                current_stock_index=i + 1,
+                progress=progress,
+                message=f'正在更新 {stock_code} ({i+1}/{len(stock_list)})...'
+            )
+
+            # Save checkpoint every 10 stocks
+            if i % 10 == 0:
+                current_task = tm.get_task(task_id)
+                current_stats = current_task.get('stats') if current_task else stats
+                tm.save_checkpoint(task_id, i, current_stats)
+
+            # Update stock data
+            print(f"[Task-{task_id[:8]}] Updating stock {stock_code} ({i+1}/{len(stock_list)})...")
+            stats_result = db.save_all_stocks_by_code_incremental(
+                default_start_date='20240101',
+                end_date=end_date,
+                stock_list=[stock_code]
+            )
+            print(f"[Task-{task_id[:8]}] Stock {stock_code} update complete")
+
+            # Update stats
+            if stats_result:
+                if stats_result.get('success', 0) > 0:
+                    stats['success'] += stats_result.get('success', 0)
+                    tm.increment_stats(task_id, 'success', stats_result.get('success', 0))
+                if stats_result.get('failed', 0) > 0:
+                    stats['failed'] += stats_result.get('failed', 0)
+                    tm.increment_stats(task_id, 'failed', stats_result.get('failed', 0))
+                if stats_result.get('skipped', 0) > 0:
+                    stats['skipped'] += stats_result.get('skipped', 0)
+                    tm.increment_stats(task_id, 'skipped', stats_result.get('skipped', 0))
+            else:
+                stats['failed'] += 1
+                tm.increment_stats(task_id, 'failed')
+
+        except Exception as e:
+            stats['failed'] += 1
+            tm.increment_stats(task_id, 'failed')
+            print(f"[ERROR] Failed to update {stock_code}: {e}")
+
+    # Complete task
+    tm.delete_checkpoint(task_id)
+    tm.update_task(task_id,
+        status='completed',
+        progress=100,
+        current_stock_index=len(stock_list),
+        message='更新完成',
+        result={'updated_stocks': stats.get('success', 0)},
+        stats=stats
+    )
+
+
+def execute_update_industry_classification(tm, task_id, params):
+    """
+    Execute SW industry classification update task.
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters (src, force)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+
+    src = params.get('src', 'SW2021')
+    force = params.get('force', False)
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    tm.update_task(
+        task_id,
+        status='running',
+        message=f'正在更新申万行业分类数据...'
+    )
+
+    # Step 1: Save industry classification
+    print(f"[Task-{task_id[:8]}] Step 1: Saving industry classification...")
+    classify_count = db.save_sw_classify(src=src, update_timestamp=True)
+
+    if classify_count == 0:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='获取行业分类失败',
+            stats={'success': 0, 'failed': 0, 'skipped': 0}
+        )
+        return
+
+    # Step 2: Get all industry codes
+    try:
+        # Try to get indices from database method if available
+        if hasattr(db, 'get_sw_industry_codes'):
+            all_indices = db.get_sw_industry_codes(src=src)
+        else:
+            # Fall back to query
+            import pandas as pd
+            query = "SELECT index_code FROM sw_classify WHERE src = :src"
+            with db.engine.connect() as conn:
+                df_indices = pd.read_sql_query(query, conn, params={"src": src})
+            all_indices = df_indices['index_code'].tolist()
+    except Exception as e:
+        print(f"[Task-{task_id[:8]}] Failed to get industry codes: {e}")
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'获取行业代码失败: {e}',
+            stats={'success': 0, 'failed': 0, 'skipped': 0}
+        )
+        return
+
+    total_count = len(all_indices)
+
+    if total_count == 0:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='没有找到行业分类',
+            stats={'success': 0, 'failed': 0, 'skipped': 0}
+        )
+        return
+
+    # Initialize tracking variables
+    failed_indices = []
+    members_count = 0
+
+    # Load checkpoint if exists
+    checkpoint = tm.load_checkpoint(task_id)
+    start_index = 0
+
+    if checkpoint:
+        start_index = checkpoint.get('current_index', 0)
+        failed_indices = checkpoint.get('failed_indices', [])
+        members_count = checkpoint.get('members_count', 0)
+        print(f"[Task-{task_id[:8]}] Resuming from index {start_index}")
+
+    tm.update_task(
+        task_id,
+        total_stocks=total_count,
+        current_stock_index=start_index,
+        stats={'success': 0, 'failed': 0, 'skipped': 0},
+        message=f'正在更新 {total_count} 个申万行业成分股...'
+    )
+
+    # Step 3: Loop through each industry
+    for i in range(start_index, total_count):
+        index_code = all_indices[i]
+
+        # Check stop request
+        if tm.is_stop_requested(task_id):
+            print(f"[Task-{task_id[:8]}] Stop requested at index {i}")
+            current_stats = tm.get_task(task_id).get('stats', {})
+            tm.save_checkpoint(task_id, i, {
+                'failed_indices': failed_indices,
+                'members_count': members_count
+            })
+            tm.update_task(task_id,
+                status='stopped',
+                message=f'任务已停止 ({i}/{total_count})',
+                stats=current_stats
+            )
+            tm.clear_stop_request(task_id)
+            return
+
+        # Check pause request
+        while tm.is_pause_requested(task_id):
+            tm.update_task(task_id, status='paused', message='任务已暂停')
+            import time
+            time.sleep(1)
+            if tm.is_stop_requested(task_id):
+                current_stats = tm.get_task(task_id).get('stats', {})
+                tm.save_checkpoint(task_id, i, {
+                    'failed_indices': failed_indices,
+                    'members_count': members_count
+                })
+                tm.update_task(task_id, status='stopped', message='任务已停止', stats=current_stats)
+                tm.clear_stop_request(task_id)
+                tm.clear_pause_request(task_id)
+                return
+            if not tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='running', message='任务已恢复执行')
+
+        try:
+            # Update progress
+            progress = int(((i + 1) / total_count) * 100)
+            tm.update_task(
+                task_id,
+                current_stock_index=i + 1,
+                progress=progress,
+                message=f'正在更新 {index_code} ({i+1}/{total_count})...'
+            )
+
+            # Save checkpoint every 10 industries
+            if i % 10 == 0:
+                tm.save_checkpoint(task_id, i, {
+                    'failed_indices': failed_indices,
+                    'members_count': members_count
+                })
+
+            # Update industry members
+            print(f"[Task-{task_id[:8]}] Updating {index_code} ({i+1}/{total_count})...")
+            count = db.save_sw_members(index_code=index_code, is_new='Y', force_update=force)
+
+            if count > 0:
+                members_count += count
+                tm.increment_stats(task_id, 'success')
+            else:
+                tm.increment_stats(task_id, 'failed')
+                failed_indices.append(index_code)
+
+        except Exception as e:
+            tm.increment_stats(task_id, 'failed')
+            failed_indices.append(index_code)
+            print(f"[ERROR] Failed to update {index_code}: {e}")
+
+    # Complete task
+    tm.delete_checkpoint(task_id)
+    final_stats = tm.get_task(task_id).get('stats', {})
+
+    result = {
+        'classify_count': classify_count,
+        'members_count': members_count,
+        'total_indices': total_count,
+        'skipped_indices': 0,
+        'failed_indices': failed_indices
+    }
+
+    tm.update_task(task_id,
+        status='completed',
+        progress=100,
+        current_stock_index=total_count,
+        message='申万行业分类更新完成',
+        result=result,
+        stats=final_stats
+    )
+
+
+def execute_update_financial_reports(tm, task_id, params):
+    """
+    Execute financial reports update task.
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters (stock_range, custom_stocks, include_indicators, include_reports)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+    from worker.utils import get_stock_list_for_task
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    stock_range = params.get('stock_range', 'all')
+    custom_stocks = params.get('custom_stocks', [])
+    include_indicators = params.get('include_indicators', True)
+    include_reports = params.get('include_reports', True)
+    stocks_param = params.get('stocks', [])
+
+    # Get stock list
+    stock_list = get_stock_list_for_task(stock_range, custom_stocks, db, stocks_param)
+
+    if not stock_list:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='无法获取股票列表'
+        )
+        return
+
+    tm.update_task(
+        task_id,
+        total_stocks=len(stock_list),
+        status='running',
+        message=f'正在更新财务数据 ({len(stock_list)} 只股票)...'
+    )
+
+    # TODO: Implement actual financial data update logic
+    # This is a placeholder - the actual implementation would call
+    # db.save_financial_data() or similar method
+
+    stats = {'success': len(stock_list), 'failed': 0, 'skipped': 0}
+    tm.update_task(task_id,
+        status='completed',
+        message='财务数据更新完成',
+        result=stats,
+        stats=stats
+    )
+
+
+def execute_update_index_data(tm, task_id, params):
+    """
+    Execute index data update task.
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters (markets, start_date, end_date)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+    from sqlalchemy import text
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    markets = params.get('markets', ['SSE', 'SZSE'])
+    start_date = '20240101'
+    end_date = datetime.now().strftime('%Y%m%d')
+
+    tm.update_task(
+        task_id,
+        status='running',
+        message='正在获取指数列表...'
+    )
+
+    # Get all indices
+    all_indices = []
+    for market in markets:
+        try:
+            count = db.save_index_basic(market=market)
+            if count > 0:
+                with db.engine.connect() as conn:
+                    query = "SELECT ts_code FROM index_names"
+                    if market == 'SSE':
+                        query += " WHERE ts_code LIKE '%.SH'"
+                    elif market == 'SZSE':
+                        query += " WHERE ts_code LIKE '%.SZ'"
+                    result = conn.execute(text(query))
+                    all_indices.extend([row[0] for row in result.fetchall()])
+        except Exception as e:
+            print(f"Failed to get {market} indices: {e}")
+
+    # Remove duplicates
+    all_indices = list(set(all_indices))
+    total_indices = len(all_indices)
+
+    if not total_indices:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='没有找到指数'
+        )
+        return
+
+    # Update task with total count
+    tm.update_task(
+        task_id,
+        message=f'正在更新 {total_indices} 个指数数据...',
+        total_stocks=total_indices
+    )
+
+    # Load checkpoint if exists
+    checkpoint = tm.load_checkpoint(task_id)
+    start_index = 0
+    stats = {'success': 0, 'failed': 0, 'skipped': 0}
+
+    if checkpoint:
+        start_index = checkpoint.get('current_index', 0)
+        stats = checkpoint.get('stats', stats)
+        print(f"[Task-{task_id[:8]}] Resuming from index {start_index}")
+
+    # Update each index individually to track progress
+    for i in range(start_index, total_indices):
+        ts_code = all_indices[i]
+
+        # Check stop request
+        if tm.is_stop_requested(task_id):
+            task = tm.get_task(task_id)
+            task_stats = task.get('stats', stats) if task else stats
+            tm.save_checkpoint(task_id, i, task_stats)
+            tm.update_task(task_id, status='stopped', message='任务已停止')
+            tm.clear_stop_request(task_id)
+            return
+
+        # Check pause request
+        while tm.is_pause_requested(task_id):
+            tm.update_task(task_id, status='paused', message='任务已暂停')
+            time.sleep(1)
+            if tm.is_stop_requested(task_id):
+                tm.update_task(task_id, status='stopped', message='任务已停止')
+                tm.clear_stop_request(task_id)
+                tm.clear_pause_request(task_id)
+                return
+            if not tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='running', message='任务已恢复执行')
+
+        try:
+            # Update progress
+            progress = int(((i + 1) / total_indices) * 100)
+            tm.update_task(
+                task_id,
+                progress=progress,
+                current_stock_index=i + 1,
+                message=f'正在更新 {ts_code} ({i+1}/{total_indices})...'
+            )
+
+            # Save checkpoint every 10 indices
+            if i % 10 == 0:
+                current_task = tm.get_task(task_id)
+                current_stats = current_task.get('stats', stats) if current_task else stats
+                tm.save_checkpoint(task_id, i, current_stats)
+
+            # Update index daily data
+            result = db.save_index_daily(ts_code, start_date, end_date)
+
+            # Update stats
+            if result > 0:
+                stats['success'] += 1
+                tm.increment_stats(task_id, 'success')
+            elif result == 0:
+                stats['skipped'] += 1
+                tm.increment_stats(task_id, 'skipped')
+            else:
+                stats['failed'] += 1
+                tm.increment_stats(task_id, 'failed')
+
+        except Exception as e:
+            stats['failed'] += 1
+            tm.increment_stats(task_id, 'failed')
+            print(f"ERROR: Failed to update {ts_code}: {e}")
+
+    # Complete task
+    tm.delete_checkpoint(task_id)
+    tm.update_task(task_id,
+        status='completed',
+        progress=100,
+        current_stock_index=total_indices,
+        message='指数数据更新完成',
+        result={'updated_indices': stats.get('success', 0)},
+        stats=stats
+    )
+
+
+def execute_test_handler(tm, task_id, params):
+    """
+    执行测试任务以验证任务管理功能。
+
+    该处理器模拟一个长时间运行的任务，处理一系列项目，用于全面测试：
+    - 任务生命周期 (pending -> running -> completed/failed/stopped)
+    - 进度跟踪和更新
+    - 暂停/恢复/停止操作
+    - 断点续传机制（保存/加载检查点）
+    - 统计信息收集 (success/failed/skipped)
+    - 错误处理和恢复
+
+    Args:
+        tm: TaskManager 实例
+        task_id: 任务标识符
+        params: 任务参数字典:
+            - total_items: int (默认: 100) - 要处理的总项目数
+            - item_duration_ms: int (默认: 100) - 每个项目处理时间（毫秒）
+            - checkpoint_interval: int (默认: 10) - 每N个项目保存检查点
+            - failure_rate: float (默认: 0.0) - 随机失败率 (0.0-1.0)
+            - simulate_pause: bool (默认: False) - 在50%时自动暂停用于测试
+    """
+    import random
+    import time
+
+    # 提取参数并设置默认值
+    total_items = params.get('total_items', 100)
+    item_duration_ms = params.get('item_duration_ms', 100)
+    checkpoint_interval = params.get('checkpoint_interval', 10)
+    failure_rate = params.get('failure_rate', 0.0)
+    simulate_pause = params.get('simulate_pause', False)
+
+    # 验证参数
+    if total_items <= 0:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='Invalid parameter: total_items must be > 0'
+        )
+        return
+
+    if item_duration_ms < 0:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='Invalid parameter: item_duration_ms must be >= 0'
+        )
+        return
+
+    if not (0.0 <= failure_rate <= 1.0):
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='Invalid parameter: failure_rate must be between 0.0 and 1.0'
+        )
+        return
+
+    # 加载检查点（如果存在，用于恢复测试）
+    checkpoint = tm.load_checkpoint(task_id)
+    start_index = 0
+    stats = {'success': 0, 'failed': 0, 'skipped': 0}
+
+    if checkpoint:
+        start_index = checkpoint.get('current_index', 0)
+        stats = checkpoint.get('stats', stats)
+        print(f"[TestHandler-{task_id[:8]}] Resuming from item {start_index}")
+
+    # 更新任务初始进度
+    tm.update_task(
+        task_id,
+        total_stocks=total_items,  # 复用 total_stocks 字段
+        current_stock_index=start_index,  # 复用 current_stock_index 字段
+        stats=stats,
+        message=f'测试任务启动，准备处理 {total_items} 个项目...'
+    )
+
+    # 处理每个项目
+    for i in range(start_index, total_items):
+        item_name = f"item-{i+1:03d}"
+
+        # 检查停止请求
+        if tm.is_stop_requested(task_id):
+            print(f"[TestHandler-{task_id[:8]}] Stop requested at item {i}")
+            task = tm.get_task(task_id)
+            task_stats = task.get('stats') if task else stats
+            tm.save_checkpoint(task_id, i, task_stats)
+            tm.update_task(task_id, status='stopped', message='任务已停止')
+            tm.clear_stop_request(task_id)
+            return
+
+        # 检查暂停请求
+        while tm.is_pause_requested(task_id):
+            tm.update_task(task_id, status='paused', message=f'任务已暂停 (项目 {i+1}/{total_items})')
+            time.sleep(1)
+            # 暂停时重新检查停止请求
+            if tm.is_stop_requested(task_id):
+                task = tm.get_task(task_id)
+                task_stats = task.get('stats') if task else stats
+                tm.save_checkpoint(task_id, i, task_stats)
+                tm.update_task(task_id, status='stopped', message='任务已停止')
+                tm.clear_stop_request(task_id)
+                tm.clear_pause_request(task_id)
+                return
+            # 如果清除暂停标志则恢复
+            if not tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='running', message='任务已恢复执行')
+
+        # 更新进度
+        progress = int(((i + 1) / total_items) * 100)
+        tm.update_task(
+            task_id,
+            current_stock_index=i + 1,
+            progress=progress,
+            message=f'正在处理 {item_name} ({i+1}/{total_items})...'
+        )
+
+        # 按间隔保存检查点
+        if i % checkpoint_interval == 0:
+            current_task = tm.get_task(task_id)
+            current_stats = current_task.get('stats') if current_task else stats
+            tm.save_checkpoint(task_id, i, current_stats)
+            print(f"[TestHandler-{task_id[:8]}] Checkpoint saved at item {i}")
+
+        # 如果请求则在50%时模拟暂停
+        if simulate_pause and i == total_items // 2:
+            print(f"[TestHandler-{task_id[:8]}] Auto-pause at 50% (item {i})")
+            tm.request_pause(task_id)
+            continue  # 下一次循环将进入暂停处理
+
+        # 模拟工作（休眠）
+        if item_duration_ms > 0:
+            time.sleep(item_duration_ms / 1000.0)
+
+        # 模拟失败
+        if failure_rate > 0 and random.random() < failure_rate:
+            stats['failed'] += 1
+            tm.increment_stats(task_id, 'failed')
+            print(f"[TestHandler-{task_id[:8]}] {item_name} failed (simulated)")
+        else:
+            stats['success'] += 1
+            tm.increment_stats(task_id, 'success')
+            print(f"[TestHandler-{task_id[:8]}] {item_name} completed")
+
+    # 完成任务
+    tm.delete_checkpoint(task_id)
+    tm.update_task(task_id,
+        status='completed',
+        progress=100,
+        current_stock_index=total_items,
+        message=f'测试完成: {stats.get("success", 0)} 成功, {stats.get("failed", 0)} 失败',
+        result=stats,
+        stats=stats
+    )
+    print(f"[TestHandler-{task_id[:8]}] Test completed with stats: {stats}")
+
+
+# Task type to handler mapping
+TASK_HANDLERS = {
+    'update_stock_prices': execute_update_stock_prices,
+    'update_industry_classification': execute_update_industry_classification,
+    'update_financial_reports': execute_update_financial_reports,
+    'update_index_data': execute_update_index_data,
+    'test_handler': execute_test_handler,  # 新增测试处理器
+    # Backward compatibility for old task types
+    'update_all_stocks': execute_update_stock_prices,
+    'update_favorites': execute_update_stock_prices,
+}

@@ -90,7 +90,10 @@ def search_stocks(query: str, limit: int = 10, asset_type: str = 'all') -> list:
     if not query:
         return results
 
-    query = query.strip().upper()
+    query = query.strip()
+    # 只对纯代码进行大写转换（保留中文原样）
+    if query and query[0].isdigit():  # 以数字开头，说明是股票代码
+        query = query.upper()
 
     # 搜索股票
     if asset_type in ['stock', 'all']:

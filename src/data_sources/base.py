@@ -151,6 +151,40 @@ class BaseStockDB(ABC):
             conn.execute(text(fina_indicator_sql))
             conn.commit()
 
+        # 创建申万行业分类表
+        sw_classify_sql = """
+        CREATE TABLE IF NOT EXISTS sw_classify (
+            index_code TEXT PRIMARY KEY,
+            industry_name TEXT NOT NULL,
+            parent_code TEXT,
+            level TEXT NOT NULL,
+            industry_code TEXT NOT NULL,
+            is_pub TEXT,
+            src TEXT DEFAULT 'SW2021',
+            updated_at TEXT
+        );
+        """
+        with self.engine.connect() as conn:
+            conn.execute(text(sw_classify_sql))
+            conn.commit()
+
+        # 创建申万行业成分股表
+        sw_members_sql = """
+        CREATE TABLE IF NOT EXISTS sw_members (
+            index_code TEXT NOT NULL,
+            ts_code TEXT NOT NULL,
+            name TEXT,
+            in_date TEXT,
+            out_date TEXT,
+            is_new TEXT DEFAULT 'Y',
+            PRIMARY KEY (index_code, ts_code),
+            FOREIGN KEY (index_code) REFERENCES sw_classify(index_code) ON DELETE CASCADE
+        );
+        """
+        with self.engine.connect() as conn:
+            conn.execute(text(sw_members_sql))
+            conn.commit()
+
         # 创建索引以提升查询性能
         index_sqls = [
             "CREATE INDEX IF NOT EXISTS idx_bars_symbol ON bars(symbol);",
@@ -171,6 +205,14 @@ class BaseStockDB(ABC):
             "CREATE INDEX IF NOT EXISTS idx_fina_indicator_end_date ON fina_indicator(end_date);",
             "CREATE INDEX IF NOT EXISTS idx_fina_indicator_ann_date ON fina_indicator(ann_date);",
             "CREATE INDEX IF NOT EXISTS idx_fina_indicator_roe ON fina_indicator(roe);",
+            # 申万行业分类表索引
+            "CREATE INDEX IF NOT EXISTS idx_sw_classify_level ON sw_classify(level);",
+            "CREATE INDEX IF NOT EXISTS idx_sw_classify_parent_code ON sw_classify(parent_code);",
+            "CREATE INDEX IF NOT EXISTS idx_sw_classify_src ON sw_classify(src);",
+            # 申万行业成分股表索引
+            "CREATE INDEX IF NOT EXISTS idx_sw_members_index_code ON sw_members(index_code);",
+            "CREATE INDEX IF NOT EXISTS idx_sw_members_ts_code ON sw_members(ts_code);",
+            "CREATE INDEX IF NOT EXISTS idx_sw_members_is_new ON sw_members(is_new);",
         ]
         with self.engine.connect() as conn:
             for index_sql in index_sqls:

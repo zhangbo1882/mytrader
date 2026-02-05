@@ -9,10 +9,10 @@
 
 // Task type display names
 const FinancialTaskTypeNames = {
-    'update_financial_data': '财务数据更新',
-    'update_both': '股价+财务数据更新',
-    'update_all_stocks': '股价数据更新',
-    'update_favorites': '股票更新'
+    'update_stock_prices': '股票价格更新',
+    'update_financial_reports': '财务报表更新',
+    'update_industry_classification': '申万行业分类更新',
+    'update_index_data': '指数数据更新'
 };
 
 /**
@@ -26,19 +26,21 @@ function getTaskDisplayName(taskType) {
  * Check if a task type is financial-related
  */
 function isFinancialTask(taskType) {
-    return taskType === 'update_financial_data' || taskType === 'update_both';
+    return taskType === 'update_financial_reports';
 }
 
 /**
  * Get CSS class for task type badge
  */
 function getTaskTypeBadgeClass(taskType) {
-    if (taskType === 'update_financial_data') {
+    if (taskType === 'update_financial_reports') {
         return 'bg-info';
-    } else if (taskType === 'update_both') {
-        return 'bg-primary';
-    } else if (taskType === 'update_all_stocks' || taskType === 'update_favorites') {
+    } else if (taskType === 'update_stock_prices') {
         return 'bg-success';
+    } else if (taskType === 'update_industry_classification') {
+        return 'bg-warning';
+    } else if (taskType === 'update_index_data') {
+        return 'bg-secondary';
     }
     return 'bg-secondary';
 }
