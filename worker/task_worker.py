@@ -79,8 +79,10 @@ class TaskWorker:
         This method:
         1. Cleans up finished threads
         2. Checks if we can start more tasks (max_concurrent)
-        3. Queries database for pending tasks
-        4. Starts tasks in separate threads
+        3. Atomically claims a pending task (using UPDATE ... WHERE status='pending')
+        4. Starts task in a separate thread if successfully claimed
+
+        The atomic claim ensures multiple workers will get different tasks.
         """
         # Clean up finished threads first
         self._cleanup_finished_threads()
@@ -89,32 +91,27 @@ class TaskWorker:
         if len(self.running_tasks) >= self.max_concurrent:
             return
 
-        # Get pending tasks from database
-        pending_tasks = self.tm.get_all_tasks(status='pending', limit=1)
+        # Atomically claim a pending task
+        # Multiple workers calling this will get different tasks (or None)
+        task = self.tm.claim_task()
 
-        if not pending_tasks:
+        if task is None:
             return
 
-        # Start tasks up to max_concurrent limit
-        for task in pending_tasks:
-            # Check concurrent limit again
-            if len(self.running_tasks) >= self.max_concurrent:
-                break
-
-            # Start task execution
-            self._start_task(task)
+        # Start task execution
+        self._start_task(task)
 
     def _start_task(self, task):
         """
         Start a task execution in a separate thread.
 
         Args:
-            task: Task dictionary from database
+            task: Task dictionary from database (already claimed by claim_task)
         """
         task_id = task['task_id']
 
-        # Update task status to 'running'
-        self.tm.update_task(task_id, status='running', message='Worker正在执行任务...')
+        # Note: Task status is already 'running' from claim_task()
+        # No need to update status again here
 
         # Create and start execution thread
         thread = threading.Thread(

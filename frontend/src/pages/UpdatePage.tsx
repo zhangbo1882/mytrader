@@ -104,6 +104,7 @@ const getTaskTypeName = (taskType: string): string => {
     'update_financial_reports': '财务报表',
     'update_industry_classification': '行业分类',
     'update_index_data': '指数数据',
+    'update_industry_statistics': '行业统计',
   };
   return taskTypeMap[taskType] || taskType;
 };
@@ -217,6 +218,14 @@ function UpdatePage() {
             force: values.industry_force || false,
           },
         });
+      } else if (contentType === 'statistics') {
+        await taskService.create({
+          type: 'update',
+          params: {
+            content_type: 'statistics',
+            metrics: values.metrics || ['pe_ttm', 'pb', 'ps_ttm', 'total_mv', 'circ_mv'],
+          },
+        });
       } else if (contentType === 'index') {
         await taskService.create({
           type: 'update',
@@ -293,6 +302,7 @@ function UpdatePage() {
         'index': 'update_index_data',
         'industry': 'update_industry_classification',
         'financial': 'update_financial_reports',
+        'statistics': 'update_industry_statistics',
       };
 
       const task_type = taskTypeMap[values.content_type || 'stock'] || 'update_stock_prices';
@@ -386,6 +396,82 @@ function UpdatePage() {
     } catch (error) {
       message.error({
         content: '恢复失败',
+        icon: <CloseCircleOutlined />,
+        duration: 5,
+      });
+    }
+  };
+
+  // 暂停任务
+  const handlePauseTask = async (taskId: string) => {
+    try {
+      await taskService.pause(taskId);
+      message.success({
+        content: '任务暂停中...',
+        icon: <CheckCircleOutlined />,
+        duration: 3,
+      });
+      await loadTasks();
+    } catch (error) {
+      message.error({
+        content: '暂停任务失败',
+        icon: <CloseCircleOutlined />,
+        duration: 5,
+      });
+    }
+  };
+
+  // 恢复任务
+  const handleResumeTask = async (taskId: string) => {
+    try {
+      await taskService.resume(taskId);
+      message.success({
+        content: '任务已恢复',
+        icon: <CheckCircleOutlined />,
+        duration: 3,
+      });
+      await loadTasks();
+    } catch (error) {
+      message.error({
+        content: '恢复任务失败',
+        icon: <CloseCircleOutlined />,
+        duration: 5,
+      });
+    }
+  };
+
+  // 停止任务
+  const handleStopTask = async (taskId: string) => {
+    try {
+      await taskService.stop(taskId);
+      message.success({
+        content: '任务停止中...',
+        icon: <CheckCircleOutlined />,
+        duration: 3,
+      });
+      await loadTasks();
+    } catch (error) {
+      message.error({
+        content: '停止任务失败',
+        icon: <CloseCircleOutlined />,
+        duration: 5,
+      });
+    }
+  };
+
+  // 删除任务
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await taskService.delete(taskId);
+      message.success({
+        content: '任务已删除',
+        icon: <CheckCircleOutlined />,
+        duration: 3,
+      });
+      await loadTasks();
+    } catch (error) {
+      message.error({
+        content: '删除任务失败',
         icon: <CloseCircleOutlined />,
         duration: 5,
       });
@@ -490,10 +576,10 @@ function UpdatePage() {
                   <TaskCard
                     key={task.id}
                     task={task}
-                    onResume={() => {}}
-                    onPause={() => {}}
-                    onStop={() => {}}
-                    onDelete={() => {}}
+                    onResume={() => handleResumeTask(task.id)}
+                    onPause={() => handlePauseTask(task.id)}
+                    onStop={() => handleStopTask(task.id)}
+                    onDelete={() => handleDeleteTask(task.id)}
                   />
                 ))}
               </Space>
@@ -658,6 +744,7 @@ function UpdatePage() {
               <Radio value="financial">财务数据</Radio>
               <Radio value="index">指数数据</Radio>
               <Radio value="industry">申万行业分类</Radio>
+              <Radio value="statistics">行业统计</Radio>
             </Radio.Group>
           </Form.Item>
 
@@ -719,6 +806,24 @@ function UpdatePage() {
                     <Checkbox>强制重新获取（忽略已有数据）</Checkbox>
                   </Form.Item>
                 </>
+              ) : getFieldValue('content_type') === 'statistics' ? (
+                <Form.Item
+                  label="更新指标"
+                  name="metrics"
+                  initialValue={['pe_ttm', 'pb', 'ps_ttm', 'total_mv', 'circ_mv']}
+                  extra="选择要更新的行业统计指标"
+                  rules={[{ required: true, message: '请至少选择一个指标' }]}
+                >
+                  <Checkbox.Group style={{ width: '100%' }}>
+                    <Space direction="vertical">
+                      <Checkbox value="pe_ttm">市盈率TTM (pe_ttm)</Checkbox>
+                      <Checkbox value="pb">市净率 (pb)</Checkbox>
+                      <Checkbox value="ps_ttm">市销率TTM (ps_ttm)</Checkbox>
+                      <Checkbox value="total_mv">总市值 (total_mv)</Checkbox>
+                      <Checkbox value="circ_mv">流通市值 (circ_mv)</Checkbox>
+                    </Space>
+                  </Checkbox.Group>
+                </Form.Item>
               ) : (
                 <Form.Item
                   label="股票范围"
@@ -841,6 +946,7 @@ function UpdatePage() {
             <Radio.Group>
               <Radio value="stock">股价数据</Radio>
               <Radio value="index">指数数据</Radio>
+              <Radio value="statistics">行业统计</Radio>
             </Radio.Group>
           </Form.Item>
 

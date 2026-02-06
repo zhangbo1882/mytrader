@@ -33,6 +33,9 @@ boards_ns = Namespace('boards', description='板块数据接口')
 # Favorites Namespace
 favorites_ns = Namespace('favorites', description='收藏功能接口')
 
+# Liquidity Namespace
+liquidity_ns = Namespace('liquidity', description='流动性筛选接口')
+
 # ============================================================================
 # Models (DTOs) - must be defined AFTER namespaces
 # ============================================================================
@@ -85,6 +88,7 @@ create_task_model = task_ns.model('CreateTaskRequest', {
             'update_financial_reports',
             'update_industry_classification',
             'update_index_data',
+            'update_industry_statistics',
             'test_handler'
         ],
         attribute='task_type'
@@ -1053,6 +1057,105 @@ class SWIndustryMembersResource(Resource):
         return data, status_code
 
 
+@sw_industry_ns.route('/percentile', methods=['GET'])
+class IndustryPercentileResource(Resource):
+    """行业分位值查询"""
+    @sw_industry_ns.doc('get_industry_percentile',
+        description='''获取行业指标分位值（使用行业代码）
+
+**查询参数：**
+- **industry_code** (必需): 申万行业代码，如"801010"或"801010.SI"
+- **metric** (必需): 指标名称，如"pe_ttm", "pb", "total_mv", "circ_mv"
+- **percentile** (可选): 百分位，默认0.75，支持0.1-0.9
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "data": {
+    "industry_code": "801010",
+    "industry_name": "银行",
+    "metric": "pe_ttm",
+    "percentile": 0.75,
+    "percentile_str": "p75",
+    "value": 6.5,
+    "calculated_at": "2026-02-06 19:25:00"
+  }
+}
+```
+    ''')
+    @sw_industry_ns.param('industry_code', '申万行业代码 (如: 801010)', type='string', required=True)
+    @sw_industry_ns.param('metric', '指标名称 (如: pe_ttm, pb, total_mv)', type='string', required=True)
+    @sw_industry_ns.param('percentile', '百分位 (0.1-0.9)', type='float', default=0.75)
+    def get(self):
+        """查询行业分位值"""
+        from web.services.industry_statistics_service import get_industry_percentile
+        return get_industry_percentile()
+
+
+@sw_industry_ns.route('/statistics-metrics', methods=['GET'])
+class IndustryStatisticsMetricsResource(Resource):
+    """获取可用指标列表"""
+    @sw_industry_ns.doc('get_available_metrics',
+        description='''获取可查询的指标列表
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "data": {
+    "metrics": ["pe_ttm", "pb", "ps_ttm", "total_mv", "circ_mv"],
+    "descriptions": {
+      "pe_ttm": "市盈率TTM",
+      "pb": "市净率"
+    },
+    "available_percentiles": [10, 25, 50, 75, 90]
+  }
+}
+```
+    ''')
+    def get(self):
+        """获取可用指标列表"""
+        from web.services.industry_statistics_service import get_available_metrics
+        return get_available_metrics()
+
+
+@sw_industry_ns.route('/statistics-industries', methods=['GET'])
+class IndustryStatisticsIndustriesResource(Resource):
+    """获取有统计数据的行业列表"""
+    @sw_industry_ns.doc('get_industries_with_stats',
+        description='''获取有统计数据的行业列表
+
+**查询参数：**
+- **level**: 行业级别 (1/2/3)，默认1
+- **metric**: 指标名称 (可选)，过滤有该指标数据的行业
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "data": {
+    "industries": [
+      {
+        "industry_code": "801010",
+        "industry_name": "银行",
+        "level": 1,
+        "metrics": ["pe_ttm", "pb", "total_mv"]
+      }
+    ],
+    "total": 31
+  }
+}
+```
+    ''')
+    @sw_industry_ns.param('level', '行业级别 (1/2/3)', type='integer', default=1)
+    @sw_industry_ns.param('metric', '指标名称 (可选)', type='string', required=False)
+    def get(self):
+        """获取有统计数据的行业列表"""
+        from web.services.industry_statistics_service import get_industries_with_stats
+        return get_industries_with_stats()
+
+
 # ============================================================================
 # Boards Resources
 # ============================================================================
@@ -1353,3 +1456,138 @@ class FavoriteClearResource(Resource):
         """清空收藏"""
         from web.services.favorite_service import clear_favorites
         return clear_favorites()
+
+
+# ============================================================================
+# Liquidity Resources
+# ============================================================================
+
+# Liquidity models
+liquidity_screen_model = liquidity_ns.model('LiquidityScreenRequest', {
+    'lookback_days': fields.Integer(description='回溯交易日数（默认20，注意是交易日不是自然日）', example=20, default=20),
+    'min_avg_amount_20d': fields.Float(description='最小日均成交额 万元（默认3000）', example=3000, default=3000),
+    'min_avg_turnover_20d': fields.Float(description='最小日均换手率 %（默认0.3）', example=0.3, default=0.3),
+    'small_cap_threshold': fields.Float(description='小盘股阈值 亿元（默认50）', example=50, default=50),
+    'high_turnover_threshold': fields.Float(description='高换手率阈值 %（默认8）', example=8.0, default=8.0),
+    'max_amihud_illiquidity': fields.Float(description='最大Amihud非流动性指标（默认0.8）', example=0.8, default=0.8),
+    'limit': fields.Integer(description='返回结果数量限制（默认100）', example=100, default=100)
+})
+
+liquidity_stock_model = liquidity_ns.model('LiquidityStock', {
+    'symbol': fields.String(description='股票代码', example='600382'),
+    'name': fields.String(description='股票名称', example='广东明珠'),
+    'avg_amount_20d': fields.Float(description='日均成交额 万元', example=5000.5),
+    'avg_turnover_20d': fields.Float(description='日均换手率 %', example=3.5),
+    'avg_circ_mv': fields.Float(description='日均流通市值 亿元', example=100.5),
+    'amihud_illiquidity': fields.Float(description='Amihud非流动性指标', example=0.000001),
+    'filter_result': fields.String(description='筛选结果', example='PASS')
+})
+
+
+@liquidity_ns.route('/screen', methods=['POST'])
+class LiquidityScreenResource(Resource):
+    """流动性筛选"""
+    @liquidity_ns.doc('liquidity_screen',
+        description='''A股流动性三级筛选。
+
+**三级筛选逻辑：**
+1. **绝对流动性底线**（防极端风险）
+   - 日均成交额 < 3000万元：拒绝
+
+2. **相对活跃度**（剔除"僵尸股"）
+   - 日均换手率 < 0.3%：拒绝
+
+3. **流动性质量**（防小盘股陷阱）
+   - 流通市值 < 50亿元 且 换手率 > 8%：
+     - Amihud非流动性指标 > 0.8：拒绝
+
+**请求体参数：**
+```json
+{
+  "lookback_days": 20,
+  "min_avg_amount_20d": 3000,
+  "min_avg_turnover_20d": 0.3,
+  "small_cap_threshold": 50,
+  "high_turnover_threshold": 8.0,
+  "max_amihud_illiquidity": 0.8,
+  "limit": 100
+}
+```
+
+**参数说明：**
+- **lookback_days**: 回溯**交易日**数量（不是自然日），系统会自动处理周末和节假日
+- 其他参数单位说明见返回数据
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "count": 50,
+  "stocks": [
+    {
+      "symbol": "600382",
+      "name": "广东明珠",
+      "avg_amount_20d": 5000.5,
+      "avg_turnover_20d": 3.5,
+      "avg_circ_mv": 100.5,
+      "amihud_illiquidity": 0.000001,
+      "filter_result": "PASS"
+    }
+  ]
+}
+```
+
+**指标说明：**
+- avg_amount_20d: 日均成交额（万元）
+- avg_turnover_20d: 日均换手率（%）
+- avg_circ_mv: 日均流通市值（亿元）
+- amihud_illiquidity: Amihud非流动性指标，越小流动性越好
+''')
+    @liquidity_ns.expect(liquidity_screen_model)
+    def post(self):
+        """流动性筛选"""
+        from web.services.liquidity_service import liquidity_screen
+        return liquidity_screen()
+
+
+@liquidity_ns.route('/metrics/<symbol>')
+class LiquidityMetricsResource(Resource):
+    """单股流动性指标"""
+    @liquidity_ns.doc('get_liquidity_metrics',
+        description='''获取单股流动性指标。
+
+**路径参数：**
+- **symbol**: 股票代码（如: 600382, 000001.SZ）
+
+**查询参数：**
+- **lookback_days**: 回溯**交易日**数量（默认20，不是自然日）
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "symbol": "600382",
+  "name": "广东明珠",
+  "metrics": {
+    "avg_amount_20d": 5000.5,
+    "avg_turnover_20d": 3.5,
+    "avg_circ_mv": 100.5,
+    "amihud_illiquidity": 0.000001,
+    "data_points": 20
+  }
+}
+```
+
+**指标说明：**
+- avg_amount_20d: 日均成交额（万元）
+- avg_turnover_20d: 日均换手率（%）
+- avg_circ_mv: 日均流通市值（亿元）
+- amihud_illiquidity: Amihud非流动性指标
+- data_points: 数据点数量
+''')
+    @liquidity_ns.param('symbol', '股票代码（如: 600382, 000001.SZ）', type='string', required=True)
+    @liquidity_ns.param('lookback_days', '回溯天数（默认: 20）', type='integer', default=20, required=False)
+    def get(self, symbol):
+        """获取单股流动性指标"""
+        from web.services.liquidity_service import liquidity_metrics
+        return liquidity_metrics(symbol)

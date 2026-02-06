@@ -35,6 +35,8 @@ def create_task(request_data):
         return handle_update_financial_reports(params)
     elif task_type == 'update_index_data':
         return handle_update_index_data(params)
+    elif task_type == 'update_industry_statistics':
+        return handle_update_industry_statistics(params)
     elif task_type == 'test_handler':
         return handle_test_handler(params)
     else:
@@ -273,3 +275,44 @@ def handle_test_handler(params):
         'status': 'pending',
         'message': f'测试任务已创建，total_items={total_items}'
     }, 201
+
+
+def handle_update_industry_statistics(params):
+    """
+    Handle industry statistics update task.
+
+    Args:
+        params: Dictionary with keys:
+            - metrics: List of metric names (default: ["pe_ttm", "pb", "ps_ttm", "total_mv", "circ_mv"])
+    """
+    metrics = params.get('metrics', ['pe_ttm', 'pb', 'ps_ttm', 'total_mv', 'circ_mv'])
+
+    # Validate parameters
+    valid_metrics = ['pe_ttm', 'pb', 'ps_ttm', 'total_mv', 'circ_mv']
+    if not metrics or not isinstance(metrics, list):
+        return {'error': 'metrics 必须是非空列表'}, 400
+
+    for metric in metrics:
+        if metric not in valid_metrics:
+            return {'error': f'无效的指标: {metric}，有效值为: {", ".join(valid_metrics)}'}, 400
+
+    # Build task parameters
+    task_params = {
+        'metrics': metrics
+    }
+
+    # Create task with status='pending' - Worker will pick it up
+    tm = get_task_manager()
+    task_id = tm.create_task(
+        task_type='update_industry_statistics',
+        params=task_params
+    )
+    tm.update_task(task_id, message=f'任务已创建，等待Worker执行...')
+
+    return {
+        'success': True,
+        'task_id': task_id,
+        'status': 'pending',
+        'message': f'行业统计更新任务已创建，metrics={len(metrics)}个指标'
+    }, 201
+

@@ -41,7 +41,7 @@ if [ "$NODE_ENV" = "production" ]; then
     npm run preview
 else
     # 开发环境: 使用 Vite 开发服务器
-    export PORT="${PORT:-5173}"
+    export PORT="${PORT:-5002}"
     echo "启动前端开发服务器，端口: $PORT (支持热更新)"
     npm run dev
 fi

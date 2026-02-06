@@ -552,3 +552,44 @@ class StockQuery(BaseQuery):
             df = df[cols]
 
         return df
+
+    def liquidity_screen(self, lookback_days: int = 20,
+                        min_avg_amount_20d: Optional[float] = None,
+                        min_avg_turnover_20d: Optional[float] = None,
+                        small_cap_threshold: Optional[float] = None,
+                        high_turnover_threshold: Optional[float] = None,
+                        max_amihud_illiquidity: Optional[float] = None,
+                        limit: Optional[int] = None) -> pd.DataFrame:
+        """
+        Liquidity screening - Three-tier liquidity filter
+
+        Args:
+            lookback_days: Lookback period for metrics calculation (default: 20)
+            min_avg_amount_20d: Minimum average daily amount in 万元 (default: 3000)
+            min_avg_turnover_20d: Minimum average turnover rate % (default: 0.3)
+            small_cap_threshold: Small cap threshold in 亿元 (default: 50)
+            high_turnover_threshold: High turnover threshold % (default: 8)
+            max_amihud_illiquidity: Maximum Amihud illiquidity (default: 0.8)
+            limit: Maximum number of results to return
+
+        Returns:
+            DataFrame with stocks that passed the liquidity filter
+        """
+        from .liquidity_query import LiquidityQuery
+
+        # Get database path from engine
+        db_path = self.engine.url.database
+
+        # Create LiquidityQuery instance
+        liquidity_query = LiquidityQuery(db_path)
+
+        # Perform liquidity screening
+        return liquidity_query.screen_by_liquidity(
+            lookback_days=lookback_days,
+            min_avg_amount_20d=min_avg_amount_20d,
+            min_avg_turnover_20d=min_avg_turnover_20d,
+            small_cap_threshold=small_cap_threshold,
+            high_turnover_threshold=high_turnover_threshold,
+            max_amihud_illiquidity=max_amihud_illiquidity,
+            limit=limit
+        )

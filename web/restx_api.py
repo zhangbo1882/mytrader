@@ -11,7 +11,8 @@ from web.restx_namespaces import (
     health_ns,
     sw_industry_ns,
     boards_ns,
-    favorites_ns
+    favorites_ns,
+    liquidity_ns
 )
 
 # Create Blueprint
@@ -45,3 +46,4 @@ api.add_namespace(financial_ns, path='/financial')
 api.add_namespace(sw_industry_ns, path='/sw-industry')
 api.add_namespace(boards_ns, path='/boards')
 api.add_namespace(favorites_ns, path='/favorites')
+api.add_namespace(liquidity_ns, path='/liquidity')

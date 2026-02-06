@@ -25,8 +25,11 @@ def financial_summary(symbol):
 
         # 处理财务指标数据（如果存在）
         indicator_df = data.get('fina_indicator', pd.DataFrame())
-        indicator_filtered = indicator_df[indicator_df['report_type'] == 1] if not indicator_df.empty else pd.DataFrame()
-        indicator = indicator_filtered.iloc[0] if not indicator_filtered.empty else None
+        if not indicator_df.empty and 'report_type' in indicator_df.columns:
+            indicator_filtered = indicator_df[indicator_df['report_type'].astype(str) == '1']
+            indicator = indicator_filtered.iloc[0] if not indicator_filtered.empty else None
+        else:
+            indicator = None
 
         income = income_filtered.iloc[0] if not income_filtered.empty else None
         balance = balance_filtered.iloc[0] if not balance_filtered.empty else None
@@ -59,23 +62,40 @@ def financial_summary(symbol):
             summary['free_cashflow'] = cashflow.get('free_cashflow')
             summary['sales_cash'] = cashflow.get('c_fr_sale_sg')  # 销售收现
 
-        # 财务指标（8个核心指标）
+        # 财务指标（从fina_indicator表获取完整指标）
+        # indicator 已经是 Series（在前面处理过），直接使用
         if indicator is not None:
-            # 盈利能力
+            # 盈利能力指标
             summary['roe'] = indicator.get('roe')  # 净资产收益率
             summary['roa'] = indicator.get('roa')  # 总资产报酬率
             summary['netprofit_margin'] = indicator.get('netprofit_margin')  # 销售净利率
             summary['grossprofit_margin'] = indicator.get('grossprofit_margin')  # 销售毛利率
+            summary['operateprofit_margin'] = indicator.get('operateprofit_margin')  # 营业利润率
+            summary['roic'] = indicator.get('roic')  # 投入资本回报率
 
-            # 成长能力
+            # 成长能力指标
             summary['or_yoy'] = indicator.get('or_yoy')  # 营业收入同比增长率
             summary['netprofit_yoy'] = indicator.get('netprofit_yoy')  # 净利润同比增长率
+            summary['assets_yoy'] = indicator.get('assets_yoy')  # 总资产同比增长率
+            summary['ebt_yoy'] = indicator.get('ebt_yoy')  # 息税前利润同比增长率
 
-            # 偿债能力
+            # 偿债能力指标
             summary['current_ratio'] = indicator.get('current_ratio')  # 流动比率
+            summary['quick_ratio'] = indicator.get('quick_ratio')  # 速动比率
+            summary['cash_ratio'] = indicator.get('cash_ratio')  # 现金比率
+            summary['debt_to_assets'] = indicator.get('debt_to_assets')  # 资产负债率
+            summary['debt_to_eqt'] = indicator.get('debt_to_eqt')  # 权益乘数(负债权益比)
 
-            # 营运能力
+            # 营运能力指标
             summary['assets_turn'] = indicator.get('assets_turn')  # 总资产周转率
+            summary['ar_turn'] = indicator.get('ar_turn')  # 应收账款周转率
+            summary['inv_turn'] = indicator.get('inv_turn')  # 存货周转率
+            summary['ca_turn'] = indicator.get('ca_turn')  # 流动资产周转率
+
+            # 每股指标
+            summary['basic_eps'] = indicator.get('basic_eps')  # 基本每股收益
+            summary['bps'] = indicator.get('bps')  # 每股净资产
+            summary['ocfps'] = indicator.get('ocfps')  # 每股经营现金流
 
         # 获取估值指标（PE、PB、市值等）
         try:
@@ -126,15 +146,24 @@ def financial_summary(symbol):
             '总资产报酬率': ('roa', '%'),
             '销售净利率': ('netprofit_margin', '%'),
             '销售毛利率': ('grossprofit_margin', '%'),
+            '营业利润率': ('operateprofit_margin', '%'),
             # 成长能力
             '营业收入增长率': ('or_yoy', '%'),
             '净利润增长率': ('netprofit_yoy', '%'),
+            '总资产增长率': ('assets_yoy', '%'),
             # 偿债能力
             '流动比率': ('current_ratio', ''),
+            '速动比率': ('quick_ratio', ''),
+            '现金比率': ('cash_ratio', ''),
+            '资产负债率': ('debt_to_assets', '%'),
             # 营运能力
             '总资产周转率': ('assets_turn', ''),
+            '应收账款周转率': ('ar_turn', ''),
+            '存货周转率': ('inv_turn', ''),
             # 每股指标
             '基本每股收益': ('basic_eps', '元'),
+            '每股净资产': ('bps', '元'),
+            '每股经营现金流': ('ocfps', '元'),
             # 利润表
             '营业总收入': ('total_operate_revenue', '元'),
             '营业利润': ('operate_profit', '元'),
@@ -147,11 +176,11 @@ def financial_summary(symbol):
             '经营活动现金流': ('n_cashflow_act', '元'),
             '自由现金流': ('free_cashflow', '元'),
             '销售收现': ('sales_cash', '元'),
-            # 估值指标
-            '市盈率': ('pe', ''),
+            # 估值指标（明确标识静态/TTM）
+            '市盈率(静态)': ('pe', ''),
             '市盈率TTM': ('pe_ttm', ''),
             '市净率': ('pb', ''),
-            '市销率': ('ps', ''),
+            '市销率(静态)': ('ps', ''),
             '市销率TTM': ('ps_ttm', ''),
             '总市值': ('total_mv', '万元'),
             '流通市值': ('circ_mv', '万元'),

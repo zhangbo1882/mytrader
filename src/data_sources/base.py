@@ -185,6 +185,31 @@ class BaseStockDB(ABC):
             conn.execute(text(sw_members_sql))
             conn.commit()
 
+        # 创建行业统计表（用于行业适配筛选）
+        industry_stats_sql = """
+        CREATE TABLE IF NOT EXISTS industry_statistics (
+            calculated_at TEXT NOT NULL,
+            sw_l1 TEXT,
+            sw_l2 TEXT,
+            sw_l3 TEXT,
+            metric_name TEXT NOT NULL,
+            p10 REAL,
+            p25 REAL,
+            p50 REAL,
+            p75 REAL,
+            p90 REAL,
+            mean REAL,
+            std REAL,
+            min REAL,
+            max REAL,
+            count INTEGER,
+            PRIMARY KEY (calculated_at, sw_l1, sw_l2, sw_l3, metric_name)
+        );
+        """
+        with self.engine.connect() as conn:
+            conn.execute(text(industry_stats_sql))
+            conn.commit()
+
         # 创建索引以提升查询性能
         index_sqls = [
             "CREATE INDEX IF NOT EXISTS idx_bars_symbol ON bars(symbol);",
@@ -213,6 +238,12 @@ class BaseStockDB(ABC):
             "CREATE INDEX IF NOT EXISTS idx_sw_members_index_code ON sw_members(index_code);",
             "CREATE INDEX IF NOT EXISTS idx_sw_members_ts_code ON sw_members(ts_code);",
             "CREATE INDEX IF NOT EXISTS idx_sw_members_is_new ON sw_members(is_new);",
+            # 行业统计表索引
+            "CREATE INDEX IF NOT EXISTS idx_ind_stats_calc ON industry_statistics(calculated_at);",
+            "CREATE INDEX IF NOT EXISTS idx_ind_stats_l1 ON industry_statistics(sw_l1);",
+            "CREATE INDEX IF NOT EXISTS idx_ind_stats_l2 ON industry_statistics(sw_l2);",
+            "CREATE INDEX IF NOT EXISTS idx_ind_stats_l3 ON industry_statistics(sw_l3);",
+            "CREATE INDEX IF NOT EXISTS idx_ind_stats_metric ON industry_statistics(metric_name);",
         ]
         with self.engine.connect() as conn:
             for index_sql in index_sqls:

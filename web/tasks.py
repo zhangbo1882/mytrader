@@ -507,7 +507,41 @@ class TaskManager:
         task['stop_requested'] = bool(task.get('stop_requested', 0))
         task['pause_requested'] = bool(task.get('pause_requested', 0))
 
+        # Format datetime fields to ISO 8601 with timezone
+        task['created_at'] = self._format_datetime(task.get('created_at'))
+        task['updated_at'] = self._format_datetime(task.get('updated_at'))
+        task['completed_at'] = self._format_datetime(task.get('completed_at'))
+
         return task
+
+    def _format_datetime(self, dt_str):
+        """
+        Convert datetime string to ISO 8601 format with timezone
+
+        Args:
+            dt_str: Datetime string in format 'YYYY-MM-DD HH:MM:SS' or None
+
+        Returns:
+            ISO 8601 formatted string with timezone (e.g., '2024-01-01T10:00:00+08:00') or None
+        """
+        if not dt_str:
+            return None
+        try:
+            # Parse the datetime string (assume it's in local timezone)
+            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+            # Format as ISO 8601 with timezone info
+            # Get current timezone offset
+            timestamp = dt.timestamp()
+            tz_offset = datetime.fromtimestamp(timestamp) - datetime.utcfromtimestamp(timestamp)
+            tz_offset_secs = int(tz_offset.total_seconds())
+            tz_offset_hours = tz_offset_secs // 3600
+            tz_offset_mins = abs(tz_offset_secs // 60) % 60
+            tz_sign = '+' if tz_offset_hours >= 0 else '-'
+            tz_str = f"{tz_sign}{abs(tz_offset_hours):02d}:{tz_offset_mins:02d}"
+
+            return f"{dt.isoformat()}{tz_str}"
+        except (ValueError, TypeError):
+            return dt_str
 
     def get_all_tasks(self, status=None, limit=None):
         """
@@ -574,9 +608,99 @@ class TaskManager:
             task['stop_requested'] = bool(task.get('stop_requested', 0))
             task['pause_requested'] = bool(task.get('pause_requested', 0))
 
+            # Format datetime fields to ISO 8601 with timezone
+            task['created_at'] = self._format_datetime(task.get('created_at'))
+            task['updated_at'] = self._format_datetime(task.get('updated_at'))
+            task['completed_at'] = self._format_datetime(task.get('completed_at'))
+
             tasks.append(task)
 
         return tasks
+
+    def claim_task(self):
+        """
+        Atomically claim a pending task for execution.
+
+        This method uses an atomic UPDATE to ensure that only one worker
+        can claim a specific task. Multiple workers calling this method
+        will get different tasks (or None if no tasks available).
+
+        Returns:
+            Task dictionary if successfully claimed, None if no tasks available
+        """
+        conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            # Start transaction
+            conn.execute('BEGIN TRANSACTION')
+
+            # Get the oldest pending task
+            cursor.execute('''
+                SELECT * FROM tasks
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT 1
+            ''')
+
+            row = cursor.fetchone()
+
+            if not row:
+                conn.rollback()
+                conn.close()
+                return None
+
+            task = dict(row)
+
+            # Parse JSON fields
+            if task.get('stats'):
+                try:
+                    task['stats'] = json.loads(task['stats'])
+                except (json.JSONDecodeError, TypeError):
+                    task['stats'] = {'success': 0, 'failed': 0, 'skipped': 0}
+
+            if task.get('params'):
+                try:
+                    task['params'] = json.loads(task['params'])
+                except (json.JSONDecodeError, TypeError):
+                    task['params'] = {}
+
+            # Atomically claim the task by updating its status
+            # Only one worker will succeed because of the WHERE status = 'pending' condition
+            cursor.execute('''
+                UPDATE tasks
+                SET status = 'running',
+                    updated_at = CURRENT_TIMESTAMP,
+                    message = 'Worker正在执行任务...'
+                WHERE task_id = ?
+                  AND status = 'pending'
+            ''', (task['task_id'],))
+
+            # Check if the update was successful
+            if cursor.rowcount == 0:
+                # Another worker already claimed this task
+                conn.rollback()
+                conn.close()
+                return None
+
+            conn.commit()
+
+            # Convert boolean fields
+            task['stop_requested'] = bool(task.get('stop_requested', 0))
+            task['pause_requested'] = bool(task.get('pause_requested', 0))
+
+            # Format datetime fields
+            task['created_at'] = self._format_datetime(task.get('created_at'))
+            task['updated_at'] = self._format_datetime(task.get('updated_at'))
+            task['completed_at'] = self._format_datetime(task.get('completed_at'))
+
+            return task
+
+        except Exception as e:
+            conn.rollback()
+            conn.close()
+            raise e
 
     def delete_task(self, task_id):
         """

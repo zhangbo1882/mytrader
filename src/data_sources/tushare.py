@@ -1392,6 +1392,11 @@ class TushareDB(BaseStockDB):
                 print(f"  ⚠️  {ts_code_std} 无财务指标数据")
                 return 0
 
+            # 添加 report_type 字段（API返回的数据中没有此字段）
+            # 默认为 1 表示合并报表
+            if 'report_type' not in df.columns:
+                df['report_type'] = 1
+
             # 去重处理
             df_before = len(df)
             df = df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date', 'report_type'], keep='last')
@@ -1402,19 +1407,10 @@ class TushareDB(BaseStockDB):
             available_columns = [col for col in core_columns if col in df.columns]
             df = df[available_columns]
 
-            # 先删除重复数据（如果存在）
+            # 先删除该股票的所有旧数据（避免主键冲突）
             with self.engine.connect() as conn:
-                # 获取API返回数据的公告日期列表
-                ann_dates = df['ann_date'].tolist()
-                placeholders = ','.join([':ann_date_' + str(i) for i in range(len(ann_dates))])
-                params = {'ts_code': ts_code_std}
-                params.update({f'ann_date_{i}': date for i, date in enumerate(ann_dates)})
-
-                delete_sql = f"""
-                DELETE FROM fina_indicator
-                WHERE ts_code = :ts_code AND ann_date IN ({placeholders})
-                """
-                conn.execute(text(delete_sql), params)
+                delete_sql = "DELETE FROM fina_indicator WHERE ts_code = :ts_code"
+                conn.execute(text(delete_sql), {'ts_code': ts_code_std})
                 conn.commit()
 
             # 保存到数据库
@@ -1897,19 +1893,20 @@ class TushareDB(BaseStockDB):
 
         Returns:
             保存的记录数
+
+        注意：Tushare的index_member_all接口返回的是每只股票及其所属行业信息
+              每行包含l1_code, l2_code, l3_code，需要展开为多条记录
         """
         try:
-            # 构建查询参数
+            # 构建查询参数 - 只传is_new，不传index_code（API不会按index_code过滤）
             params = {'is_new': is_new}
-            if index_code:
-                params['index_code'] = index_code
             if ts_code:
                 params['ts_code'] = ts_code
 
             desc = f"index_code={index_code}" if index_code else f"ts_code={ts_code}" if ts_code else "全部"
             print(f"  📥 获取申万行业成分股数据 ({desc}, is_new={is_new})...")
 
-            # 获取数据
+            # 获取数据（一次性获取所有股票的行业信息）
             df = self._retry_api_call(
                 self.pro.index_member_all,
                 **params
@@ -1919,30 +1916,46 @@ class TushareDB(BaseStockDB):
                 print(f"  ⚠️  无申万行业成分股数据")
                 return 0
 
-            # 如果指定了 index_code，删除旧数据
-            if index_code and force_update:
-                delete_sql = "DELETE FROM sw_members WHERE index_code = :index_code"
-                with self.engine.connect() as conn:
-                    conn.execute(text(delete_sql), {"index_code": index_code})
-                    conn.commit()
+            # 将宽格式转换为长格式（每个股票-行业对一条记录）
+            records = []
+            for _, row in df.iterrows():
+                ts_code = row['ts_code']
+                name = row['name']
+                in_date = row['in_date']
+                out_date = row['out_date']
 
-            # 准备数据
-            df = df.copy()
-            df['is_new'] = is_new
+                # 为每个非空行业代码创建一条记录
+                for level in ['l3', 'l2', 'l1']:  # 优先三级行业
+                    code_col = f'{level}_code'
+                    name_col = f'{level}_name'
 
-            # API 返回的数据中没有 index_code 字段，需要手动添加
-            if index_code and 'index_code' not in df.columns:
-                df['index_code'] = index_code
+                    if pd.notna(row.get(code_col)):
+                        records.append({
+                            'index_code': row[code_col],
+                            'ts_code': ts_code,
+                            'name': name,
+                            'in_date': in_date,
+                            'out_date': out_date,
+                            'is_new': is_new
+                        })
+                        # 如果指定了index_code，找到匹配后就不再处理更低级别的行业
+                        if index_code and row[code_col] == index_code:
+                            break
 
-            # 选择列
-            columns = ['index_code', 'ts_code', 'name', 'in_date', 'out_date', 'is_new']
+            # 如果指定了index_code，过滤出该行业的记录
+            if index_code:
+                records = [r for r in records if r['index_code'] == index_code]
 
-            # 确保所有列都存在
-            for col in columns:
-                if col not in df.columns:
-                    df[col] = None
+                # 删除该行业的旧数据
+                if force_update and records:
+                    delete_sql = "DELETE FROM sw_members WHERE index_code = :index_code"
+                    with self.engine.connect() as conn:
+                        conn.execute(text(delete_sql), {"index_code": index_code})
+                        conn.commit()
 
-            df = df[columns]
+            if not records:
+                print(f"  ⚠️  无符合条件的申万行业成分股数据")
+                return 0
 
             # 保存到数据库 - 使用 upsert 避免重复插入
             upsert_sql = """
@@ -1956,19 +1969,12 @@ class TushareDB(BaseStockDB):
             """
 
             with self.engine.connect() as conn:
-                for _, row in df.iterrows():
-                    conn.execute(text(upsert_sql), {
-                        "index_code": row['index_code'],
-                        "ts_code": row['ts_code'],
-                        "name": row['name'],
-                        "in_date": row['in_date'],
-                        "out_date": row['out_date'],
-                        "is_new": row['is_new']
-                    })
+                for record in records:
+                    conn.execute(text(upsert_sql), record)
                 conn.commit()
 
-            print(f"  ✅ 已保存申万行业成分股 {len(df)} 条记录")
-            return len(df)
+            print(f"  ✅ 已保存申万行业成分股 {len(records)} 条记录")
+            return len(records)
 
         except Exception as e:
             error_msg = str(e)
@@ -1976,6 +1982,8 @@ class TushareDB(BaseStockDB):
                 print(f"  ⚠️  无权限获取申万行业成分股数据（需要2000+积分）")
             else:
                 print(f"  ❌ 保存申万行业成分股失败: {e}")
+            import traceback
+            traceback.print_exc()
             return 0
 
     def get_outdated_indices(self, src: str = 'SW2021', days: int = 7) -> list:

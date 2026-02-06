@@ -108,7 +108,7 @@ npm install
 npm run dev
 ```
 
-访问 http://localhost:5173
+访问 http://localhost:5002
 
 ### 构建生产版本
 
@@ -190,12 +190,12 @@ function QueryPage() {
 创建 `.env` 文件配置环境变量：
 
 ```bash
-VITE_API_BASE_URL=http://localhost:5000/api
+VITE_API_BASE_URL=http://localhost:5001/api
 ```
 
 ## 后端API对接
 
-开发服务器已配置代理，所有 `/api` 请求将转发到 `http://localhost:5000`。
+开发服务器已配置代理，所有 `/api` 请求将转发到 `http://localhost:5001`。
 
 在生产环境中，确保后端CORS配置正确。
 
@@ -273,7 +273,7 @@ npm install
 
 ```bash
 # 检查端口占用
-lsof -i :5173
+lsof -i :5002
 
 # 使用其他端口
 npm run dev -- --port 3000

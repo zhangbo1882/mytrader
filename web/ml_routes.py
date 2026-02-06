@@ -513,6 +513,241 @@ def api_get_model_performance(model_id):
         return jsonify({'error': f'查询失败: {str(e)}'}), 500
 
 
+# ==================== Quarterly Model Routes ====================
+
+@ml_bp.route('/api/ml/quarterly/train', methods=['POST'])
+def api_train_quarterly_model():
+    """
+    训练季度财务预测模型 API
+
+    Body (JSON):
+        symbols: 股票代码列表
+        start_quarter: 开始季度 (e.g., "2020Q1")
+        end_quarter: 结束季度 (e.g., "2024Q4")
+        feature_mode: 特征模式 ("financial_only", "with_reports", "with_valuation")
+        train_mode: 训练模式 ("single", "multi")
+        optimize_hyperparams: 是否优化超参数 (default: false)
+        train_ratio: 训练集比例 (default: 0.7)
+        val_ratio: 验证集比例 (default: 0.15)
+    """
+    try:
+        from web.services.quarterly_ml_service import create_quarterly_training_task
+
+        data = request.json
+        if not data:
+            return jsonify({'error': '请求数据为空'}), 400
+
+        # Extract parameters
+        symbols = data.get('symbols', [])
+        start_quarter = data.get('start_quarter', '2020Q1')
+        end_quarter = data.get('end_quarter', '2024Q4')
+        feature_mode = data.get('feature_mode', 'financial_only')
+        train_mode = data.get('train_mode', 'multi')
+        optimize_hyperparams = data.get('optimize_hyperparams', False)
+        train_ratio = data.get('train_ratio', 0.7)
+        val_ratio = data.get('val_ratio', 0.15)
+
+        # Validate parameters
+        if not symbols:
+            return jsonify({'error': '必须提供股票代码列表 (symbols)'}), 400
+
+        if train_mode == 'single' and len(symbols) > 1:
+            return jsonify({'error': '单股票模式 (single) 只能提供一只股票代码'}), 400
+
+        # Create training task
+        result = create_quarterly_training_task({
+            'symbols': symbols,
+            'start_quarter': start_quarter,
+            'end_quarter': end_quarter,
+            'feature_mode': feature_mode,
+            'train_mode': train_mode,
+            'optimize_hyperparams': optimize_hyperparams,
+            'train_ratio': train_ratio,
+            'val_ratio': val_ratio
+        })
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+
+    except Exception as e:
+        logger.error(f"Error in api_train_quarterly_model: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': f'请求失败: {str(e)}'}), 500
+
+
+@ml_bp.route('/api/ml/quarterly/models')
+def api_list_quarterly_models():
+    """
+    列出所有季度模型
+
+    Query params:
+        symbol: 股票代码过滤 (可选)
+        limit: 返回数量限制 (默认50)
+    """
+    try:
+        from web.services.quarterly_ml_service import get_quarterly_models
+
+        symbol = request.args.get('symbol')
+        limit = int(request.args.get('limit', 50))
+
+        result = get_quarterly_models(symbol=symbol, limit=limit)
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+
+    except Exception as e:
+        logger.error(f"Error listing quarterly models: {str(e)}")
+        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+
+
+@ml_bp.route('/api/ml/quarterly/models/<model_id>')
+def api_get_quarterly_model(model_id):
+    """
+    获取季度模型详细信息
+
+    Path params:
+        model_id: 模型ID
+    """
+    try:
+        from web.services.quarterly_ml_service import get_quarterly_model
+
+        result = get_quarterly_model(model_id)
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 404 if 'not found' in result.get('error', '') else 500
+
+    except Exception as e:
+        logger.error(f"Error getting quarterly model: {str(e)}")
+        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+
+
+@ml_bp.route('/api/ml/quarterly/predict', methods=['POST'])
+def api_predict_quarterly():
+    """
+    使用季度模型进行预测
+
+    Body (JSON):
+        model_id: 模型ID
+        symbols: 股票代码列表
+    """
+    try:
+        from web.services.quarterly_ml_service import predict_quarterly_return
+
+        data = request.json
+        if not data:
+            return jsonify({'error': '请求数据为空'}), 400
+
+        model_id = data.get('model_id')
+        symbols = data.get('symbols', [])
+
+        if not model_id:
+            return jsonify({'error': '请指定模型ID'}), 400
+
+        if not symbols:
+            return jsonify({'error': '请提供股票代码列表'}), 400
+
+        result = predict_quarterly_return(model_id, symbols)
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+
+    except Exception as e:
+        logger.error(f"Error in quarterly prediction: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'error': f'预测失败: {str(e)}'}), 500
+
+
+@ml_bp.route('/api/ml/quarterly/models/<model_id>/evaluation')
+def api_evaluate_quarterly_model(model_id):
+    """
+    获取季度模型评估报告
+
+    Path params:
+        model_id: 模型ID
+
+    Query params:
+        test_start_quarter: 测试期开始季度 (可选)
+        test_end_quarter: 测试期结束季度 (可选)
+    """
+    try:
+        from web.services.quarterly_ml_service import evaluate_quarterly_model
+
+        test_start_quarter = request.args.get('test_start_quarter')
+        test_end_quarter = request.args.get('test_end_quarter')
+
+        result = evaluate_quarterly_model(
+            model_id,
+            test_start_quarter=test_start_quarter,
+            test_end_quarter=test_end_quarter
+        )
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 404 if 'not found' in result.get('error', '') else 500
+
+    except Exception as e:
+        logger.error(f"Error evaluating quarterly model: {str(e)}")
+        return jsonify({'error': f'评估失败: {str(e)}'}), 500
+
+
+@ml_bp.route('/api/ml/quarterly/models/<model_id>/importance')
+def api_get_quarterly_feature_importance(model_id):
+    """
+    获取季度模型特征重要性
+
+    Path params:
+        model_id: 模型ID
+
+    Query params:
+        top_n: 返回前N个特征 (默认20)
+    """
+    try:
+        from web.services.quarterly_ml_service import get_feature_importance
+
+        top_n = int(request.args.get('top_n', 20))
+
+        result = get_feature_importance(model_id, top_n=top_n)
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 404 if 'not found' in result.get('error', '') else 500
+
+    except Exception as e:
+        logger.error(f"Error getting feature importance: {str(e)}")
+        return jsonify({'error': f'查询失败: {str(e)}'}), 500
+
+
+@ml_bp.route('/api/ml/quarterly/models/<model_id>', methods=['DELETE'])
+def api_delete_quarterly_model(model_id):
+    """
+    删除季度模型
+
+    Path params:
+        model_id: 模型ID
+    """
+    try:
+        from web.services.quarterly_ml_service import delete_quarterly_model
+
+        result = delete_quarterly_model(model_id)
+
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+
+    except Exception as e:
+        logger.error(f"Error deleting quarterly model: {str(e)}")
+        return jsonify({'error': f'删除失败: {str(e)}'}), 500
+
+
 def register_ml_routes(app):
     """
     注册ML路由到Flask应用

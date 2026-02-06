@@ -59,6 +59,9 @@ export const taskService = {
       case 'industry':
         taskType = 'update_industry_classification';
         break;
+      case 'statistics':
+        taskType = 'update_industry_statistics';
+        break;
       case 'stock':
       default:
         taskType = 'update_stock_prices';
