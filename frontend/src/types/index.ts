@@ -6,3 +6,6 @@ export * from './board.types';
 export * from './financial.types';
 export * from './ai.types';
 export * from './ml.types';
+export * from './backtest.types';
+export * from './valuation.types';
+export * from './screening.types';

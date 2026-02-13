@@ -1050,20 +1050,127 @@ class TushareDB(BaseStockDB):
 
     # ==================== 财务数据相关方法 ====================
 
-    def _create_financial_table_from_df(self, table_name: str, df: pd.DataFrame):
+    def _create_unified_financial_table(self, table_name: str):
         """
-        根据DataFrame动态创建财务报表表
+        创建统一财务报表表（如果不存在）
+
+        统一表包含所有股票的数据，使用 ts_code 字段区分
 
         Args:
-            table_name: 表名（如 income_000001）
-            df: 包含列信息的DataFrame
+            table_name: 表名（income, balancesheet, cashflow）
         """
-        if df.empty:
-            raise ValueError("DataFrame为空，无法创建表")
+        # 定义每张表的字段列表
+        table_columns = {
+            'income': [
+                # 主键字段
+                'ts_code', 'ann_date', 'end_date',
+                # 利润表字段
+                'f_ann_date', 'report_type', 'comp_type', 'end_type',
+                'basic_eps', 'diluted_eps', 'total_revenue', 'revenue',
+                'int_income', 'prem_earned', 'comm_income', 'n_commis_income',
+                'n_oth_income', 'n_oth_b_income', 'prem_income', 'out_prem',
+                'une_prem_reser', 'reins_income', 'n_sec_tb_income', 'n_sec_uw_income',
+                'n_asset_mg_income', 'oth_b_income', 'fv_value_chg_gain', 'invest_income',
+                'ass_invest_income', 'forex_gain', 'total_cogs', 'oper_cost',
+                'int_exp', 'comm_exp', 'biz_tax_surchg', 'sell_exp', 'admin_exp',
+                'fin_exp', 'assets_impair_loss', 'prem_refund', 'compens_payout',
+                'reser_insur_liab', 'div_payt', 'reins_exp', 'oper_exp',
+                'compens_payout_refu', 'insur_reser_refu', 'reins_cost_refund', 'other_bus_cost',
+                'operate_profit', 'non_oper_income', 'non_oper_exp', 'nca_disploss',
+                'total_profit', 'income_tax', 'n_income', 'n_income_attr_p',
+                'minority_gain', 'oth_compr_income', 't_compr_income', 'compr_inc_attr_p',
+                'compr_inc_attr_m_s', 'ebit', 'ebitda', 'insurance_exp',
+                'undist_profit', 'distable_profit', 'rd_exp', 'fin_exp_int_exp',
+                'fin_exp_int_inc', 'transfer_surplus_rese', 'transfer_housing_imprest',
+                'transfer_oth', 'adj_lossgain', 'withdra_legal_surplus', 'withdra_legal_pubfund',
+                'withdra_biz_devfund', 'withdra_rese_fund', 'withdra_oth_ersu',
+                'workers_welfare', 'distr_profit_shrhder', 'prfshare_payable_dvd',
+                'comshare_payable_dvd', 'capit_comstock_div', 'continued_net_profit',
+                'update_flag'
+            ],
+            'balancesheet': [
+                # 主键字段
+                'ts_code', 'ann_date', 'end_date',
+                # 资产负债表字段
+                'f_ann_date', 'report_type', 'comp_type', 'end_type',
+                'total_share', 'cap_rese', 'undistr_porfit', 'surplus_rese',
+                'special_rese', 'money_cap', 'trad_asset', 'notes_receiv',
+                'accounts_receiv', 'oth_receiv', 'prepayment', 'div_receiv',
+                'int_receiv', 'inventories', 'amor_exp', 'nca_within_1y',
+                'sett_rsrv', 'loanto_oth_bank_fi', 'premium_receiv', 'reinsur_receiv',
+                'reinsur_res_receiv', 'pur_resale_fa', 'oth_cur_assets', 'total_cur_assets',
+                'fa_avail_for_sale', 'htm_invest', 'lt_eqt_invest', 'invest_real_estate',
+                'time_deposits', 'oth_assets', 'lt_rec', 'fix_assets', 'cip',
+                'const_materials', 'fixed_assets_disp', 'produc_bio_assets', 'oil_and_gas_assets',
+                'intan_assets', 'r_and_d', 'goodwill', 'lt_amor_exp', 'defer_tax_assets',
+                'decr_in_disbur', 'oth_nca', 'total_nca', 'cash_reser_cb',
+                'depos_in_oth_bfi', 'prec_metals', 'deriv_assets', 'rr_reins_une_prem',
+                'rr_reins_outstd_cla', 'rr_reins_lins_liab', 'rr_reins_lthins_liab',
+                'refund_depos', 'ph_pledge_loans', 'refund_cap_depos', 'indep_acct_assets',
+                'client_depos', 'client_prov', 'transac_seat_fee', 'invest_as_receiv',
+                'total_assets', 'lt_borr', 'st_borr', 'cb_borr', 'depos_ib_deposits',
+                'loan_oth_bank', 'trading_fl', 'notes_payable', 'acct_payable',
+                'adv_receipts', 'sold_for_repur_fa', 'comm_payable', 'payroll_payable',
+                'taxes_payable', 'int_payable', 'div_payable', 'oth_payable',
+                'acc_exp', 'deferred_inc', 'st_bonds_payable', 'payable_to_reinsurer',
+                'rsrv_insur_cont', 'acting_trading_sec', 'acting_uw_sec',
+                'non_cur_liab_due_1y', 'oth_cur_liab', 'total_cur_liab', 'bond_payable',
+                'lt_payable', 'specific_payables', 'estimated_liab', 'defer_tax_liab',
+                'defer_inc_non_cur_liab', 'oth_ncl', 'total_ncl', 'depos_oth_bfi',
+                'deriv_liab', 'depos', 'agency_bus_liab', 'oth_liab', 'prem_receiv_adva',
+                'depos_received', 'ph_invest', 'reser_une_prem', 'reser_outstd_claims',
+                'reser_lins_liab', 'reser_lthins_liab', 'indept_acc_liab', 'pledge_borr',
+                'indem_payable', 'policy_div_payable', 'total_liab', 'treasury_share',
+                'ordin_risk_reser', 'forex_differ', 'invest_loss_unconf', 'minority_int',
+                'total_hldr_eqy_exc_min_int', 'total_hldr_eqy_inc_min_int', 'total_liab_hldr_eqy',
+                'lt_payroll_payable', 'oth_comp_income', 'oth_eqt_tools', 'oth_eqt_tools_p_shr',
+                'lending_funds', 'acc_receivable', 'st_fin_payable', 'payables',
+                'hfs_assets', 'hfs_sales', 'cost_fin_assets', 'fair_value_fin_assets',
+                'contract_assets', 'contract_liab', 'accounts_receiv_bill', 'accounts_pay',
+                'oth_rcv_total', 'fix_assets_total', 'cip_total', 'oth_pay_total',
+                'long_pay_total', 'debt_invest', 'oth_debt_invest', 'update_flag'
+            ],
+            'cashflow': [
+                # 主键字段
+                'ts_code', 'ann_date', 'end_date',
+                # 现金流量表字段
+                'f_ann_date', 'comp_type', 'report_type', 'end_type',
+                'net_profit', 'finan_exp', 'c_fr_sale_sg', 'recp_tax_rends',
+                'n_depos_incr_fi', 'n_incr_loans_cb', 'n_inc_borr_oth_fi', 'prem_fr_orig_contr',
+                'n_incr_insured_dep', 'n_reinsur_prem', 'n_incr_disp_tfa', 'ifc_cash_incr',
+                'n_incr_disp_faas', 'n_incr_loans_oth_bank', 'n_cap_incr_repur', 'c_fr_oth_operate_a',
+                'c_inf_fr_operate_a', 'c_paid_goods_s', 'c_paid_to_for_empl', 'c_paid_for_taxes',
+                'n_incr_clt_loan_adv', 'n_incr_dep_cbob', 'c_pay_claims_orig_inco', 'pay_handling_chrg',
+                'pay_comm_insur_plcy', 'oth_cash_pay_oper_act', 'st_cash_out_act', 'n_cashflow_act',
+                'oth_recp_ral_inv_act', 'c_disp_withdrwl_invest', 'c_recp_return_invest',
+                'n_recp_disp_fiolta', 'n_recp_disp_sobu', 'stot_inflows_inv_act',
+                'c_pay_acq_const_fiolta', 'c_paid_invest', 'n_disp_subs_oth_biz',
+                'oth_pay_ral_inv_act', 'n_incr_pledge_loan', 'stot_out_inv_act', 'n_cashflow_inv_act',
+                'c_recp_borrow', 'proc_issue_bonds', 'oth_cash_recp_ral_fnc_act',
+                'stot_cash_in_fnc_act', 'free_cashflow', 'c_prepay_amt_borr', 'c_pay_dist_dpcp_int_exp',
+                'incl_dvd_profit_paid_sc_ms', 'oth_cashpay_ral_fnc_act', 'stot_cashout_fnc_act',
+                'n_cash_flows_fnc_act', 'eff_fx_flu_cash', 'n_incr_cash_cash_equ',
+                'c_cash_equ_beg_period', 'c_cash_equ_end_period', 'c_recp_cap_contrib',
+                'incl_cash_rec_saims', 'uncon_invest_loss', 'prov_depr_assets', 'depr_fa_coga_dpba',
+                'amort_intang_assets', 'lt_amort_deferred_exp', 'decr_deferred_exp', 'incr_acc_exp',
+                'loss_disp_fiolta', 'loss_scr_fa', 'loss_fv_chg', 'invest_loss',
+                'decr_def_inc_tax_assets', 'incr_def_inc_tax_liab', 'decr_inventories',
+                'decr_oper_payable', 'incr_oper_payable', 'others', 'im_net_cashflow_oper_act',
+                'conv_debt_into_cap', 'conv_copbonds_due_within_1y', 'fa_fnc_leases',
+                'im_n_incr_cash_equ', 'net_dism_capital_add', 'net_cash_rece_sec',
+                'credit_impa_loss', 'use_right_asset_dep', 'oth_loss_asset', 'end_bal_cash',
+                'beg_bal_cash', 'end_bal_cash_equ', 'beg_bal_cash_equ', 'update_flag'
+            ]
+        }
+
+        if table_name not in table_columns:
+            raise ValueError(f"未知的表类型: {table_name}")
+
+        columns = table_columns[table_name]
 
         # 构建列定义
         columns_def = []
-        for col in df.columns:
+        for col in columns:
             if col in ['ts_code', 'ann_date', 'end_date']:
                 columns_def.append(f"{col} TEXT NOT NULL")
             else:
@@ -1085,7 +1192,10 @@ class TushareDB(BaseStockDB):
             with self.engine.connect() as conn:
                 conn.execute(text(sql))
                 conn.commit()
-            print(f"✅ 表 {table_name} 已创建")
+                # 创建索引
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_symbol_date ON {table_name}(ts_code, end_date)"))
+                conn.execute(text(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_date ON {table_name}(end_date)"))
+                conn.commit()
         except Exception as e:
             print(f"⚠️  创建表 {table_name} 失败: {e}")
             raise
@@ -1104,7 +1214,7 @@ class TushareDB(BaseStockDB):
 
     def save_income(self, ts_code: str, start_date: str = None, end_date: str = None):
         """
-        获取并保存利润表数据
+        获取并保存利润表数据到统一表
 
         Args:
             ts_code: 股票代码（如 000001.SZ 或 000001）
@@ -1117,8 +1227,7 @@ class TushareDB(BaseStockDB):
         try:
             # 标准化代码
             ts_code_std = self._standardize_code(ts_code)
-            code = self._extract_stock_code(ts_code_std)
-            table_name = f"income_{code}"
+            table_name = "income"
 
             # 获取数据
             print(f"  📥 获取利润表数据 {ts_code_std}...")
@@ -1139,39 +1248,18 @@ class TushareDB(BaseStockDB):
             if len(df) < df_before:
                 print(f"  🔄 去除重复数据: {df_before} -> {len(df)} 条")
 
-            # 检查表是否存在，不存在则创建
-            table_exists = False
+            # 确保统一表存在
+            self._create_unified_financial_table(table_name)
+
+            # 删除该股票的旧数据（避免主键冲突）
             with self.engine.connect() as conn:
-                result = conn.execute(text(
-                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-                ))
-                table_exists = result.fetchone() is not None
+                delete_sql = "DELETE FROM income WHERE ts_code = :ts_code"
+                conn.execute(text(delete_sql), {'ts_code': ts_code_std})
+                conn.commit()
 
-            # 保存到数据库
-            if not table_exists:
-                # 表不存在，创建并插入
-                self._create_financial_table_from_df(table_name, df)
-                df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                print(f"  ✅ 已保存利润表 {len(df)} 条记录")
-            else:
-                # 表已存在，检查是否有重复
-                existing_df = pd.read_sql_query(f"SELECT ts_code, ann_date, end_date FROM {table_name}", self.engine)
-                if existing_df.empty:
-                    # 表为空，直接插入
-                    df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                    print(f"  ✅ 已保存利润表 {len(df)} 条记录")
-                else:
-                    # 合并并去重
-                    merged_df = pd.concat([existing_df, df], ignore_index=True)
-                    merged_df = merged_df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='last')
-
-                    # 删除旧表并重新创建
-                    with self.engine.connect() as conn:
-                        conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-                        conn.commit()
-                    self._create_financial_table_from_df(table_name, merged_df)
-                    merged_df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                    print(f"  ✅ 已保存利润表 {len(merged_df)} 条记录（含历史数据）")
+            # 保存到统一表
+            df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
+            print(f"  ✅ 已保存利润表 {len(df)} 条记录")
 
             return len(df)
 
@@ -1185,7 +1273,7 @@ class TushareDB(BaseStockDB):
 
     def save_balancesheet(self, ts_code: str, start_date: str = None, end_date: str = None):
         """
-        获取并保存资产负债表数据
+        获取并保存资产负债表数据到统一表
 
         Args:
             ts_code: 股票代码（如 000001.SZ 或 000001）
@@ -1198,8 +1286,7 @@ class TushareDB(BaseStockDB):
         try:
             # 标准化代码
             ts_code_std = self._standardize_code(ts_code)
-            code = self._extract_stock_code(ts_code_std)
-            table_name = f"balancesheet_{code}"
+            table_name = "balancesheet"
 
             # 获取数据
             print(f"  📥 获取资产负债表数据 {ts_code_std}...")
@@ -1220,33 +1307,18 @@ class TushareDB(BaseStockDB):
             if len(df) < df_before:
                 print(f"  🔄 去除重复数据: {df_before} -> {len(df)} 条")
 
-            # 检查表是否存在，不存在则创建
-            table_exists = False
-            with self.engine.connect() as conn:
-                result = conn.execute(text(
-                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-                ))
-                table_exists = result.fetchone() is not None
+            # 确保统一表存在
+            self._create_unified_financial_table(table_name)
 
-            # 保存到数据库
-            if not table_exists:
-                self._create_financial_table_from_df(table_name, df)
-                df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                print(f"  ✅ 已保存资产负债表 {len(df)} 条记录")
-            else:
-                existing_df = pd.read_sql_query(f"SELECT ts_code, ann_date, end_date FROM {table_name}", self.engine)
-                if existing_df.empty:
-                    df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                    print(f"  ✅ 已保存资产负债表 {len(df)} 条记录")
-                else:
-                    merged_df = pd.concat([existing_df, df], ignore_index=True)
-                    merged_df = merged_df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='last')
-                    with self.engine.connect() as conn:
-                        conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-                        conn.commit()
-                    self._create_financial_table_from_df(table_name, merged_df)
-                    merged_df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                    print(f"  ✅ 已保存资产负债表 {len(merged_df)} 条记录（含历史数据）")
+            # 删除该股票的旧数据（避免主键冲突）
+            with self.engine.connect() as conn:
+                delete_sql = "DELETE FROM balancesheet WHERE ts_code = :ts_code"
+                conn.execute(text(delete_sql), {'ts_code': ts_code_std})
+                conn.commit()
+
+            # 保存到统一表
+            df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
+            print(f"  ✅ 已保存资产负债表 {len(df)} 条记录")
 
             return len(df)
 
@@ -1260,7 +1332,7 @@ class TushareDB(BaseStockDB):
 
     def save_cashflow(self, ts_code: str, start_date: str = None, end_date: str = None):
         """
-        获取并保存现金流量表数据
+        获取并保存现金流量表数据到统一表
 
         Args:
             ts_code: 股票代码（如 000001.SZ 或 000001）
@@ -1273,8 +1345,7 @@ class TushareDB(BaseStockDB):
         try:
             # 标准化代码
             ts_code_std = self._standardize_code(ts_code)
-            code = self._extract_stock_code(ts_code_std)
-            table_name = f"cashflow_{code}"
+            table_name = "cashflow"
 
             # 获取数据
             print(f"  📥 获取现金流量表数据 {ts_code_std}...")
@@ -1295,33 +1366,18 @@ class TushareDB(BaseStockDB):
             if len(df) < df_before:
                 print(f"  🔄 去除重复数据: {df_before} -> {len(df)} 条")
 
-            # 检查表是否存在，不存在则创建
-            table_exists = False
-            with self.engine.connect() as conn:
-                result = conn.execute(text(
-                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-                ))
-                table_exists = result.fetchone() is not None
+            # 确保统一表存在
+            self._create_unified_financial_table(table_name)
 
-            # 保存到数据库
-            if not table_exists:
-                self._create_financial_table_from_df(table_name, df)
-                df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                print(f"  ✅ 已保存现金流量表 {len(df)} 条记录")
-            else:
-                existing_df = pd.read_sql_query(f"SELECT ts_code, ann_date, end_date FROM {table_name}", self.engine)
-                if existing_df.empty:
-                    df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                    print(f"  ✅ 已保存现金流量表 {len(df)} 条记录")
-                else:
-                    merged_df = pd.concat([existing_df, df], ignore_index=True)
-                    merged_df = merged_df.drop_duplicates(subset=['ts_code', 'ann_date', 'end_date'], keep='last')
-                    with self.engine.connect() as conn:
-                        conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-                        conn.commit()
-                    self._create_financial_table_from_df(table_name, merged_df)
-                    merged_df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
-                    print(f"  ✅ 已保存现金流量表 {len(merged_df)} 条记录（含历史数据）")
+            # 删除该股票的旧数据（避免主键冲突）
+            with self.engine.connect() as conn:
+                delete_sql = "DELETE FROM cashflow WHERE ts_code = :ts_code"
+                conn.execute(text(delete_sql), {'ts_code': ts_code_std})
+                conn.commit()
+
+            # 保存到统一表
+            df.to_sql(table_name, self.engine, if_exists="append", index=False, method="multi")
+            print(f"  ✅ 已保存现金流量表 {len(df)} 条记录")
 
             return len(df)
 
@@ -1497,7 +1553,7 @@ class TushareDB(BaseStockDB):
 
     def get_latest_financial_date(self, ts_code: str, table_type: str) -> str:
         """
-        查询指定股票的最新财报日期
+        查询指定股票的最新财报日期（从统一表查询）
 
         Args:
             ts_code: 股票代码（如 000001.SZ 或 000001）
@@ -1510,12 +1566,8 @@ class TushareDB(BaseStockDB):
             # 标准化代码
             ts_code_std = self._standardize_code(ts_code)
 
-            # fina_indicator 使用统一表名
-            if table_type == 'fina_indicator':
-                table_name = 'fina_indicator'
-            else:
-                code = self._extract_stock_code(ts_code_std)
-                table_name = f"{table_type}_{code}"
+            # 所有财务表都使用统一表名
+            table_name = table_type
 
             # 检查表是否存在
             with self.engine.connect() as conn:
@@ -1986,6 +2038,130 @@ class TushareDB(BaseStockDB):
             traceback.print_exc()
             return 0
 
+    def save_sw_members_all(self, is_new: str = 'Y', src: str = 'SW2021') -> int:
+        """
+        获取并保存所有股票的申万行业成分股数据（完整版）
+
+        通过遍历一级行业代码来分批获取数据。
+        使用 l1_code 参数获取每个一级行业的成分股。
+
+        Args:
+            is_new: 是否最新成分，Y=是（默认），N=否
+            src: 行业分类来源，SW2021 或 SW2014
+
+        Returns:
+            保存的记录数
+        """
+        import pandas as pd
+        from sqlalchemy import text
+
+        try:
+            # 获取所有一级行业代码
+            print(f"  📋 获取一级行业列表...")
+            l1_industries = pd.read_sql_query(
+                "SELECT index_code, industry_name FROM sw_classify WHERE level = 'L1' AND src = :src ORDER BY index_code",
+                self.engine,
+                params={"src": src}
+            )
+
+            if l1_industries.empty:
+                print(f"  ⚠️  无行业分类数据")
+                return 0
+
+            l1_codes = l1_industries['index_code'].tolist()
+            print(f"  📊 共 {len(l1_codes)} 个一级行业需要查询")
+
+            # 遍历每个一级行业获取成分股
+            all_records = []
+            failed_industries = []
+            seen_stocks = set()  # 用于跟踪已处理的股票
+
+            for i, index_code in enumerate(l1_codes):
+                industry_name = l1_industries[l1_industries['index_code'] == index_code]['industry_name'].values[0]
+                try:
+                    if (i + 1) % 5 == 0 or i == 0:
+                        print(f"  🔄 正在查询 [{i+1}/{len(l1_codes)}] {industry_name} ({index_code})")
+
+                    # 使用 l1_code 参数查询该一级行业的所有成分股
+                    df = self._retry_api_call(
+                        self.pro.index_member_all,
+                        l1_code=index_code,  # 注意：使用 l1_code 而不是 index_code
+                        is_new=is_new
+                    )
+
+                    if df is None or df.empty:
+                        # 该行业可能没有成分股数据
+                        continue
+
+                    # 将宽格式转换为长格式（每个股票-行业对一条记录）
+                    for _, row in df.iterrows():
+                        ts_code = row['ts_code']
+                        name = row['name']
+                        in_date = row['in_date']
+                        out_date = row['out_date']
+
+                        # 跳过已处理的股票（避免重复）
+                        if ts_code in seen_stocks:
+                            continue
+                        seen_stocks.add(ts_code)
+
+                        # 为每个非空行业代码创建一条记录（L1, L2, L3）
+                        for level in ['l3', 'l2', 'l1']:
+                            code_col = f'{level}_code'
+                            if pd.notna(row.get(code_col)):
+                                all_records.append({
+                                    'index_code': row[code_col],
+                                    'ts_code': ts_code,
+                                    'name': name,
+                                    'in_date': in_date,
+                                    'out_date': out_date,
+                                    'is_new': is_new
+                                })
+
+                except Exception as e:
+                    failed_industries.append((index_code, industry_name, str(e)))
+                    print(f"  ⚠️  查询 {industry_name} ({index_code}) 失败: {e}")
+
+            if failed_industries:
+                print(f"  ⚠️  共 {len(failed_industries)} 个行业查询失败")
+
+            if not all_records:
+                print(f"  ⚠️  无申万行业成分股数据")
+                return 0
+
+            # 保存到数据库
+            print(f"  💾 正在保存 {len(all_records)} 条记录...")
+
+            upsert_sql = """
+            INSERT INTO sw_members (index_code, ts_code, name, in_date, out_date, is_new)
+            VALUES (:index_code, :ts_code, :name, :in_date, :out_date, :is_new)
+            ON CONFLICT(index_code, ts_code) DO UPDATE SET
+                name = :name,
+                in_date = :in_date,
+                out_date = :out_date,
+                is_new = :is_new
+            """
+
+            with self.engine.connect() as conn:
+                for record in all_records:
+                    conn.execute(text(upsert_sql), record)
+                conn.commit()
+
+            unique_stocks = len(seen_stocks)
+            print(f"  ✅ 已保存申万行业成分股 {len(all_records)} 条记录")
+            print(f"  📈 覆盖 {unique_stocks} 只股票")
+            return len(all_records)
+
+        except Exception as e:
+            error_msg = str(e)
+            if "无权限" in error_msg or "权限" in error_msg or "403" in error_msg:
+                print(f"  ⚠️  无权限获取申万行业成分股数据（需要2000+积分）")
+            else:
+                print(f"  ❌ 保存申万行业成分股失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+
     def get_outdated_indices(self, src: str = 'SW2021', days: int = 7) -> list:
         """
         获取需要更新的行业代码列表（根据 updated_at 判断）
@@ -2205,3 +2381,747 @@ class TushareDB(BaseStockDB):
         query += " ORDER BY industry_code"
 
         return pd.read_sql_query(query, self.engine, params=params)
+
+    # ==================== 资金流向相关方法 ====================
+
+    def _create_moneyflow_tables(self):
+        """创建资金流向相关表"""
+        # 创建个股资金流向表
+        stock_moneyflow_sql = """
+        CREATE TABLE IF NOT EXISTS stock_moneyflow (
+            ts_code TEXT NOT NULL,
+            trade_date TEXT NOT NULL,
+
+            -- 小单
+            buy_sm_vol INTEGER,
+            buy_sm_amount REAL,
+            sell_sm_vol INTEGER,
+            sell_sm_amount REAL,
+
+            -- 中单
+            buy_md_vol INTEGER,
+            buy_md_amount REAL,
+            sell_md_vol INTEGER,
+            sell_md_amount REAL,
+
+            -- 大单
+            buy_lg_vol INTEGER,
+            buy_lg_amount REAL,
+            sell_lg_vol INTEGER,
+            sell_lg_amount REAL,
+
+            -- 特大单
+            buy_elg_vol INTEGER,
+            buy_elg_amount REAL,
+            sell_elg_vol INTEGER,
+            sell_elg_amount REAL,
+
+            -- 净流向
+            net_mf_vol INTEGER,
+            net_mf_amount REAL,
+
+            -- 计算字段（方便查询）
+            net_lg_amount REAL,
+            net_elg_amount REAL,
+
+            PRIMARY KEY (ts_code, trade_date)
+        );
+        """
+        # 创建行业资金流向汇总表
+        industry_moneyflow_sql = """
+        CREATE TABLE IF NOT EXISTS industry_moneyflow (
+            trade_date TEXT NOT NULL,
+            level TEXT NOT NULL,
+            sw_l1 TEXT,
+            sw_l2 TEXT,
+            sw_l3 TEXT,
+            index_code TEXT,
+
+            -- 成分股统计
+            stock_count INTEGER,
+            up_count INTEGER,
+            down_count INTEGER,
+            limit_up_count INTEGER,
+            limit_down_count INTEGER,
+
+            -- 资金流向汇总（万元）
+            net_mf_amount REAL,
+            net_lg_amount REAL,
+            net_elg_amount REAL,
+            buy_elg_amount REAL,
+            sell_elg_amount REAL,
+            buy_lg_amount REAL,
+            sell_lg_amount REAL,
+
+            -- 平均值（万元/股）
+            avg_net_amount REAL,
+            avg_net_lg_amount REAL,
+            avg_net_elg_amount REAL,
+
+            updated_at TEXT,
+
+            PRIMARY KEY (trade_date, level, sw_l1, sw_l2, sw_l3)
+        );
+        """
+
+        # 创建索引
+        index_sql_1 = "CREATE INDEX IF NOT EXISTS idx_moneyflow_date ON stock_moneyflow(trade_date);"
+        index_sql_2 = "CREATE INDEX IF NOT EXISTS idx_ind_moneyflow_date ON industry_moneyflow(trade_date);"
+        index_sql_3 = "CREATE INDEX IF NOT EXISTS idx_ind_moneyflow_level ON industry_moneyflow(level);"
+
+        with self.engine.connect() as conn:
+            from sqlalchemy import text
+            conn.execute(text(stock_moneyflow_sql))
+            conn.execute(text(industry_moneyflow_sql))
+            conn.execute(text(index_sql_1))
+            conn.execute(text(index_sql_2))
+            conn.execute(text(index_sql_3))
+            conn.commit()
+
+    def save_moneyflow(self, ts_code: str, start_date: str = None, end_date: str = None) -> int:
+        """
+        获取单只股票的资金流向数据
+
+        Args:
+            ts_code: 股票代码 (如 600382.SH)
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            保存的记录数
+        """
+        try:
+            # 确保表存在
+            self._create_moneyflow_tables()
+
+            # 标准化股票代码
+            ts_code = self._standardize_code(ts_code)
+
+            # 获取数据
+            params = {'ts_code': ts_code}
+            if start_date:
+                params['start_date'] = start_date
+            if end_date:
+                params['end_date'] = end_date
+
+            df = self._retry_api_call(
+                self.pro.moneyflow,
+                **params
+            )
+
+            if df is None or df.empty:
+                return 0
+
+            # 计算净流向字段
+            df['net_lg_amount'] = df['buy_lg_amount'] - df['sell_lg_amount']
+            df['net_elg_amount'] = df['buy_elg_amount'] - df['sell_elg_amount']
+
+            # 保存数据
+            df.to_sql('stock_moneyflow', self.engine, if_exists='append', index=False, method='multi')
+
+            return len(df)
+
+        except Exception as e:
+            print(f"获取 {ts_code} 资金流向数据失败: {e}")
+            return 0
+
+    def save_moneyflow_by_date(self, trade_date: str, exclude_st: bool = True) -> int:
+        """
+        获取指定日期的所有股票资金流向数据
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            exclude_st: 是否排除ST股（默认True）
+
+        Returns:
+            保存的记录数
+        """
+        try:
+            # 确保表存在
+            self._create_moneyflow_tables()
+
+            # 获取数据
+            df = self._retry_api_call(
+                self.pro.moneyflow,
+                trade_date=trade_date
+            )
+
+            if df is None or df.empty:
+                return 0
+
+            # 排除ST股（从 st_stocks 表获取 ST 股票列表）
+            if exclude_st:
+                with self.engine.connect() as conn:
+                    st_codes_result = conn.execute(text("SELECT ts_code FROM st_stocks")).fetchall()
+                    st_codes = [row[0] for row in st_codes_result]
+                    if st_codes:
+                        before_count = len(df)
+                        df = df[~df['ts_code'].isin(st_codes)]
+                        after_count = len(df)
+                        if before_count > after_count:
+                            print(f"  排除 ST 股票: {before_count - after_count} 只")
+
+            # 计算净流向字段
+            df['net_lg_amount'] = df['buy_lg_amount'] - df['sell_lg_amount']
+            df['net_elg_amount'] = df['buy_elg_amount'] - df['sell_elg_amount']
+
+            # 保存数据
+            df.to_sql('stock_moneyflow', self.engine, if_exists='append', index=False, method='multi')
+
+            return len(df)
+
+        except Exception as e:
+            print(f"获取 {trade_date} 资金流向数据失败: {e}")
+            return 0
+
+    def save_all_moneyflow_incremental(self, start_date: str = None, exclude_st: bool = True) -> dict:
+        """
+        增量更新所有股票资金流向数据
+
+        Args:
+            start_date: 起始日期，默认从数据库最新日期的下一天开始
+                      如果数据库为空，则从1年前开始
+            exclude_st: 是否排除ST股（默认True）
+
+        Returns:
+            统计信息字典
+        """
+        stats = {'success': 0, 'failed': 0, 'skipped': 0}
+
+        try:
+            # 确保表存在
+            self._create_moneyflow_tables()
+
+            # 获取数据库最新日期
+            if start_date is None:
+                query = text("SELECT MAX(trade_date) as max_date FROM stock_moneyflow")
+                with self.engine.connect() as conn:
+                    result = conn.execute(query).fetchone()
+                    if result and result[0]:
+                        # 从最新日期的下一天开始
+                        from datetime import datetime, timedelta
+                        last_date = datetime.strptime(result[0], '%Y%m%d')
+                        start_date = (last_date + timedelta(days=1)).strftime('%Y%m%d')
+
+            # 如果没有指定开始日期且数据库为空，使用1年前作为默认值
+            if start_date is None:
+                from datetime import datetime, timedelta
+                one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+                start_date = one_year_ago
+
+            # 获取交易日期列表
+            from datetime import datetime, timedelta
+            start = datetime.strptime(start_date, '%Y%m%d')
+            end = datetime.now()
+
+            # 获取交易日历
+            trade_dates = self.pro.trade_cal(exchange='SSE',
+                                            start_date=start_date,
+                                            end_date=end.strftime('%Y%m%d'))
+            trade_dates = trade_dates[trade_dates['is_open'] == 1]['cal_date'].tolist()
+
+            print(f"增量更新资金流向数据: {start_date} 至今，共 {len(trade_dates)} 个交易日")
+
+            # 遍历每个交易日
+            for trade_date in trade_dates:
+                try:
+                    count = self.save_moneyflow_by_date(trade_date, exclude_st=exclude_st)
+                    if count > 0:
+                        stats['success'] += count
+                        print(f"  ✓ {trade_date}: {count} 条记录")
+                    else:
+                        stats['skipped'] += 1
+                        print(f"  - {trade_date}: 无数据")
+                    self._wait_for_rate_limit()
+                except Exception as e:
+                    stats['failed'] += 1
+                    print(f"  ✗ {trade_date}: 失败 - {e}")
+
+        except Exception as e:
+            print(f"增量更新资金流向数据失败: {e}")
+
+        return stats
+
+    def save_moneyflow_by_stocks(
+        self,
+        stock_list: list,
+        start_date: str = None,
+        end_date: str = None,
+        exclude_st: bool = True
+    ) -> dict:
+        """
+        按股票列表获取资金流向数据（适用于收藏列表或自定义股票）
+
+        Args:
+            stock_list: 股票代码列表
+            start_date: 开始日期 YYYYMMDD（默认从1年前开始）
+            end_date: 结束日期 YYYYMMDD（默认今天）
+            exclude_st: 是否排除ST股（默认True）
+
+        Returns:
+            统计信息字典
+        """
+        stats = {'success': 0, 'failed': 0, 'skipped': 0}
+
+        try:
+            from datetime import datetime, timedelta
+
+            # 确保表存在
+            self._create_moneyflow_tables()
+
+            # 设置默认日期范围
+            if end_date is None:
+                end_date = datetime.now().strftime('%Y%m%d')
+
+            if start_date is None:
+                # 默认从1年前开始
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+
+            print(f"按股票列表获取资金流向: {len(stock_list)} 只股票, {start_date} - {end_date}")
+
+            # 遍历股票列表
+            for i, stock_code in enumerate(stock_list, 1):
+                try:
+                    # 标准化股票代码
+                    ts_code = self._standardize_code(stock_code)
+
+                    # 获取资金流向数据
+                    df = self._retry_api_call(
+                        self.pro.moneyflow,
+                        ts_code=ts_code,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+
+                    if df is None or df.empty:
+                        stats['skipped'] += 1
+                        print(f"  [{i}/{len(stock_list)}] {stock_code}: 无数据")
+                        continue
+
+                    # 排除ST股
+                    if exclude_st and 'name' in df.columns:
+                        df = df[~df['name'].str.startswith('ST')]
+                        df = df[~df['name'].str.startswith('*ST')]
+
+                    # 计算净流向字段
+                    df['net_lg_amount'] = df['buy_lg_amount'] - df['sell_lg_amount']
+                    df['net_elg_amount'] = df['buy_elg_amount'] - df['sell_elg_amount']
+
+                    # 保存数据
+                    df.to_sql('stock_moneyflow', self.engine, if_exists='append', index=False, method='multi')
+
+                    stats['success'] += len(df)
+                    print(f"  ✓ [{i}/{len(stock_list)}] {stock_code}: {len(df)} 条记录")
+
+                    # 等待限流
+                    self._wait_for_rate_limit()
+
+                except Exception as e:
+                    stats['failed'] += 1
+                    print(f"  ✗ [{i}/{len(stock_list)}] {stock_code}: 失败 - {e}")
+
+        except Exception as e:
+            print(f"按股票列表获取资金流向数据失败: {e}")
+
+        return stats
+
+    def calculate_industry_moneyflow(self, trade_date: str, level: str = 'L1') -> int:
+        """
+        计算指定日期的行业资金流向汇总
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            level: 行业级别 (L1/L2/L3)
+
+        Returns:
+            保存的记录数
+        """
+        try:
+            from sqlalchemy import text
+            from datetime import datetime
+
+            # 确保表存在
+            self._create_moneyflow_tables()
+
+            # 查询个股资金流向并关联行业分类（使用 industry_name）
+            # sw_classify 表只有 industry_name 字段，需要在 Python 中填充 sw_l1/sw_l2/sw_l3
+            query = """
+            SELECT
+                m.trade_date,
+                c.level,
+                c.industry_name,
+                c.index_code,
+                COUNT(DISTINCT m.ts_code) as stock_count,
+                SUM(CASE WHEN m.net_mf_amount > 0 THEN 1 ELSE 0 END) as up_count,
+                SUM(CASE WHEN m.net_mf_amount < 0 THEN 1 ELSE 0 END) as down_count,
+                SUM(m.net_mf_amount) as net_mf_amount,
+                SUM(m.net_lg_amount) as net_lg_amount,
+                SUM(m.net_elg_amount) as net_elg_amount,
+                SUM(m.buy_elg_amount) as buy_elg_amount,
+                SUM(m.sell_elg_amount) as sell_elg_amount,
+                SUM(m.buy_lg_amount) as buy_lg_amount,
+                SUM(m.sell_lg_amount) as sell_lg_amount,
+                AVG(m.net_mf_amount) as avg_net_amount,
+                AVG(m.net_lg_amount) as avg_net_lg_amount,
+                AVG(m.net_elg_amount) as avg_net_elg_amount
+            FROM stock_moneyflow m
+            JOIN sw_members mem ON m.ts_code = mem.ts_code AND mem.is_new = 'Y'
+            JOIN sw_classify c ON mem.index_code = c.index_code
+            WHERE m.trade_date = :trade_date AND c.level = :level
+            GROUP BY c.industry_name, c.index_code, c.level, m.trade_date
+            """
+
+            with self.engine.connect() as conn:
+                df = pd.read_sql_query(query, conn, params={'trade_date': trade_date, 'level': level})
+
+            if df.empty:
+                return 0
+
+            # 根据 level 填充 sw_l1, sw_l2, sw_l3 字段
+            df['sw_l1'] = None
+            df['sw_l2'] = None
+            df['sw_l3'] = None
+
+            if level == 'L1':
+                df['sw_l1'] = df['industry_name']
+            elif level == 'L2':
+                df['sw_l2'] = df['industry_name']
+                # 需要关联 parent_code 获取 L1 名称
+                for idx, row in df.iterrows():
+                    with self.engine.connect() as conn:
+                        parent_result = conn.execute(
+                            text("SELECT parent_code FROM sw_classify WHERE index_code = :code"),
+                            {'code': row['index_code']}
+                        ).fetchone()
+                        if parent_result and parent_result[0] and parent_result[0] != '0':
+                            l1_result = conn.execute(
+                                text("SELECT industry_name FROM sw_classify WHERE index_code = :code"),
+                                {'code': parent_result[0]}
+                            ).fetchone()
+                            if l1_result:
+                                df.at[idx, 'sw_l1'] = l1_result[0]
+            elif level == 'L3':
+                df['sw_l3'] = df['industry_name']
+                # 对于 L3 行业，通过 sw_members 表获取对应的 L1 和 L2 行业名称
+                for idx, row in df.iterrows():
+                    with self.engine.connect() as conn:
+                        # 找一只属于该 L3 行业的股票
+                        stock_result = conn.execute(
+                            text("""
+                                SELECT mem.ts_code FROM sw_members mem
+                                JOIN sw_classify c ON mem.index_code = c.index_code
+                                WHERE c.industry_name = :industry_name AND c.level = 'L3' AND mem.is_new = 'Y'
+                                LIMIT 1
+                            """),
+                            {'industry_name': row['industry_name']}
+                        ).fetchone()
+
+                        if stock_result:
+                            # 通过这只股票查找其所属的 L1 和 L2 行业
+                            l1_l2_result = conn.execute(
+                                text("""
+                                    SELECT
+                                        (SELECT c1.industry_name FROM sw_members mem3
+                                         JOIN sw_classify c1 ON mem3.index_code = c1.index_code
+                                         WHERE mem3.ts_code = :stock_code AND c1.level = 'L1' AND mem3.is_new = 'Y'
+                                         LIMIT 1) as l1_name,
+                                        (SELECT c2.industry_name FROM sw_members mem3
+                                         JOIN sw_classify c2 ON mem3.index_code = c2.index_code
+                                         WHERE mem3.ts_code = :stock_code AND c2.level = 'L2' AND mem3.is_new = 'Y'
+                                         LIMIT 1) as l2_name
+                                """),
+                                {'stock_code': stock_result[0]}
+                            ).fetchone()
+
+                            if l1_l2_result:
+                                df.at[idx, 'sw_l1'] = l1_l2_result[0]
+                                df.at[idx, 'sw_l2'] = l1_l2_result[1]
+
+            # 删除临时列
+            if 'industry_name' in df.columns:
+                df = df.drop(columns=['industry_name'])
+
+            # 添加更新时间
+            df['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            df['limit_up_count'] = 0
+            df['limit_down_count'] = 0
+
+            # 删除旧数据
+            delete_query = """
+            DELETE FROM industry_moneyflow
+            WHERE trade_date = :trade_date AND level = :level
+            """
+            with self.engine.connect() as conn:
+                conn.execute(text(delete_query), {'trade_date': trade_date, 'level': level})
+                conn.commit()
+
+            # 保存新数据
+            df.to_sql('industry_moneyflow', self.engine, if_exists='append', index=False, method='multi')
+
+            return len(df)
+
+        except Exception as e:
+            print(f"计算 {trade_date} 行业资金流向汇总失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+
+    def save_industry_moneyflow_batch(self, start_date: str = None, end_date: str = None) -> dict:
+        """
+        批量计算并保存行业资金流向汇总
+
+        Args:
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            统计信息字典
+        """
+        stats = {'success': 0, 'failed': 0}
+
+        try:
+            from datetime import datetime
+
+            # 获取日期范围
+            if end_date is None:
+                end_date = datetime.now().strftime('%Y%m%d')
+
+            if start_date is None:
+                # 查询 industry_moneyflow 最新日期
+                query = text("SELECT MAX(trade_date) as max_date FROM industry_moneyflow")
+                with self.engine.connect() as conn:
+                    result = conn.execute(query).fetchone()
+                    if result and result[0]:
+                        start_date = result[0]
+                    else:
+                        start_date = '20240101'
+
+            # 获取有资金流向数据的日期列表
+            query = """
+            SELECT DISTINCT trade_date
+            FROM stock_moneyflow
+            WHERE trade_date >= :start_date AND trade_date <= :end_date
+            ORDER BY trade_date
+            """
+
+            with self.engine.connect() as conn:
+                df_dates = pd.read_sql_query(query, conn,
+                                            params={'start_date': start_date, 'end_date': end_date})
+
+            if df_dates.empty:
+                print(f"没有找到 {start_date} 至 {end_date} 的资金流向数据")
+                return stats
+
+            trade_dates = df_dates['trade_date'].tolist()
+            print(f"计算行业资金流向汇总: {len(trade_dates)} 个交易日")
+
+            # 遍历每个交易日和行业级别
+            levels = ['L1', 'L2', 'L3']
+            for trade_date in trade_dates:
+                for level in levels:
+                    try:
+                        count = self.calculate_industry_moneyflow(trade_date, level)
+                        if count > 0:
+                            stats['success'] += count
+                            print(f"  ✓ {trade_date} {level}: {count} 条记录")
+                    except Exception as e:
+                        stats['failed'] += 1
+                        print(f"  ✗ {trade_date} {level}: 失败 - {e}")
+
+        except Exception as e:
+            print(f"批量计算行业资金流向汇总失败: {e}")
+
+        return stats
+
+    # ========================================================================
+    # Dragon List (龙虎榜) 相关方法
+    # ========================================================================
+
+    def _create_dragon_list_tables(self):
+        """创建龙虎榜数据表"""
+        with self.engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS dragon_list (
+                    ts_code TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    name TEXT,
+                    close REAL,
+                    pct_change REAL,
+                    turnover_rate REAL,
+                    amount REAL,
+                    l_sell REAL,
+                    l_buy REAL,
+                    l_amount REAL,
+                    net_amount REAL,
+                    net_rate REAL,
+                    amount_rate REAL,
+                    float_values REAL,
+                    reason TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (ts_code, trade_date)
+                );
+            """))
+
+            # 创建索引
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_dragon_list_trade_date
+                ON dragon_list(trade_date);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_dragon_list_ts_code
+                ON dragon_list(ts_code);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_dragon_list_reason
+                ON dragon_list(reason);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_dragon_list_net_amount
+                ON dragon_list(net_amount);
+            """))
+
+    def save_dragon_list(self, trade_date: str = None, ts_code: str = None):
+        """
+        保存龙虎榜数据
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD，默认为最近交易日
+            ts_code: 股票代码（可选）
+
+        Returns:
+            保存的记录数
+        """
+        try:
+            # 确保表存在
+            self._create_dragon_list_tables()
+
+            self._wait_for_rate_limit()
+
+            # 如果没有提供trade_date，尝试获取最近交易日
+            if not trade_date:
+                from datetime import datetime, timedelta
+                # 尝试获取最近5个工作日的数据
+                for days_back in range(1, 8):  # 尝试前1-7天
+                    test_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y%m%d')
+                    try:
+                        # 测试是否能获取数据（不实际保存，只是测试API调用）
+                        test_df = self._retry_api_call(self.pro.top_list, trade_date=test_date)
+                        if test_df is not None and not test_df.empty:
+                            trade_date = test_date
+                            print(f"找到最近交易日: {trade_date}")
+                            break
+                    except Exception as e:
+                        # 如果API调用失败，继续尝试下一天
+                        continue
+
+                # 如果仍然没有找到交易日，使用昨天的日期
+                if not trade_date:
+                    trade_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+                    print(f"使用默认日期（昨天）: {trade_date}")
+
+            params = {'trade_date': trade_date}
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            print(f"[save_dragon_list] 调用Tushare API参数: {params}")
+            df = self._retry_api_call(self.pro.top_list, **params)
+
+            if df is None:
+                print(f"[save_dragon_list] API返回 None")
+                return 0
+            elif df.empty:
+                print(f"[save_dragon_list] API返回空DataFrame, 形状: {df.shape}, 列名: {list(df.columns)}")
+                return 0
+            else:
+                print(f"[save_dragon_list] 成功获取数据, 形状: {df.shape}, 示例列: {list(df.columns)[:5] if len(df.columns) > 5 else list(df.columns)}")
+
+            # 删除旧数据（支持更新）
+            print(f"[save_dragon_list] 准备保存数据到数据库，trade_date={trade_date}, ts_code={ts_code}")
+
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    with self.engine.begin() as conn:
+                        if trade_date and ts_code:
+                            print(f"[save_dragon_list] 删除指定日期和股票的数据: {trade_date}, {ts_code}")
+                            result = conn.execute(text("""
+                                DELETE FROM dragon_list
+                                WHERE trade_date = :trade_date AND ts_code = :ts_code
+                            """), {'trade_date': trade_date, 'ts_code': ts_code})
+                            print(f"[save_dragon_list] 删除了 {result.rowcount} 行")
+                        elif trade_date:
+                            print(f"[save_dragon_list] 删除指定日期的所有数据: {trade_date}")
+                            result = conn.execute(text("""
+                                DELETE FROM dragon_list WHERE trade_date = :trade_date
+                            """), {'trade_date': trade_date})
+                            print(f"[save_dragon_list] 删除了 {result.rowcount} 行")
+
+                        # 删除重复数据（同一股票同一天可能因不同原因多次上榜）
+                        original_len = len(df)
+                        df = df.drop_duplicates(subset=['ts_code', 'trade_date'], keep='first')
+                        if len(df) < original_len:
+                            print(f"[save_dragon_list] 删除了 {original_len - len(df)} 条重复记录")
+
+                        # 插入新数据 - 使用逐行插入减少锁定冲突
+                        print(f"[save_dragon_list] 插入 {len(df)} 条新记录，尝试 {attempt+1}/{max_retries}")
+                        df.to_sql('dragon_list', self.engine, if_exists='append',
+                                index=False, method=None, chunksize=10)
+                        print(f"[save_dragon_list] 数据插入完成")
+
+                    print(f"[save_dragon_list] 成功保存 {len(df)} 条记录")
+                    return len(df)
+
+                except Exception as e:
+                    if "database is locked" in str(e) and attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # 指数退避：1秒、2秒、4秒
+                        print(f"[save_dragon_list] 数据库锁定，{wait_time}秒后重试... (尝试 {attempt+1}/{max_retries})")
+                        import time
+                        time.sleep(wait_time)
+                    else:
+                        print(f"[save_dragon_list] 数据库操作失败: {e}")
+                        raise
+
+        except Exception as e:
+            print(f"获取龙虎榜数据失败: {e}")
+            return 0
+
+    def save_dragon_list_batch(self, start_date: str, end_date: str = None):
+        """
+        批量保存龙虎榜数据（用于历史数据回填）
+
+        Args:
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD，默认为今天
+
+        Returns:
+            总保存记录数
+        """
+        from datetime import datetime, timedelta
+
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y%m%d')
+
+        total_count = 0
+        current_date = start_date
+        dates_to_fetch = []
+
+        # 生成日期列表（只考虑交易日，跳过周末）
+        while current_date <= end_date:
+            dt = datetime.strptime(current_date, '%Y%m%d')
+            if dt.weekday() < 5:  # 周一到周五
+                dates_to_fetch.append(current_date)
+            current_date = (dt + timedelta(days=1)).strftime('%Y%m%d')
+
+        print(f"[save_dragon_list_batch] 开始处理 {len(dates_to_fetch)} 个交易日: {dates_to_fetch[:5]}{'...' if len(dates_to_fetch) > 5 else ''}")
+
+        for i, date in enumerate(dates_to_fetch):
+            print(f"[save_dragon_list_batch] 处理第 {i+1}/{len(dates_to_fetch)} 个日期: {date}")
+            count = self.save_dragon_list(trade_date=date)
+            total_count += count
+            if count > 0:
+                print(f"[save_dragon_list_batch] 已保存 {date} 龙虎榜数据: {count} 条")
+            else:
+                print(f"[save_dragon_list_batch] {date} 无数据或保存失败")
+
+        print(f"[save_dragon_list_batch] 批量处理完成，总共保存 {total_count} 条记录")
+        return total_count

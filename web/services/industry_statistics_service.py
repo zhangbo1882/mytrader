@@ -26,7 +26,14 @@ def get_industry_name_from_code(industry_code: str) -> str:
     # 尝试匹配index_code（带.SI）和industry_code（不带）
     possible_patterns = [f'{code}.SI', code]
     
-    engine = create_engine(f'sqlite:///{TUSHARE_DB_PATH}', echo=False)
+    engine = create_engine(
+        f'sqlite:///{TUSHARE_DB_PATH}',
+        echo=False,
+        connect_args={
+            'check_same_thread': False,
+            'timeout': 30  # 30秒超时
+        }
+    )
     
     for pattern in possible_patterns:
         query = """

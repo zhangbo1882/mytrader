@@ -229,17 +229,41 @@ class MlDataLoader:
             # ROA
             balance_df['roa'] = balance_df['n_income_attr_p'] / balance_df['total_assets'] * 100
 
-            # 资产负债率
-            balance_df['debt_ratio'] = balance_df['total_liability'] / balance_df['total_assets'] * 100
+            # 资产负债率 = 总负债 / 总资产 × 100%
+            balance_df['debt_to_assets'] = balance_df['total_liab'] / balance_df['total_assets'] * 100
+
+            # 有息资产负债率 = 有息负债 / 总资产 × 100%
+            # 有息负债包括：短期借款、长期借款、应付债券、一年内到期的非流动负债
+            debt_cols = []
+            if 'st_borr' in balance_df.columns:  # 短期借款
+                debt_cols.append('st_borr')
+            if 'lt_borr' in balance_df.columns:  # 长期借款
+                debt_cols.append('lt_borr')
+            if 'bond_payable' in balance_df.columns:  # 应付债券
+                debt_cols.append('bond_payable')
+            if 'st_bonds_payable' in balance_df.columns:  # 短期应付债券
+                debt_cols.append('st_bonds_payable')
+            if 'non_cur_liab_due_1y' in balance_df.columns:  # 一年内到期的非流动负债
+                debt_cols.append('non_cur_liab_due_1y')
+
+            if debt_cols:
+                # 计算有息负债总和
+                balance_df['interest_bearing_debt'] = balance_df[debt_cols].sum(axis=1, skipna=True)
+                # 计算有息资产负债率
+                balance_df['interest_bearing_debt_ratio'] = balance_df['interest_bearing_debt'] / balance_df['total_assets'] * 100
 
             # 流动比率
-            balance_df['current_ratio'] = balance_df['total_current_assets'] / balance_df['total_current_liability']
+            balance_df['current_ratio'] = balance_df['total_cur_assets'] / balance_df['total_cur_liab']
 
             if financial_features.empty:
                 financial_features['report_date'] = balance_df['report_date']
 
+            balance_cols = ['report_date', 'total_assets', 'total_liab', 'roe', 'roa', 'debt_to_assets', 'current_ratio']
+            if 'interest_bearing_debt' in balance_df.columns:
+                balance_cols.extend(['interest_bearing_debt', 'interest_bearing_debt_ratio'])
+
             financial_features = financial_features.merge(
-                balance_df[['report_date', 'total_assets', 'total_liability', 'roe', 'roa', 'debt_ratio', 'current_ratio']],
+                balance_df[balance_cols],
                 on='report_date',
                 how='outer'
             )

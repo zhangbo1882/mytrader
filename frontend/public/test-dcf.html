@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>DCF 测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .result { margin-top: 10px; padding: 10px; background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <h1>DCF 参数测试工具</h1>
+
+    <div class="test-section">
+        <h3>股票代码</h3>
+        <input type="text" id="symbol" value="600519" placeholder="输入股票代码">
+    </div>
+
+    <div class="test-section">
+        <h3>测试不同配置</h3>
+        <button onclick="testConservative()">测试 Conservative</button>
+        <button onclick="testBalanced()">测试 Balanced</button>
+        <button onclick="testAggressive()">测试 Aggressive</button>
+        <button onclick="testCustom()">测试 Custom (高增长)</button>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        const API_BASE = '/api';
+
+        async function testDCF(config, name) {
+            const symbol = document.getElementById('symbol').value;
+            const params = new URLSearchParams();
+            params.append('methods', 'dcf');
+            params.append('dcf_config', JSON.stringify(config));
+
+            const url = `${API_BASE}/valuation/summary/${symbol}?${params.toString()}`;
+
+            document.getElementById('result').innerHTML = `<div class="result">正在测试 ${name}...</div>`;
+
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.success && data.valuation) {
+                    const v = data.valuation;
+                    const m = v.metrics || {};
+                    document.getElementById('result').innerHTML = `
+                        <div class="result">
+                            <h3>${name} 结果:</h3>
+                            <p><strong>公允价值:</strong> ¥${v.fair_value?.toFixed(2)}</p>
+                            <p><strong>当前价格:</strong> ¥${v.current_price?.toFixed(2)}</p>
+                            <p><strong>上下空间:</strong> ${v.upside_downside?.toFixed(2)}%</p>
+                            <p><strong>WACC:</strong> ${m.wacc?.toFixed(4)}</p>
+                            <p><strong>终值增长率:</strong> ${m.terminal_growth}</p>
+                            <p><strong>预测年数:</strong> ${m.forecast_years}</p>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('result').innerHTML = `<div class="result">错误: ${data.error || '未知错误'}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('result').innerHTML = `<div class="result">请求失败: ${error.message}</div>`;
+            }
+        }
+
+        function testConservative() {
+            testDCF({ risk_profile: 'conservative' }, 'Conservative (保守型)');
+        }
+
+        function testBalanced() {
+            testDCF({ risk_profile: 'balanced' }, 'Balanced (平衡型)');
+        }
+
+        function testAggressive() {
+            testDCF({ risk_profile: 'aggressive' }, 'Aggressive (积极型)');
+        }
+
+        function testCustom() {
+            testDCF({ terminal_growth: 0.05, forecast_years: 10 }, 'Custom (自定义: 终值5%, 预测10年)');
+        }
+
+        // 显示当前配置
+        console.log('DCF测试页面已加载');
+        console.log('API Base:', API_BASE);
+    </script>
+</body>
+</html>

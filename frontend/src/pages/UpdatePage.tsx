@@ -105,6 +105,9 @@ const getTaskTypeName = (taskType: string): string => {
     'update_industry_classification': '行业分类',
     'update_index_data': '指数数据',
     'update_industry_statistics': '行业统计',
+    'update_moneyflow': '资金流向',
+    'update_dragon_list': '龙虎榜',
+    'backtest': '策略回测',
   };
   return taskTypeMap[taskType] || taskType;
 };
@@ -226,6 +229,26 @@ function UpdatePage() {
             metrics: values.metrics || ['pe_ttm', 'pb', 'ps_ttm', 'total_mv', 'circ_mv'],
           },
         });
+      } else if (contentType === 'moneyflow') {
+        let stockList: string[] = [];
+        if (scope === 'custom' && values.custom_stocks) {
+          stockList = values.custom_stocks.split('\n').map((s: string) => s.trim()).filter(Boolean);
+        } else if (scope === 'favorites') {
+          stockList = favorites.map((f) => f.code);
+        }
+
+        // 创建资金流向数据更新任务
+        // 全市场更新时，任务完成后会自动触发行业汇总计算
+        await taskService.create({
+          type: 'update',
+          params: {
+            content_type: 'moneyflow',
+            mode: values.mode || 'incremental',
+            stock_range: scope,
+            custom_stocks: stockList,
+            exclude_st: true,
+          },
+        });
       } else if (contentType === 'index') {
         await taskService.create({
           type: 'update',
@@ -249,6 +272,21 @@ function UpdatePage() {
             stock_range: scope,
             custom_stocks: stockList,
             include_indicators: true,
+          },
+        });
+      } else if (contentType === 'dragon_list') {
+        // 龙虎榜更新任务
+        const startDate = values.start_date;
+        const endDate = values.end_date;
+        // 如果有开始日期，则是批量模式，否则是增量模式
+        const mode = startDate ? 'batch' : 'incremental';
+
+        await taskService.create({
+          type: 'update_dragon_list',
+          params: {
+            mode,
+            start_date: startDate,
+            end_date: endDate,
           },
         });
       } else {
@@ -303,6 +341,8 @@ function UpdatePage() {
         'industry': 'update_industry_classification',
         'financial': 'update_financial_reports',
         'statistics': 'update_industry_statistics',
+        'moneyflow': 'update_moneyflow',
+        'dragon_list': 'update_dragon_list',
       };
 
       const task_type = taskTypeMap[values.content_type || 'stock'] || 'update_stock_prices';
@@ -317,7 +357,8 @@ function UpdatePage() {
         mode: values.mode || 'incremental',
       };
 
-      if (values.content_type === 'stock') {
+      // 根据任务类型设置不同参数
+      if (values.content_type === 'stock' || values.content_type === 'moneyflow') {
         params.stock_range = values.stock_range || 'all';
       } else if (values.content_type === 'index') {
         params.markets = values.markets || ['SSE', 'SZSE'];
@@ -745,29 +786,37 @@ function UpdatePage() {
               <Radio value="index">指数数据</Radio>
               <Radio value="industry">申万行业分类</Radio>
               <Radio value="statistics">行业统计</Radio>
+              <Radio value="moneyflow">资金流向</Radio>
+              <Radio value="dragon_list">龙虎榜</Radio>
             </Radio.Group>
           </Form.Item>
 
           <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type}>
-            {({ getFieldValue }) =>
-              getFieldValue('content_type') !== 'financial' ? (
-                <Form.Item
-                  label="更新模式"
-                  name="mode"
-                  rules={[{ required: true, message: '请选择更新模式' }]}
-                  extra={
-                    <Tooltip title="增量更新更快，适合日常使用；全量更新较慢，适合首次或补全数据">
-                      <InfoCircleOutlined style={{ color: '#1890ff', cursor: 'help' }} aria-hidden="true" />
-                    </Tooltip>
-                  }
-                >
-                  <Radio.Group>
-                    <Radio value="incremental">增量更新（快速，日常使用）</Radio>
-                    <Radio value="full">全量更新（较慢，首次或补全数据）</Radio>
-                  </Radio.Group>
-                </Form.Item>
-              ) : null
-            }
+            {({ getFieldValue }) => {
+              const contentType = getFieldValue('content_type');
+              // 龙虎榜不需要更新模式（通过日期字段决定模式）
+              // 财务数据也不需要更新模式
+              if (contentType !== 'financial' && contentType !== 'dragon_list') {
+                return (
+                  <Form.Item
+                    label="更新模式"
+                    name="mode"
+                    rules={[{ required: true, message: '请选择更新模式' }]}
+                    extra={
+                      <Tooltip title="增量更新更快，适合日常使用；全量更新较慢，适合首次或补全数据">
+                        <InfoCircleOutlined style={{ color: '#1890ff', cursor: 'help' }} aria-hidden="true" />
+                      </Tooltip>
+                    }
+                  >
+                    <Radio.Group>
+                      <Radio value="incremental">增量更新（快速，日常使用）</Radio>
+                      <Radio value="full">全量更新（较慢，首次或补全数据）</Radio>
+                    </Radio.Group>
+                  </Form.Item>
+                );
+              }
+              return null;
+            }}
           </Form.Item>
 
           <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type}>
@@ -824,7 +873,24 @@ function UpdatePage() {
                     </Space>
                   </Checkbox.Group>
                 </Form.Item>
-              ) : (
+              ) : getFieldValue('content_type') === 'dragon_list' ? (
+                <>
+                  <Form.Item
+                    label="开始日期 (批量模式)"
+                    name="start_date"
+                    extra="批量模式下必需，格式: YYYY-MM-DD"
+                  >
+                    <Input placeholder="例如: 2025-01-01" autoComplete="off" aria-label="开始日期" />
+                  </Form.Item>
+                  <Form.Item
+                    label="结束日期"
+                    name="end_date"
+                    extra="可选，格式: YYYY-MM-DD"
+                  >
+                    <Input placeholder="例如: 2025-01-31" autoComplete="off" aria-label="结束日期" />
+                  </Form.Item>
+                </>
+              ) : getFieldValue('content_type') !== 'dragon_list' ? (
                 <Form.Item
                   label="股票范围"
                   name="scope"
@@ -837,7 +903,7 @@ function UpdatePage() {
                     <Radio value="custom">自定义</Radio>
                   </Radio.Group>
                 </Form.Item>
-              )
+              ) : null
             }
           </Form.Item>
 
@@ -924,6 +990,11 @@ function UpdatePage() {
                   工作日09:00
                 </Button>
               </Tooltip>
+              <Tooltip title="工作日15:30（收盘后）">
+                <Button size="small" onClick={() => scheduleForm.setFieldsValue({ cron_expression: '30 15 * * 1-5' })}>
+                  工作日15:30
+                </Button>
+              </Tooltip>
               <Tooltip title="每6小时一次">
                 <Button size="small" onClick={() => scheduleForm.setFieldsValue({ cron_expression: '0 */6 * * *' })}>
                   每6小时
@@ -947,56 +1018,67 @@ function UpdatePage() {
               <Radio value="stock">股价数据</Radio>
               <Radio value="index">指数数据</Radio>
               <Radio value="statistics">行业统计</Radio>
+              <Radio value="moneyflow">资金流向</Radio>
+              <Radio value="dragon_list">龙虎榜</Radio>
             </Radio.Group>
           </Form.Item>
 
           <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type}>
-            {({ getFieldValue }) =>
-              getFieldValue('content_type') === 'stock' ? (
-                <>
-                  <Form.Item
-                    label="更新模式"
-                    name="mode"
-                    rules={[{ required: true, message: '请选择更新模式' }]}
-                    extra={
-                      <Tooltip title="增量更新更快，适合日常使用">
-                        <InfoCircleOutlined style={{ color: '#1890ff', cursor: 'help' }} aria-hidden="true" />
-                      </Tooltip>
-                    }
-                  >
-                    <Radio.Group>
-                      <Radio value="incremental">增量更新（推荐）</Radio>
-                      <Radio value="full">全量更新</Radio>
-                    </Radio.Group>
-                  </Form.Item>
+            {({ getFieldValue }) => {
+              const contentType = getFieldValue('content_type');
+              if (contentType === 'stock' || contentType === 'moneyflow') {
+                return (
+                  <>
+                    <Form.Item
+                      label="更新模式"
+                      name="mode"
+                      rules={[{ required: true, message: '请选择更新模式' }]}
+                      extra={
+                        <Tooltip title="增量更新更快，适合日常使用">
+                          <InfoCircleOutlined style={{ color: '#1890ff', cursor: 'help' }} aria-hidden="true" />
+                        </Tooltip>
+                      }
+                    >
+                      <Radio.Group>
+                        <Radio value="incremental">增量更新（推荐）</Radio>
+                        <Radio value="full">全量更新</Radio>
+                      </Radio.Group>
+                    </Form.Item>
 
+                    <Form.Item
+                      label="股票范围"
+                      name="stock_range"
+                      rules={[{ required: true, message: '请选择股票范围' }]}
+                      extra="选择要更新的股票范围"
+                    >
+                      <Radio.Group>
+                        <Radio value="all">全部A股</Radio>
+                        <Radio value="favorites">收藏列表</Radio>
+                      </Radio.Group>
+                    </Form.Item>
+                  </>
+                );
+              } else if (contentType === 'dragon_list') {
+                // 龙虎榜定时任务：不需要额外参数
+                return null;
+              } else {
+                // 其他类型（如index）：显示市场选择
+                return (
                   <Form.Item
-                    label="股票范围"
-                    name="stock_range"
-                    rules={[{ required: true, message: '请选择股票范围' }]}
-                    extra="选择要更新的股票范围"
+                    label="市场选择"
+                    name="markets"
+                    rules={[{ required: true, message: '请选择市场' }]}
+                    initialValue={['SSE', 'SZSE']}
+                    extra="选择要更新的交易所市场"
                   >
-                    <Radio.Group>
-                      <Radio value="all">全部A股</Radio>
-                      <Radio value="favorites">收藏列表</Radio>
-                    </Radio.Group>
+                    <Checkbox.Group>
+                      <Checkbox value="SSE">上海证券交易所 (SSE)</Checkbox>
+                      <Checkbox value="SZSE">深圳证券交易所 (SZSE)</Checkbox>
+                    </Checkbox.Group>
                   </Form.Item>
-                </>
-              ) : (
-                <Form.Item
-                  label="市场选择"
-                  name="markets"
-                  rules={[{ required: true, message: '请选择市场' }]}
-                  initialValue={['SSE', 'SZSE']}
-                  extra="选择要更新的交易所市场"
-                >
-                  <Checkbox.Group>
-                    <Checkbox value="SSE">上海证券交易所 (SSE)</Checkbox>
-                    <Checkbox value="SZSE">深圳证券交易所 (SZSE)</Checkbox>
-                  </Checkbox.Group>
-                </Form.Item>
-              )
-            }
+                );
+              }
+            }}
           </Form.Item>
         </Form>
       </Modal>

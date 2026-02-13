@@ -1,7 +1,7 @@
 """
 财务数据查询模块
 
-提供财务报表数据查询接口
+提供财务报表数据查询接口（使用统一表架构）
 """
 
 import pandas as pd
@@ -55,11 +55,11 @@ class FinancialQuery:
             利润表数据 DataFrame
         """
         code = self._standardize_code(symbol)
-        table_name = f"income_{code}"
+        table_name = "income"
 
         # 构建查询条件
-        conditions = []
-        params = {}
+        conditions = ["ts_code LIKE :ts_code"]
+        params = {"ts_code": f"{code}%"}
 
         if start_date:
             conditions.append("ann_date >= :start_date")
@@ -73,7 +73,7 @@ class FinancialQuery:
             conditions.append("report_type = :report_type")
             params["report_type"] = report_type
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        where_clause = " AND ".join(conditions)
 
         query = f"""
         SELECT * FROM {table_name}
@@ -109,11 +109,11 @@ class FinancialQuery:
             资产负债表数据 DataFrame
         """
         code = self._standardize_code(symbol)
-        table_name = f"balancesheet_{code}"
+        table_name = "balancesheet"
 
         # 构建查询条件
-        conditions = []
-        params = {}
+        conditions = ["ts_code LIKE :ts_code"]
+        params = {"ts_code": f"{code}%"}
 
         if start_date:
             conditions.append("ann_date >= :start_date")
@@ -127,7 +127,7 @@ class FinancialQuery:
             conditions.append("report_type = :report_type")
             params["report_type"] = report_type
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        where_clause = " AND ".join(conditions)
 
         query = f"""
         SELECT * FROM {table_name}
@@ -163,11 +163,11 @@ class FinancialQuery:
             现金流量表数据 DataFrame
         """
         code = self._standardize_code(symbol)
-        table_name = f"cashflow_{code}"
+        table_name = "cashflow"
 
         # 构建查询条件
-        conditions = []
-        params = {}
+        conditions = ["ts_code LIKE :ts_code"]
+        params = {"ts_code": f"{code}%"}
 
         if start_date:
             conditions.append("ann_date >= :start_date")
@@ -181,7 +181,7 @@ class FinancialQuery:
             conditions.append("report_type = :report_type")
             params["report_type"] = report_type
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        where_clause = " AND ".join(conditions)
 
         query = f"""
         SELECT * FROM {table_name}
@@ -306,23 +306,17 @@ class FinancialQuery:
             最新公告日期（格式 YYYYMMDD），无数据返回 None
         """
         code = self._standardize_code(symbol)
-        table_name = f"{table_type}_{code}"
+        table_name = table_type
 
         try:
             with self.engine.connect() as conn:
-                # 检查表是否存在
-                result = conn.execute(text(
-                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-                ))
-                if not result.fetchone():
-                    return None
-
                 # 查询最新日期
                 query = f"""
                 SELECT ann_date, end_date FROM {table_name}
+                WHERE ts_code LIKE :ts_code
                 ORDER BY ann_date DESC LIMIT 1
                 """
-                df = pd.read_sql_query(query, conn)
+                df = pd.read_sql_query(query, conn, params={"ts_code": f"{code}%"})
 
                 if not df.empty:
                     return df[['ann_date', 'end_date']].iloc[0].to_dict()
@@ -338,7 +332,7 @@ class FinancialQuery:
         years: int = 5
     ) -> pd.DataFrame:
         """
-        对比多家公司的营业收入
+        对比多家公司的营业收入（从统一表查询）
 
         Args:
             symbols: 股票代码列表
@@ -351,19 +345,19 @@ class FinancialQuery:
 
         for symbol in symbols:
             code = self._standardize_code(symbol)
-            table_name = f"income_{code}"
+            table_name = "income"
 
             try:
                 query = f"""
                 SELECT ts_code, end_date, total_revenue, revenue
                 FROM {table_name}
-                WHERE report_type = '1'
+                WHERE ts_code LIKE :ts_code AND report_type = '1'
                 ORDER BY end_date DESC
-                LIMIT {years}
+                LIMIT :years
                 """
 
                 with self.engine.connect() as conn:
-                    df = pd.read_sql_query(query, conn)
+                    df = pd.read_sql_query(query, conn, params={"ts_code": f"{code}%", "years": years})
 
                     if not df.empty:
                         for _, row in df.iterrows():
@@ -398,13 +392,14 @@ class FinancialQuery:
         """
         code = self._standardize_code(symbol)
 
-        # 构建查询条件
-        income_table = f"income_{code}"
-        balance_table = f"balancesheet_{code}"
-        cashflow_table = f"cashflow_{code}"
+        # 使用统一表名
+        income_table = "income"
+        balance_table = "balancesheet"
+        cashflow_table = "cashflow"
 
-        conditions = ["report_type = '1'"]  # 只查合并报表
-        params = {}
+        # 构建查询条件
+        conditions = ["ts_code LIKE :ts_code", "report_type = '1'"]  # 只查合并报表
+        params = {"ts_code": f"{code}%"}
 
         if year:
             conditions.append("end_date LIKE :year")
@@ -416,14 +411,6 @@ class FinancialQuery:
 
         try:
             with self.engine.connect() as conn:
-                # 检查表是否存在
-                for table in [income_table, balance_table, cashflow_table]:
-                    result = conn.execute(text(
-                        f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
-                    ))
-                    if not result.fetchone():
-                        return summary
-
                 # 利润表关键指标
                 income_query = f"""
                 SELECT end_date, total_revenue, n_income, n_income_attr_p, basic_eps
@@ -467,7 +454,7 @@ class FinancialQuery:
 
     def list_financial_tables(self) -> List[str]:
         """
-        列出数据库中所有财务报表表
+        列出数据库中所有财务报表表（统一表）
 
         Returns:
             表名列表
@@ -477,7 +464,7 @@ class FinancialQuery:
                 query = """
                 SELECT name FROM sqlite_master
                 WHERE type='table'
-                AND (name LIKE 'income_%' OR name LIKE 'balancesheet_%' OR name LIKE 'cashflow_%' OR name = 'fina_indicator')
+                AND (name = 'income' OR name = 'balancesheet' OR name = 'cashflow' OR name = 'fina_indicator')
                 ORDER BY name
                 """
                 df = pd.read_sql_query(query, conn)
@@ -493,44 +480,37 @@ class FinancialQuery:
         Returns:
             统计信息 DataFrame
         """
-        tables = self.list_financial_tables()
         stats = []
+        tables = ['income', 'balancesheet', 'cashflow']
 
-        for table in tables:
+        for table_type in tables:
             try:
                 with self.engine.connect() as conn:
-                    # 获取记录数
-                    count_query = f"SELECT COUNT(*) as count FROM {table}"
+                    # 获取总记录数
+                    count_query = f"SELECT COUNT(*) as count FROM {table_type}"
                     count_df = pd.read_sql_query(count_query, conn)
-                    count = count_df['count'].iloc[0]
+                    total_count = count_df['count'].iloc[0]
+
+                    # 获取股票数量
+                    stock_query = f"SELECT COUNT(DISTINCT substr(ts_code, 1, 6)) as stock_count FROM {table_type}"
+                    stock_df = pd.read_sql_query(stock_query, conn)
+                    stock_count = stock_df['stock_count'].iloc[0]
 
                     # 获取最新日期
-                    date_query = f"SELECT MAX(ann_date) as latest_date FROM {table}"
+                    date_query = f"SELECT MAX(ann_date) as latest_date FROM {table_type}"
                     date_df = pd.read_sql_query(date_query, conn)
                     latest_date = date_df['latest_date'].iloc[0]
 
-                    # 解析股票代码和报表类型
-                    if table.startswith('income_'):
-                        table_type = 'income'
-                        code = table.replace('income_', '')
-                    elif table.startswith('balancesheet_'):
-                        table_type = 'balancesheet'
-                        code = table.replace('balancesheet_', '')
-                    elif table.startswith('cashflow_'):
-                        table_type = 'cashflow'
-                        code = table.replace('cashflow_', '')
-                    else:
-                        continue
-
                     stats.append({
-                        'code': code,
+                        'code': 'ALL',
                         'table_type': table_type,
-                        'table_name': table,
-                        'record_count': count,
+                        'table_name': table_type,
+                        'record_count': total_count,
+                        'stock_count': stock_count,
                         'latest_date': latest_date
                     })
 
             except Exception as e:
-                print(f"获取表 {table} 统计失败: {e}")
+                print(f"获取表 {table_type} 统计失败: {e}")
 
         return pd.DataFrame(stats)

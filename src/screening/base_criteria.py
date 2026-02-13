@@ -4,9 +4,12 @@
 提供筛选条件的基本接口和逻辑组合功能（& | ~）
 支持短路筛选优化（低成本条件优先执行）
 """
+import logging
 from abc import ABC, abstractmethod
 from typing import Dict
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class BaseCriteria(ABC):
@@ -49,6 +52,33 @@ class BaseCriteria(ABC):
     def __or__(self, other):   # crit1 | crit2
         return OrCriteria(self, other)
 
+    @staticmethod
+    def format_date_for_db(date_str: str) -> str:
+        """
+        将日期字符串格式化为数据库格式 (YYYY-MM-DD)
+
+        支持输入格式:
+        - YYYYMMDD (如: 20251101)
+        - YYYY-MM-DD (如: 2025-11-01)
+        """
+        if not date_str:
+            return date_str
+
+        # 如果已经是 YYYY-MM-DD 格式，直接返回
+        if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+            return date_str
+
+        # 尝试解析 YYYYMMDD 格式
+        if len(date_str) == 8 and date_str.isdigit():
+            try:
+                return f"{date_str[0:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            except Exception:
+                pass
+
+        # 无法解析，返回原字符串
+        logger.warning(f"[BaseCriteria] Unable to parse date format: {date_str}")
+        return date_str
+
     def __invert__(self):       # ~crit
         return NotCriteria(self)
 
@@ -66,11 +96,24 @@ class AndCriteria(BaseCriteria):
 
     def filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """逐步排除，短路优化"""
+        logger.debug(f"[AndCriteria] Starting filter with {len(self.criteria)} criteria, input size: {len(df)}")
+        logger.debug(f"[AndCriteria] Criteria execution order (by cost): {[type(c).__name__ for c in self.criteria]}")
+
+        if df.empty:
+            logger.warning(f"[AndCriteria] Input DataFrame is empty")
+            return df
+
         result = df
-        for crit in self.criteria:
+        for i, crit in enumerate(self.criteria):
+            input_size = len(result)
             if result.empty:  # 短路：已经没有数据，直接返回
+                logger.debug(f"[AndCriteria] Short-circuit: result is empty after {i} criteria")
                 return result
+            logger.debug(f"[AndCriteria] Applying criterion {i+1}/{len(self.criteria)}: {type(crit).__name__} (cost: {crit.cost})")
             result = crit.filter(result)
+            logger.debug(f"[AndCriteria] Criterion {i+1}/{len(self.criteria)} applied, input: {input_size}, output: {len(result)}")
+
+        logger.info(f"[AndCriteria] Filter completed, total input: {len(df)}, final output: {len(result)}")
         return result
 
     def to_config(self) -> Dict:
@@ -99,13 +142,26 @@ class OrCriteria(BaseCriteria):
 
     def filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """满足任一条件即可"""
+        logger.debug(f"[OrCriteria] Starting filter with {len(self.criteria)} criteria, input size: {len(df)}")
+
+        if df.empty:
+            logger.warning(f"[OrCriteria] Input DataFrame is empty")
+            return df
+
         results = []
-        for crit in self.criteria:
-            results.append(crit.filter(df))
+        for i, crit in enumerate(self.criteria):
+            logger.debug(f"[OrCriteria] Applying criterion {i+1}/{len(self.criteria)}: {type(crit).__name__}")
+            result = crit.filter(df)
+            logger.debug(f"[OrCriteria] Criterion {i+1}/{len(self.criteria)} returned {len(result)} results")
+            results.append(result)
 
         # 合并结果，去重
         if results:
-            return pd.concat(results).drop_duplicates()
+            combined = pd.concat(results).drop_duplicates()
+            logger.info(f"[OrCriteria] Filter completed, input: {len(df)}, combined results before dedup: {sum(len(r) for r in results)}, final output: {len(combined)}")
+            return combined
+
+        logger.info(f"[OrCriteria] Filter completed, no criteria matched, returning empty DataFrame")
         return pd.DataFrame()
 
     def to_config(self) -> Dict:
@@ -133,8 +189,23 @@ class NotCriteria(BaseCriteria):
 
     def filter(self, df: pd.DataFrame) -> pd.DataFrame:
         """返回不满足条件的行"""
+        logger.debug(f"[NotCriteria] Starting filter, input size: {len(df)}")
+
+        if df.empty:
+            logger.warning(f"[NotCriteria] Input DataFrame is empty")
+            return df
+
+        if 'symbol' not in df.columns:
+            logger.warning(f"[NotCriteria] 'symbol' column not found in DataFrame")
+            return df
+
+        logger.debug(f"[NotCriteria] Applying inner criteria: {type(self.criteria).__name__}")
         passed_symbols = self.criteria.filter(df)['symbol'].unique()
-        return df[~df['symbol'].isin(passed_symbols)]
+        logger.debug(f"[NotCriteria] Inner criteria matched {len(passed_symbols)} symbols")
+
+        result = df[~df['symbol'].isin(passed_symbols)]
+        logger.info(f"[NotCriteria] Filter completed, input: {len(df)}, excluded symbols: {len(passed_symbols)}, output: {len(result)}")
+        return result
 
     def to_config(self) -> Dict:
         return {

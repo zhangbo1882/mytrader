@@ -3,11 +3,16 @@
 
 提供常用的预定义筛选策略，可直接使用或作为示例
 """
+import logging
 from src.screening.base_criteria import AndCriteria
 from src.screening.criteria.basic_criteria import RangeCriteria, GreaterThanCriteria, PercentileCriteria
 from src.screening.criteria.industry_criteria import (
     IndustryFilter, IndustryRelativeCriteria
 )
+from src.screening.criteria.amplitude_criteria import AverageAmplitudeCriteria
+from src.screening.criteria.positive_days_criteria import PositiveDaysCriteria
+
+logger = logging.getLogger(__name__)
 
 
 class PredefinedStrategies:
@@ -26,12 +31,15 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
+        logger.info(f"[PredefinedStrategies] Creating liquidity strategy")
         # 注意：条件顺序会被AndCriteria自动优化（按cost排序）
-        return AndCriteria(
+        criteria = AndCriteria(
             RangeCriteria('close', 2, 500),           # cost=1, 快速排除低价股
             RangeCriteria('circ_mv', 50000, None),     # cost=5, 排除小盘股
             RangeCriteria('turnover', 0.3, None)       # cost=10, 活跃度过滤
         )
+        logger.debug(f"[PredefinedStrategies] liquidity strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def value_strategy():
@@ -46,12 +54,15 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating value strategy")
+        criteria = AndCriteria(
             RangeCriteria('pe_ttm', 0, 20),
             RangeCriteria('pb', 0, 3),
             GreaterThanCriteria('latest_roe', 15),
             GreaterThanCriteria('amount', 5000)
         )
+        logger.debug(f"[PredefinedStrategies] value strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def growth_strategy():
@@ -67,13 +78,16 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating growth strategy")
+        criteria = AndCriteria(
             GreaterThanCriteria('latest_or_yoy', 20),
             GreaterThanCriteria('latest_gr_yoy', 15),
             RangeCriteria('pe_ttm', 0, 50),
             GreaterThanCriteria('latest_roe', 8),
             GreaterThanCriteria('amount', 5000)
         )
+        logger.debug(f"[PredefinedStrategies] growth strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def tech_growth_strategy():
@@ -89,7 +103,8 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating tech_growth strategy")
+        criteria = AndCriteria(
             # 行业白名单
             IndustryFilter(['计算机', '通信', '电子', '传媒'], mode='whitelist'),
             # 成长性
@@ -100,6 +115,8 @@ class PredefinedStrategies:
             # 流动性
             GreaterThanCriteria('amount', 5000)
         )
+        logger.debug(f"[PredefinedStrategies] tech_growth strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def quality_strategy():
@@ -114,7 +131,8 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating quality strategy")
+        criteria = AndCriteria(
             # 按行业内相对质量筛选
             IndustryRelativeCriteria('latest_roe', percentile=0.3, min_stocks=5),
             # 财务健康
@@ -122,6 +140,8 @@ class PredefinedStrategies:
             # 流动性
             GreaterThanCriteria('amount', 3000)
         )
+        logger.debug(f"[PredefinedStrategies] quality strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def dividend_strategy():
@@ -136,12 +156,15 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
+        logger.info(f"[PredefinedStrategies] Creating dividend strategy")
         # 注意：股息率需要从其他数据源获取，这里使用percentile作为示例
-        return AndCriteria(
+        criteria = AndCriteria(
             PercentileCriteria('pe_ttm', 0.25),  # 低估值前25%
             GreaterThanCriteria('total_mv', 1000000),  # 市值>100亿 (单位万元)
             GreaterThanCriteria('amount', 5000)
         )
+        logger.debug(f"[PredefinedStrategies] dividend strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def low_volatility_strategy():
@@ -156,12 +179,15 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating low_volatility strategy")
+        criteria = AndCriteria(
             GreaterThanCriteria('total_mv', 2000000),  # 市值>200亿
             RangeCriteria('pe_ttm', 0, 30),
             IndustryRelativeCriteria('latest_roe', percentile=0.3, min_stocks=5),
             GreaterThanCriteria('amount', 10000)
         )
+        logger.debug(f"[PredefinedStrategies] low_volatility strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def turnaround_strategy():
@@ -176,12 +202,15 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating turnaround strategy")
+        criteria = AndCriteria(
             RangeCriteria('pb', 0, 1.5),
             IndustryRelativeCriteria('latest_roe', percentile=0.4, min_stocks=3),
             GreaterThanCriteria('circ_mv', 30000),  # 流通市值>30亿
             GreaterThanCriteria('amount', 2000)
         )
+        logger.debug(f"[PredefinedStrategies] turnaround strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def momentum_quality_strategy():
@@ -196,12 +225,15 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating momentum_quality strategy")
+        criteria = AndCriteria(
             IndustryRelativeCriteria('latest_roe', percentile=0.3, min_stocks=5),
             PercentileCriteria('pe_ttm', 0.5),  # PE低于中位数
             GreaterThanCriteria('turnover', 2),  # 换手率>2%
             GreaterThanCriteria('amount', 5000)
         )
+        logger.debug(f"[PredefinedStrategies] momentum_quality strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def exclude_financials_strategy():
@@ -216,7 +248,8 @@ class PredefinedStrategies:
         Returns:
             AndCriteria: 筛选条件
         """
-        return AndCriteria(
+        logger.info(f"[PredefinedStrategies] Creating exclude_financials strategy")
+        criteria = AndCriteria(
             # 行业黑名单
             IndustryFilter(['银行', '非银金融'], mode='blacklist'),
             # 价值条件
@@ -226,6 +259,8 @@ class PredefinedStrategies:
             # 流动性
             GreaterThanCriteria('amount', 3000)
         )
+        logger.debug(f"[PredefinedStrategies] exclude_financials strategy created with {len(criteria.criteria)} criteria")
+        return criteria
 
     @staticmethod
     def list_strategies():

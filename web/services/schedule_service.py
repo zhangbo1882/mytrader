@@ -39,6 +39,11 @@ def create_job():
             task_params['stock_range'] = data.get('stock_range', 'all')
             task_params['mode'] = data.get('mode', 'incremental')
             task_params['content_type'] = 'stock'
+        elif data.get('content_type') == 'moneyflow':
+            task_params['stock_range'] = data.get('stock_range', 'all')
+            task_params['mode'] = data.get('mode', 'incremental')
+            task_params['exclude_st'] = True
+            task_params['content_type'] = 'moneyflow'
         elif data.get('content_type') == 'index':
             task_params['markets'] = data.get('markets', ['SSE', 'SZSE'])
             task_params['content_type'] = 'index'

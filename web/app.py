@@ -6,11 +6,31 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 import sys
 import os
+import logging
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# 禁用 Python 字节码缓存，确保开发阶段始终使用最新代码
+sys.dont_write_bytecode = True
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+# 配置日志
+log_dir = project_root / 'logs'
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / 'api.log'
+
+# 配置日志格式
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 # 创建 Flask 应用
 app = Flask(__name__,
@@ -19,6 +39,10 @@ app = Flask(__name__,
 app.config['JSON_AS_ASCII'] = False  # 支持中文
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.secret_key = 'your-secret-key-here'  # Required for session
+
+# 配置 Flask 日志
+app.logger.setLevel(logging.INFO)
+app.logger.handlers = logging.getLogger().handlers
 
 # 启用 CORS
 CORS(app)

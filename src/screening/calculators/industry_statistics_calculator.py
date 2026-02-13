@@ -6,10 +6,13 @@
 - 缓存到industry_statistics表
 - 支持三级行业统计（sw_l1/sw_l2/sw_l3）
 """
+import logging
 import pandas as pd
 from typing import List, Optional
 from sqlalchemy import create_engine, text
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def groupby_two_levels(df, columns):
@@ -62,6 +65,10 @@ class IndustryStatisticsCalculator:
 
         results = []
 
+        logger.info(f"[IndustryStatisticsCalculator] Starting industry statistics calculation")
+        logger.debug(f"[IndustryStatisticsCalculator] Metrics to calculate: {metrics}")
+        logger.debug(f"[IndustryStatisticsCalculator] Calculated at: {calculated_at}")
+
         # 获取最新交易日期
         with self.engine.connect() as conn:
             result = conn.execute(text("""
@@ -72,10 +79,10 @@ class IndustryStatisticsCalculator:
             latest_date = result.fetchone()[0]
 
         if not latest_date:
-            print("Error: No trading data found")
+            logger.error("[IndustryStatisticsCalculator] No trading data found")
             return pd.DataFrame()
 
-        print(f"  Using latest trading date: {latest_date}")
+        logger.info(f"[IndustryStatisticsCalculator] Using latest trading date: {latest_date}")
 
         for metric in metrics:
             # 只读取最新一天的数据，通过多次JOIN获取l1/l2/l3行业名称
@@ -121,16 +128,14 @@ class IndustryStatisticsCalculator:
             try:
                 df = pd.read_sql_query(query, self.engine, params={'latest_date': latest_date})
             except Exception as e:
-                print(f"Error loading metric {metric}: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"[IndustryStatisticsCalculator] Error loading metric {metric}: {e}", exc_info=True)
                 continue
 
             if df.empty:
-                print(f"  No data for metric {metric}")
+                logger.warning(f"[IndustryStatisticsCalculator] No data for metric {metric}")
                 continue
 
-            print(f"  Processing {metric}: {len(df)} records")
+            logger.debug(f"[IndustryStatisticsCalculator] Processing {metric}: {len(df)} records")
 
             # 为每个行业级别生成统计（L1, L2, L3都要保存）
             # L1: 一级行业（所有该一级行业下的股票）
@@ -208,7 +213,10 @@ class IndustryStatisticsCalculator:
                             }
                             results.append(stats)
 
-        return pd.DataFrame(results)
+        result_df = pd.DataFrame(results)
+        logger.info(f"[IndustryStatisticsCalculator] Calculation completed, generated {len(result_df)} statistics records")
+        logger.debug(f"[IndustryStatisticsCalculator] Statistics shape: {result_df.shape}")
+        return result_df
 
     def save_industry_statistics(self, stats_df: pd.DataFrame) -> bool:
         """
@@ -221,10 +229,12 @@ class IndustryStatisticsCalculator:
             是否保存成功
         """
         try:
+            logger.info(f"[IndustryStatisticsCalculator] Saving {len(stats_df)} statistics records to database")
             stats_df.to_sql('industry_statistics', self.engine, if_exists='append', index=False)
+            logger.info(f"[IndustryStatisticsCalculator] Statistics saved successfully")
             return True
         except Exception as e:
-            print(f"Error saving industry statistics: {e}")
+            logger.error(f"[IndustryStatisticsCalculator] Error saving industry statistics: {e}")
             return False
 
     def get_industry_percentile(self, sw_l1: str, metric_name: str,
@@ -275,7 +285,7 @@ class IndustryStatisticsCalculator:
 
             return result.iloc[0][percentile_column]
         except Exception as e:
-            print(f"Error getting industry percentile: {e}")
+            logger.error(f"[IndustryStatisticsCalculator] Error getting industry percentile: {e}")
             return None
 
     def clear_old_statistics(self, keep_latest: int = 1) -> int:
@@ -305,5 +315,5 @@ class IndustryStatisticsCalculator:
                 conn.commit()
                 return result.rowcount
         except Exception as e:
-            print(f"Error clearing old statistics: {e}")
+            logger.error(f"[IndustryStatisticsCalculator] Error clearing old statistics: {e}")
             return 0

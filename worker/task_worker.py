@@ -89,6 +89,7 @@ class TaskWorker:
 
         # Check if we can start more tasks
         if len(self.running_tasks) >= self.max_concurrent:
+            print(f"[Worker] Max concurrent tasks reached ({self.max_concurrent}), skipping poll")
             return
 
         # Atomically claim a pending task
@@ -98,6 +99,7 @@ class TaskWorker:
         if task is None:
             return
 
+        print(f"[Worker] Claimed task {task['task_id'][:8]} (type: {task['task_type']})")
         # Start task execution
         self._start_task(task)
 

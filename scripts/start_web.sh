@@ -16,6 +16,10 @@ fi
 # 激活虚拟环境
 source "$VENV_DIR/bin/activate"
 
+# 禁用 Python 字节码缓存，确保开发阶段始终使用最新代码
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONDONTWRITEBYTECODE_PATH=/Users/zhangbo/Public/go/github.com/mytrader/src:/Users/zhangbo/Public/go/github.com/mytrader/web:/Users/zhangbo/Public/go/github.com/mytrader/worker:/Users/zhangbo/Public/go/github.com/mytrader/web:/Users/zhangbo/Public/go/github.com/mytrader/src
+
 # 设置环境变量，默认为开发环境
 FLASK_ENV="${FLASK_ENV:-development}"
 

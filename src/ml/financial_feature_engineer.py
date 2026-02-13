@@ -166,6 +166,32 @@ class FinancialFeatureEngineer:
         Returns:
             添加财务比率后的DataFrame
         """
+        # 资产负债率 = 总负债 / 总资产 × 100%
+        if 'total_liab' in df.columns and 'total_assets' in df.columns:
+            df['debt_to_assets'] = df['total_liab'] / (df['total_assets'] + 1e-6) * 100
+            df['debt_to_assets'] = df['debt_to_assets'].replace([np.inf, -np.inf], np.nan)
+
+        # 有息资产负债率 = 有息负债 / 总资产 × 100%
+        # 有息负债包括：短期借款、长期借款、应付债券、一年内到期的非流动负债
+        debt_cols = []
+        if 'st_borr' in df.columns:  # 短期借款
+            debt_cols.append('st_borr')
+        if 'lt_borr' in df.columns:  # 长期借款
+            debt_cols.append('lt_borr')
+        if 'bond_payable' in df.columns:  # 应付债券
+            debt_cols.append('bond_payable')
+        if 'st_bonds_payable' in df.columns:  # 短期应付债券
+            debt_cols.append('st_bonds_payable')
+        if 'non_cur_liab_due_1y' in df.columns:  # 一年内到期的非流动负债
+            debt_cols.append('non_cur_liab_due_1y')
+
+        if debt_cols and 'total_assets' in df.columns:
+            # 计算有息负债总和
+            df['interest_bearing_debt'] = df[debt_cols].sum(axis=1, skipna=True)
+            # 计算有息资产负债率
+            df['interest_bearing_debt_ratio'] = df['interest_bearing_debt'] / (df['total_assets'] + 1e-6) * 100
+            df['interest_bearing_debt_ratio'] = df['interest_bearing_debt_ratio'].replace([np.inf, -np.inf], np.nan)
+
         # 盈利质量：OCF/债务 / ROE
         if 'ocf_to_debt' in df.columns and 'roe' in df.columns:
             df['profit_quality'] = df['ocf_to_debt'] / (df['roe'] + 1e-6)
@@ -385,6 +411,9 @@ class FinancialFeatureEngineer:
             ],
             'cashflow': [
                 'ocfps', 'ocf_to_debt', 'free_cf'
+            ],
+            'debt': [
+                'debt_to_assets', 'interest_bearing_debt', 'interest_bearing_debt_ratio'
             ],
             'trend': [
                 'eps_ma_4q', 'roe_ma_4q', 'eps_trend_slope',

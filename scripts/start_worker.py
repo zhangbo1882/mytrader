@@ -28,6 +28,11 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 禁用 Python 字节码缓存，确保开发阶段始终使用最新代码
+sys.dont_write_bytecode = True
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # 环境变量方式禁用缓存
+
 from worker.task_worker import TaskWorker
 from config.settings import TASKS_DB_PATH
 
@@ -49,9 +54,9 @@ def main():
     parser.add_argument(
         '--max-concurrent',
         type=int,
-        default=1,
+        default=3,
         metavar='N',
-        help='Maximum concurrent tasks to run (default: 1)'
+        help='Maximum concurrent tasks to run (default: 3)'
     )
     parser.add_argument(
         '--log-file',
@@ -63,9 +68,9 @@ def main():
     parser.add_argument(
         '--log-level',
         type=str,
-        default='INFO',
+        default='DEBUG',
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        help='Logging level (default: INFO)'
+        help='Logging level (default: DEBUG)'
     )
 
     args = parser.parse_args()

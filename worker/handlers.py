@@ -5,7 +5,10 @@ These functions handle the actual execution of different task types.
 Each handler receives the TaskManager, task_id, and task parameters.
 """
 import time
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def execute_update_stock_prices(tm, task_id, params):
@@ -244,14 +247,24 @@ def execute_update_industry_classification(tm, task_id, params):
     try:
         # Delete old data if force update
         if force:
-            print(f"[Task-{task_id[:8]}] Force update: deleting old data...")
+            logger.info(f"[Task-{task_id[:8]}] Force update: deleting old data...")
             with db.engine.connect() as conn:
                 from sqlalchemy import text
+                # Get count before deletion
+                old_count = conn.execute(text("SELECT COUNT(*) FROM sw_members")).scalar()
+                logger.info(f"[Task-{task_id[:8]}] Old records count: {old_count}")
+                # Delete all
                 conn.execute(text("DELETE FROM sw_members"))
                 conn.commit()
+                # Verify deletion
+                new_count = conn.execute(text("SELECT COUNT(*) FROM sw_members")).scalar()
+                logger.info(f"[Task-{task_id[:8]}] Records after deletion: {new_count}")
+                logger.info(f"[Task-{task_id[:8]}] Deleted {old_count} old records, fetching fresh data from API...")
+                print(f"[Task-{task_id[:8]}] Deleted {old_count} old records, fetching fresh data from API...")
 
-        # Save all members (API returns all stocks with their industries, we save all)
-        count = db.save_sw_members(is_new='Y', force_update=False)
+        # Save all members - use new method to get all stocks by iterating L1 industries
+        # This bypasses the 2000 row API limit
+        count = db.save_sw_members_all(is_new='Y', src=src)
 
         if count > 0:
             members_count = count
@@ -952,15 +965,324 @@ def execute_update_industry_statistics(tm, task_id, params):
         )
 
 
+def execute_backtest(tm, task_id, params):
+    """
+    Execute backtest task (支持多策略).
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters:
+            回测共有参数:
+                - stock: 股票代码（必需）
+                - start_date: 开始日期（必需）
+                - end_date: 结束日期（可选）
+                - cash: 初始资金（可选，默认100万）
+                - commission: 手续费率（可选，默认0.2%）
+                - benchmark: 基准指数（可选）
+
+            策略参数:
+                - strategy: 策略类型（必需）
+                - strategy_params: 策略特定参数（必需）
+    """
+    from web.services.backtest_service import run_single_backtest
+
+    # 获取参数
+    stock_code = params.get('stock')
+    start_date = params.get('start_date')
+    strategy_type = params.get('strategy', 'sma_cross')
+
+    strategy_name = {
+        'sma_cross': 'SMA交叉策略'
+    }.get(strategy_type, strategy_type)
+
+    tm.update_task(
+        task_id,
+        status='running',
+        message=f'正在执行{strategy_name}回测: {stock_code} ({start_date} 开始)...'
+    )
+
+    try:
+        print(f"[Backtest-{task_id[:8]}] Starting backtest for {stock_code}")
+        logger.info(f"[Backtest-{task_id[:8]}] Starting backtest for {stock_code}")
+
+        # 运行回测
+        result = run_single_backtest(params)
+
+        logger.info(f"[Backtest-{task_id[:8]}] Backtest completed, total_trades={result['trade_stats']['total_trades']}")
+
+        # 完成任务
+        tm.update_task(
+            task_id,
+            status='completed',
+            progress=100,
+            message=f'{strategy_name}回测完成: {stock_code}, 总收益率: {result["basic_info"]["total_return"]:.2%}',
+            result=result
+        )
+
+        print(f"[Backtest-{task_id[:8]}] Backtest completed successfully")
+        print(f"  Total Return: {result['basic_info']['total_return']:.2%}")
+        print(f"  Sharpe Ratio: {result['health_metrics']['sharpe_ratio']:.2f}")
+        print(f"  Max Drawdown: {result['health_metrics']['max_drawdown']:.2%}")
+
+    except Exception as e:
+        print(f"[ERROR] Backtest failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'{strategy_name}回测失败: {str(e)}'
+        )
+
+
+def execute_update_moneyflow(tm, task_id, params):
+    """
+    Execute moneyflow data update task.
+
+    只负责获取个股资金流向数据，不包含行业汇总计算。
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters
+            - mode: "incremental" | "full" (默认: "incremental")
+            - stock_range: "all" | "favorites" | "custom" (默认: "all")
+            - custom_stocks: 自定义股票列表
+            - start_date: 开始日期 (可选)
+            - end_date: 结束日期 (可选)
+            - exclude_st: 是否排除ST股 (默认 True)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+    from worker.utils import get_stock_list_for_task
+    from datetime import datetime, timedelta
+    from sqlalchemy import text
+
+    mode = params.get('mode', 'incremental')
+    stock_range = params.get('stock_range', 'all')
+    custom_stocks = params.get('custom_stocks', [])
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
+    exclude_st = params.get('exclude_st', True)
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    # 更新任务状态
+    mode_text = '增量' if mode == 'incremental' else '全量'
+    tm.update_task(task_id, status='running', message=f'正在获取资金流向数据（{mode_text}更新）...')
+
+    try:
+        stats = {}
+
+        # 根据更新模式确定起始日期
+        if start_date is None:
+            if mode == 'incremental':
+                # 增量更新：从数据库最新日期的下一天开始
+                if stock_range == 'all':
+                    query = text("SELECT MAX(trade_date) as max_date FROM stock_moneyflow")
+                    with db.engine.connect() as conn:
+                        result = conn.execute(query).fetchone()
+                        if result and result[0]:
+                            last_date = datetime.strptime(result[0], '%Y%m%d')
+                            start_date = (last_date + timedelta(days=1)).strftime('%Y%m%d')
+                            print(f"[Task-{task_id[:8]}] 增量更新：从数据库最新日期 {result[0]} 的下一天 {start_date} 开始")
+                else:
+                    # 按股票列表的增量更新：查询每只股票的最新日期
+                    # 简化处理：从1年前开始
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+                    print(f"[Task-{task_id[:8]}] 按股票列表更新：从 {start_date} 开始")
+            else:
+                # 全量更新：从1年前开始
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+                print(f"[Task-{task_id[:8]}] 全量更新：从 {start_date} 开始")
+
+        # 根据股票范围选择不同的获取方式
+        if stock_range == 'all':
+            # 按日期获取全市场数据
+            print(f"[Task-{task_id[:8]}] Updating moneyflow data for all stocks (by date)...")
+            tm.update_task(task_id, message=f'正在获取全市场资金流向数据（{mode_text}更新）...')
+            stats = db.save_all_moneyflow_incremental(start_date=start_date, exclude_st=exclude_st)
+
+        else:
+            # 按股票列表获取（favorites 或 custom）
+            stock_list = get_stock_list_for_task(stock_range, custom_stocks, db, [])
+
+            if not stock_list:
+                tm.update_task(
+                    task_id,
+                    status='failed',
+                    message='无法获取股票列表'
+                )
+                return
+
+            print(f"[Task-{task_id[:8]}] Updating moneyflow data for {len(stock_list)} stocks...")
+            tm.update_task(task_id, message=f'正在获取 {len(stock_list)} 只股票的资金流向数据（{mode_text}更新）...')
+
+            stats = db.save_moneyflow_by_stocks(
+                stock_list=stock_list,
+                start_date=start_date,
+                end_date=end_date,
+                exclude_st=exclude_st
+            )
+
+        # 完成任务
+        tm.update_task(
+            task_id,
+            status='completed',
+            message=f'资金流向{mode_text}更新完成 (成功:{stats.get("success", 0)}, 失败:{stats.get("failed", 0)})',
+            result=stats
+        )
+
+        print(f"[Task-{task_id[:8]}] Moneyflow data update completed: {stats}")
+
+        # 如果是全市场更新，自动触发行业汇总计算
+        if stock_range == 'all':
+            print(f"[Task-{task_id[:8]}] Auto-triggering industry moneyflow calculation...")
+            industry_task_id = tm.create_task(
+                task_type='calculate_industry_moneyflow',
+                params={
+                    'start_date': start_date,
+                    'end_date': end_date,
+                }
+            )
+            print(f"[Task-{task_id[:8]}] Created industry moneyflow task: {industry_task_id[:8]}...")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'资金流向数据更新失败: {str(e)}'
+        )
+
+
+def execute_calculate_industry_moneyflow(tm, task_id, params):
+    """
+    Execute industry moneyflow summary calculation task.
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters
+            - start_date: 开始日期 YYYYMMDD (可选)
+            - end_date: 结束日期 YYYYMMDD (可选)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    # 更新任务状态
+    tm.update_task(task_id, status='running', message='正在计算行业资金流向汇总...')
+
+    try:
+        print(f"[Task-{task_id[:8]}] Calculating industry moneyflow summary...")
+        stats = db.save_industry_moneyflow_batch(start_date=start_date, end_date=end_date)
+
+        # 完成任务
+        tm.update_task(
+            task_id,
+            status='completed',
+            message=f'行业资金流向汇总计算完成 (成功:{stats.get("success", 0)}, 失败:{stats.get("failed", 0)})',
+            result=stats
+        )
+
+        print(f"[Task-{task_id[:8]}] Industry moneyflow calculation completed: {stats}")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'行业资金流向汇总计算失败: {str(e)}'
+        )
+
+
+def execute_update_dragon_list(tm, task_id, params):
+    """
+    执行龙虎榜数据更新任务
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters
+            - mode: 'incremental' or 'batch'
+            - start_date: Start date YYYY-MM-DD (for batch mode)
+            - end_date: End date YYYY-MM-DD (for batch mode)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+    from datetime import datetime
+
+    mode = params.get('mode', 'incremental')
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
+
+    try:
+        # 初始化数据源
+        db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+        if mode == 'batch' and start_date:
+            # 批量模式：回填历史数据
+            tm.update_task(task_id, status='running',
+                             message=f'开始批量更新龙虎榜数据: {start_date} 至 {end_date or "今天"}')
+
+            # 转换日期格式
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').strftime('%Y%m%d')
+            end_dt = end_date
+            if end_dt:
+                end_dt = datetime.strptime(end_dt, '%Y-%m-%d').strftime('%Y%m%d')
+
+            total_count = db.save_dragon_list_batch(start_dt, end_dt)
+
+            tm.update_task(
+                task_id,
+                status='completed',
+                message=f'批量更新完成，共保存 {total_count} 条龙虎榜记录'
+            )
+
+        else:
+            # 增量模式：更新最新数据
+            tm.update_task(task_id, status='running',
+                             message='正在获取最新龙虎榜数据...')
+
+            count = db.save_dragon_list()
+
+            tm.update_task(
+                task_id,
+                status='completed',
+                message=f'增量更新完成，共保存 {count} 条龙虎榜记录'
+            )
+
+    except Exception as e:
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'龙虎榜数据更新失败: {str(e)}'
+        )
+        raise
+
+
 # Task type to handler mapping
 TASK_HANDLERS = {
     'update_stock_prices': execute_update_stock_prices,
     'update_industry_classification': execute_update_industry_classification,
     'update_financial_reports': execute_update_financial_reports,
     'update_index_data': execute_update_index_data,
-    'update_industry_statistics': execute_update_industry_statistics,  # 新增行业统计更新
-    'test_handler': execute_test_handler,  # 新增测试处理器
+    'update_industry_statistics': execute_update_industry_statistics,  # 行业统计更新
+    'update_moneyflow': execute_update_moneyflow,  # 资金流向数据更新
+    'calculate_industry_moneyflow': execute_calculate_industry_moneyflow,  # 行业资金流向汇总计算
+    'update_dragon_list': execute_update_dragon_list,  # 龙虎榜数据更新
+    'test_handler': execute_test_handler,
     'train_quarterly_model': execute_train_quarterly_model,  # 季度模型训练
+    'backtest': execute_backtest,  # 回测任务
     # Backward compatibility for old task types
     'update_all_stocks': execute_update_stock_prices,
     'update_favorites': execute_update_stock_prices,

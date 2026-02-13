@@ -6,10 +6,13 @@
 2. 应用筛选条件
 3. 返回符合条件的股票列表
 """
+import logging
 import pandas as pd
 from sqlalchemy import create_engine
 from typing import Optional, List
 from src.screening.base_criteria import BaseCriteria
+
+logger = logging.getLogger(__name__)
 
 
 class ScreeningEngine:
@@ -43,19 +46,29 @@ class ScreeningEngine:
         Returns:
             符合条件的股票DataFrame
         """
+        logger.info(f"[ScreeningEngine] Starting screening, criteria type: {type(criteria).__name__}, date: {trade_date}")
+
         # 加载数据
+        logger.info(f"[ScreeningEngine] Loading data from database...")
         df = self._load_data(trade_date)
 
         if df.empty:
+            logger.warning(f"[ScreeningEngine] Database returned empty result")
             return pd.DataFrame()
 
+        logger.info(f"[ScreeningEngine] Data loaded from database, stock count: {len(df)}")
+
         # 应用筛选条件
+        logger.info(f"[ScreeningEngine] Applying filter criteria...")
         result = criteria.filter(df)
+        logger.info(f"[ScreeningEngine] Filter applied, remaining stocks: {len(result)}")
 
         # 应用限制
         if limit and len(result) > limit:
+            logger.info(f"[ScreeningEngine] Applying limit: {limit}")
             result = result.head(limit)
 
+        logger.info(f"[ScreeningEngine] Screening completed, final result: {len(result)} stocks")
         return result
 
     def _load_data(self, trade_date: Optional[str] = None) -> pd.DataFrame:
@@ -68,8 +81,11 @@ class ScreeningEngine:
         Returns:
             包含所有数据的DataFrame
         """
+        logger.debug(f"[ScreeningEngine] _load_data start, specified date: {trade_date}")
+
         if trade_date is None:
             # 获取最新交易日
+            logger.debug(f"[ScreeningEngine] Getting latest trade date...")
             query = """
             SELECT MAX(datetime) as latest_date
             FROM bars
@@ -77,12 +93,15 @@ class ScreeningEngine:
             """
             result = pd.read_sql_query(query, self.engine)
             if result.empty or result.iloc[0]['latest_date'] is None:
+                logger.error(f"[ScreeningEngine] Cannot get latest trade date")
                 return pd.DataFrame()
             trade_date = result.iloc[0]['latest_date']
+            logger.debug(f"[ScreeningEngine] Using latest trade date: {trade_date}")
 
         # 加载指定日期的数据（JOIN多表）
         # 优先使用L3级行业，如果没有则使用L2或L1
         # 使用ROW_NUMBER()获取最细粒度的行业分类
+        logger.debug(f"[ScreeningEngine] Executing multi-table JOIN query, date: {trade_date}")
         query = """
         WITH ranked_industries AS (
             SELECT
@@ -97,12 +116,14 @@ class ScreeningEngine:
                 sc.index_code,
                 sc.parent_code,
                 sn.name as stock_name,
+                sbi.market,
                 ROW_NUMBER() OVER (
                     PARTITION BY b.symbol
                     ORDER BY CASE sc.level WHEN 'L3' THEN 1 WHEN 'L2' THEN 2 ELSE 3 END
                 ) as rn
             FROM bars b
             LEFT JOIN stock_names sn ON b.symbol = sn.code
+            LEFT JOIN stock_basic_info sbi ON b.symbol = sbi.code
             LEFT JOIN sw_members swm ON b.symbol = SUBSTR(swm.ts_code, 1, 6)
                 AND swm.in_date <= b.datetime
                 AND (swm.out_date IS NULL OR swm.out_date > b.datetime)
@@ -120,12 +141,22 @@ class ScreeningEngine:
                 total_mv, circ_mv,
                 stock_name,
                 industry_name as sw_l3,
-                index_code
+                index_code,
+                market
             FROM ranked_industries
             WHERE rn = 1
         )
         SELECT
-            bd.*,
+            bd.symbol,
+            bd.trade_date,
+            bd.open, bd.high, bd.low, bd.close,
+            bd.volume, bd.amount, bd.turnover, bd.pct_chg,
+            bd.pe_ttm, bd.pb, bd.ps_ttm,
+            bd.total_mv, bd.circ_mv,
+            bd.stock_name,
+            bd.sw_l3,
+            bd.index_code,
+            bd.market,
             sc2.industry_name as sw_l2,
             sc1.industry_name as sw_l1,
             f.roe as latest_roe,
@@ -146,6 +177,7 @@ class ScreeningEngine:
         """
 
         df = pd.read_sql_query(query, self.engine, params={'trade_date': trade_date})
+        logger.debug(f"[ScreeningEngine] Database query returned, data shape: {df.shape}")
 
         return df
 

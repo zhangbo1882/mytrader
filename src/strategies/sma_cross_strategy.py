@@ -7,7 +7,10 @@
 - 当收盘价向上突破移动平均线时买入
 - 当收盘价向下跌破移动平均线时卖出
 """
+import logging
 import backtrader as bt
+
+logger = logging.getLogger(__name__)
 
 
 class SMACrossStrategy(bt.Strategy):
@@ -59,16 +62,16 @@ class SMACrossStrategy(bt.Strategy):
             close_price = self.datas[0].close[0]
 
             if order.isbuy():
-                print(f"\n【买入】 {current_date}")
-                print(f"  当日价格: 开盘={open_price:.2f}, 最高={high_price:.2f}, 最低={low_price:.2f}, 收盘={close_price:.2f}")
-                print(f"  执行价格: {order.executed.price:.2f}, 数量: {order.executed.size}, 手续费: {order.executed.comm:.2f}")
+                logger.info(f"【买入】 {current_date}")
+                logger.info(f"  当日价格: 开盘={open_price:.2f}, 最高={high_price:.2f}, 最低={low_price:.2f}, 收盘={close_price:.2f}")
+                logger.info(f"  执行价格: {order.executed.price:.2f}, 数量: {order.executed.size}, 手续费: {order.executed.comm:.2f}")
             elif order.issell():
-                print(f"\n【卖出】 {current_date}")
-                print(f"  当日价格: 开盘={open_price:.2f}, 最高={high_price:.2f}, 最低={low_price:.2f}, 收盘={close_price:.2f}")
-                print(f"  执行价格: {order.executed.price:.2f}, 数量: {abs(order.executed.size)}, 手续费: {order.executed.comm:.2f}")
+                logger.info(f"【卖出】 {current_date}")
+                logger.info(f"  当日价格: 开盘={open_price:.2f}, 最高={high_price:.2f}, 最低={low_price:.2f}, 收盘={close_price:.2f}")
+                logger.info(f"  执行价格: {order.executed.price:.2f}, 数量: {abs(order.executed.size)}, 手续费: {order.executed.comm:.2f}")
 
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            print(f"订单失败: {order.getstatusname()}")
+            logger.error(f"订单失败: {order.getstatusname()}")
 
         self.order = None
 
@@ -96,13 +99,13 @@ class SMACrossStrategy(bt.Strategy):
 
                 if size > 0:
                     self.order = self.buy(size=size)
-                    print(f"\n【买入信号】 {self.datas[0].datetime.date(0)}")
-                    print(f"  可用资金: {cash:.2f}, 买入价格: {price:.2f}, 买入数量: {size}股")
+                    logger.info(f"【买入信号】 {self.datas[0].datetime.date(0)}")
+                    logger.info(f"  可用资金: {cash:.2f}, 买入价格: {price:.2f}, 买入数量: {size}股")
         else:
             if self.data_close[0] < self.sma[0]:  # 执行卖出条件判断：收盘价格跌破移动平均线
                 # 清仓卖出：卖出所有持仓
                 size = self.position.size  # 当前持仓数量
                 if size > 0:
                     self.order = self.sell(size=size)
-                    print(f"\n【卖出信号】 {self.datas[0].datetime.date(0)}")
-                    print(f"  持仓数量: {size}股, 卖出价格: {self.data_close[0]:.2f}")
+                    logger.info(f"【卖出信号】 {self.datas[0].datetime.date(0)}")
+                    logger.info(f"  持仓数量: {size}股, 卖出价格: {self.data_close[0]:.2f}")

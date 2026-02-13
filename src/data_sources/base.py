@@ -5,6 +5,7 @@
 """
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 from abc import ABC, abstractmethod
 from datetime import datetime
 
@@ -22,7 +23,18 @@ class BaseStockDB(ABC):
         Args:
             db_path: 数据库文件路径
         """
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
+        # 添加连接池配置和超时设置，支持多线程访问
+        # 使用NullPool避免连接池导致的数据库锁定问题
+        self.engine = create_engine(
+            f"sqlite:///{db_path}",
+            echo=False,
+            poolclass=NullPool,  # 禁用连接池，每个连接独立
+            connect_args={
+                'check_same_thread': False,
+                'timeout': 60,  # 60秒超时
+                'isolation_level': None  # 让SQLAlchemy管理事务
+            }
+        )
         self._create_tables()
         self._stock_name_cache = {}  # 股票名称缓存
 

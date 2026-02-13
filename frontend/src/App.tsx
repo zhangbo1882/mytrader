@@ -12,6 +12,11 @@ import {
   AppstoreOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  ExperimentOutlined,
+  FundOutlined,
+  FilterOutlined,
+  TransactionOutlined,
+  TrophyOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu, theme } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -36,6 +41,11 @@ const UpdatePage = lazy(() => import('./pages/UpdatePage'));
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const FinancialPage = lazy(() => import('./pages/FinancialPage'));
 const BoardsPage = lazy(() => import('./pages/BoardsPage'));
+const BacktestPage = lazy(() => import('./pages/BacktestPage'));
+const ValuationPage = lazy(() => import('./pages/ValuationPage'));
+const ScreeningPage = lazy(() => import('./pages/ScreeningPage'));
+const MoneyFlowPage = lazy(() => import('./pages/MoneyFlowPage'));
+const DragonListPage = lazy(() => import('./pages/DragonListPage'));
 
 type MenuItem = {
   key: string;
@@ -71,6 +81,11 @@ function AppLayout() {
     { key: '/tasks', icon: <HistoryOutlined aria-hidden="true" />, label: '任务历史' },
     { key: '/financial', icon: <DollarOutlined aria-hidden="true" />, label: '财务数据' },
     { key: '/boards', icon: <AppstoreOutlined aria-hidden="true" />, label: '板块中心' },
+    { key: '/valuation', icon: <FundOutlined aria-hidden="true" />, label: '股票估值' },
+    { key: '/backtest', icon: <ExperimentOutlined aria-hidden="true" />, label: '策略回测' },
+    { key: '/screening', icon: <FilterOutlined aria-hidden="true" />, label: '股票筛选' },
+    { key: '/moneyflow', icon: <TransactionOutlined aria-hidden="true" />, label: '资金流向' },
+    { key: '/dragon-list', icon: <TrophyOutlined aria-hidden="true" />, label: '龙虎榜' },
   ];
 
   return (
@@ -140,6 +155,11 @@ function App() {
             <Route path="tasks" element={<TasksPage />} />
             <Route path="financial" element={<FinancialPage />} />
             <Route path="boards" element={<BoardsPage />} />
+            <Route path="valuation" element={<ValuationPage />} />
+            <Route path="backtest" element={<BacktestPage />} />
+            <Route path="screening" element={<ScreeningPage />} />
+            <Route path="moneyflow" element={<MoneyFlowPage />} />
+            <Route path="dragon-list" element={<DragonListPage />} />
           </Route>
         </Routes>
       </Suspense>

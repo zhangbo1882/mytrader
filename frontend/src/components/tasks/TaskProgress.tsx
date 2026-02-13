@@ -10,18 +10,28 @@ interface TaskProgressProps {
   processed: number;
   total: number;
   failed: number;
+  progress?: number;  // Backend-calculated progress (useful for tasks without stock counts)
   showText?: boolean;
 }
 
-export function TaskProgress({ status, processed, total, failed, showText = true }: TaskProgressProps) {
+export function TaskProgress({ status, processed, total, failed, progress: backendProgress, showText = true }: TaskProgressProps) {
   // Handle case where total is 0 or undefined (task initializing)
   const displayTotal = total || 0;
   const displayProcessed = processed || 0;
-  const percent = displayTotal > 0 ? Math.floor((displayProcessed / displayTotal) * 100) : 0;
+
+  // Calculate percent:
+  // - If total > 0, calculate from processed/total
+  // - If total = 0, use backend progress (for tasks like industry_statistics)
+  // - For completed tasks, always show 100%
+  const percent = displayTotal > 0
+    ? Math.floor((displayProcessed / displayTotal) * 100)
+    : (status === 'completed' || status === 'completed_with_errors')
+      ? 100
+      : backendProgress || 0;
 
   // Show initializing message when total is 0 and status is pending/running
-  const isInitializing = displayTotal === 0 && (status === 'pending' || status === 'running');
-  const isCompleted = percent === 100 && displayProcessed > 0;
+  const isInitializing = displayTotal === 0 && (status === 'pending' || status === 'running') && percent === 0;
+  const isCompleted = percent === 100 || status === 'completed' || status === 'completed_with_errors';
 
   const displayText = isInitializing
     ? '初始化中...'

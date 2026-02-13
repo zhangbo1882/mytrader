@@ -1,0 +1,747 @@
+import { useState, useEffect } from 'react';
+import { Card, Form, Select, InputNumber, Button, Space, Row, Col, Radio, Typography, Divider, message, Tag } from 'antd';
+import { PlusOutlined, DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import type { Criteria, CriteriaType, ScreeningConfig } from '@/types';
+import { screeningService } from '@/services';
+
+const { Text } = Typography;
+
+// Market type options
+const MARKET_OPTIONS = [
+  { value: '主板', label: '主板' },
+  { value: '创业板', label: '创业板' },
+  { value: '科创板', label: '科创板' },
+  { value: '北交所', label: '北交所' },
+];
+
+// Industry level options
+const INDUSTRY_LEVEL_OPTIONS = [
+  { value: 1, label: '一级行业' },
+  { value: 2, label: '二级行业' },
+  { value: 3, label: '三级行业' },
+];
+
+interface CustomCriteriaBuilderProps {
+  onSubmit: (config: ScreeningConfig) => void;
+  loading?: boolean;
+}
+
+// Available columns for filtering
+const AVAILABLE_COLUMNS = [
+  { value: 'pe_ttm', label: '市盈率(TTM)', needsPeriod: false },
+  { value: 'pb', label: '市净率', needsPeriod: false },
+  { value: 'total_mv_yi', label: '总市值(亿)', needsPeriod: false },
+  { value: 'circulation_mv_yi', label: '流通市值(亿)', needsPeriod: false },
+  { value: 'turnover_rate', label: '换手率(%)', needsPeriod: true },
+  { value: 'volume', label: '成交量(手)', needsPeriod: false },
+  { value: 'amount', label: '成交额(元)', needsPeriod: false },
+  { value: 'avg_amplitude', label: '平均振幅(%)', needsPeriod: true },
+  { value: 'positive_days', label: '正收益天数占比', needsPeriod: true },
+];
+
+// Criteria type options
+const CRITERIA_TYPE_OPTIONS: { value: CriteriaType; label: string; description: string }[] = [
+  { value: 'Range', label: '范围', description: '指定最小值和最大值' },
+  { value: 'GreaterThan', label: '大于', description: '值大于指定阈值' },
+  { value: 'LessThan', label: '小于', description: '值小于指定阈值' },
+  { value: 'Percentile', label: '百分位', description: '值在指定百分位以上' },
+  { value: 'PositiveDays', label: '正收益天数', description: '过去N天涨幅超过阈值的天数占比' },
+  { value: 'IndustryFilter', label: '行业过滤', description: '按行业筛选股票' },
+  { value: 'IndustryRelative', label: '行业内相对', description: '值在行业内的百分位' },
+  { value: 'MarketFilter', label: '市场过滤', description: '按市场/交易所筛选股票' },
+];
+
+interface CriteriaFormData {
+  type: CriteriaType;
+  column?: string;
+  minVal?: number;
+  maxVal?: number;
+  threshold?: number;
+  percentile?: number;
+  industries?: string[];
+  industry?: string;  // Single industry for IndustryRelative
+  mode?: 'include' | 'exclude';
+  industryLevel?: number;  // 1=Level 1, 2=Level 2, 3=Level 3
+  // For PositiveDays: minimum positive day ratio
+  minPositiveRatio?: number;
+  // For MarketFilter
+  markets?: string[];
+  marketMode?: 'include' | 'exclude';
+}
+
+// Global time range configuration for all time-based criteria
+interface GlobalTimeRange {
+  mode: 'period' | 'dateRange';
+  period?: number;           // Number of trading days
+  startDate?: string;        // YYYYMMDD format
+  endDate?: string;          // YYYYMMDD format
+}
+
+interface IndustryOption {
+  code: string;
+  name: string;
+  parent_code: string;
+}
+
+function CustomCriteriaBuilder({ onSubmit, loading }: CustomCriteriaBuilderProps) {
+  const [form] = Form.useForm();
+  const [criteriaList, setCriteriaList] = useState<CriteriaFormData[]>([
+    {
+      type: 'Range',
+      column: 'pe_ttm',
+      minVal: 0,
+      maxVal: 30,
+      industryLevel: 1,
+      minPositiveRatio: 50,
+      markets: ['主板', '创业板'],
+      marketMode: 'include'
+    }
+  ]);
+  const [logicType, setLogicType] = useState<'AND' | 'OR'>('AND');
+
+  // Global time range configuration for all time-based criteria
+  const [globalTimeRange, setGlobalTimeRange] = useState<GlobalTimeRange>({
+    mode: 'period',
+    period: 20
+  });
+
+  // Store industry options for each level
+  const [industryOptions, setIndustryOptions] = useState<Record<number, IndustryOption[]>>({});
+  const [loadingIndustries, setLoadingIndustries] = useState<Record<number, boolean>>({});
+
+  // Load industries for a specific level
+  const loadIndustries = async (level: number) => {
+    if (industryOptions[level]) {
+      return; // Already loaded
+    }
+
+    setLoadingIndustries(prev => ({ ...prev, [level]: true }));
+    try {
+      const response = await screeningService.getIndustries(level);
+      if (response.success) {
+        setIndustryOptions(prev => ({
+          ...prev,
+          [level]: response.industries
+        }));
+      }
+    } catch (error) {
+      console.error(`Failed to load level ${level} industries:`, error);
+      message.error(`加载${level}级行业失败`);
+    } finally {
+      setLoadingIndustries(prev => ({ ...prev, [level]: false }));
+    }
+  };
+
+  // Load industries when component mounts (load level 1 by default)
+  useEffect(() => {
+    loadIndustries(1);
+  }, []);
+
+  const addCriteria = () => {
+    setCriteriaList([...criteriaList, {
+      type: 'Range',
+      column: 'pe_ttm',
+      minVal: 0,
+      maxVal: 30,
+      industryLevel: 1,
+      minPositiveRatio: 50,
+      markets: ['主板', '创业板'],
+      marketMode: 'include'
+    }]);
+  };
+
+  const removeCriteria = (index: number) => {
+    if (criteriaList.length > 1) {
+      const newList = [...criteriaList];
+      newList.splice(index, 1);
+      setCriteriaList(newList);
+    } else {
+      message.warning('至少需要保留一个筛选条件');
+    }
+  };
+
+  const updateCriteria = (index: number, field: keyof CriteriaFormData, value: any) => {
+    const newList = [...criteriaList];
+    newList[index] = { ...newList[index], [field]: value };
+
+    // Load industries for the selected level if not already loaded
+    if (field === 'industryLevel') {
+      loadIndustries(value);
+      // Clear selected industries when level changes
+      newList[index].industries = undefined;
+      newList[index].industry = undefined;
+    }
+
+    setCriteriaList(newList);
+  };
+
+  const handleSubmit = () => {
+    // Validate each criteria
+    for (let i = 0; i < criteriaList.length; i++) {
+      const criteria = criteriaList[i];
+
+      // Check column field only if not IndustryFilter or MarketFilter
+      if (criteria.type !== 'IndustryFilter' && criteria.type !== 'MarketFilter') {
+        if (!criteria.column) {
+          message.error(`请为第 ${i + 1} 个条件选择字段`);
+          return;
+        }
+      }
+
+      // Special validation for time-range based fields
+      if (criteria.column === 'avg_amplitude' || criteria.column === 'turnover_rate' || criteria.column === 'positive_days') {
+        const mode = globalTimeRange.mode;
+
+        if (mode === 'period') {
+          // Period mode: validate period exists and is valid
+          if (!globalTimeRange.period || globalTimeRange.period < 1) {
+            message.error(`请为时间段设置有效的交易天数（至少1天）`);
+            return;
+          }
+        } else if (mode === 'dateRange') {
+          // DateRange mode: validate start_date and end_date exist
+          if (!globalTimeRange.startDate || !globalTimeRange.endDate) {
+            message.error(`请为时间段设置完整的开始和结束日期`);
+            return;
+          }
+          if (globalTimeRange.startDate >= globalTimeRange.endDate) {
+            message.error(`时间段的开始日期必须早于结束日期`);
+            return;
+          }
+        }
+      }
+
+      switch (criteria.type) {
+        case 'Range':
+          if (criteria.minVal === undefined || criteria.maxVal === undefined) {
+            message.error(`请为第 ${i + 1} 个范围条件设置最小值和最大值`);
+            return;
+          }
+          if (criteria.minVal >= criteria.maxVal) {
+            message.error(`第 ${i + 1} 个条件的最小值必须小于最大值`);
+            return;
+          }
+          break;
+        case 'GreaterThan':
+        case 'LessThan':
+          if (criteria.threshold === undefined) {
+            message.error(`请为第 ${i + 1} 个条件设置阈值`);
+            return;
+          }
+          break;
+        case 'Percentile':
+          if (criteria.percentile === undefined || criteria.percentile < 0 || criteria.percentile > 100) {
+            message.error(`请为第 ${i + 1} 个条件设置有效的百分位值(0-100)`);
+            return;
+          }
+          break;
+        case 'IndustryRelative':
+          if (!criteria.industry) {
+            message.error(`请为第 ${i + 1} 个条件选择参考行业`);
+            return;
+          }
+          if (criteria.percentile === undefined || criteria.percentile < 0 || criteria.percentile > 100) {
+            message.error(`请为第 ${i + 1} 个条件设置有效的百分位值(0-100)`);
+            return;
+          }
+          break;
+        case 'IndustryFilter':
+          if (!criteria.industries || criteria.industries.length === 0) {
+            message.error(`请为第 ${i + 1} 个条件选择行业`);
+            return;
+          }
+          break;
+        case 'MarketFilter':
+          if (!criteria.markets || criteria.markets.length === 0) {
+            message.error(`请为第 ${i + 1} 个条件选择市场`);
+            return;
+          }
+          break;
+        case 'PositiveDays':
+          if (criteria.threshold === undefined || criteria.threshold < 0) {
+            message.error(`请为第 ${i + 1} 个条件设置有效的涨幅阈值`);
+            return;
+          }
+          if (criteria.minPositiveRatio === undefined || criteria.minPositiveRatio < 0 || criteria.minPositiveRatio > 100) {
+            message.error(`请为第 ${i + 1} 个条件设置有效的正收益天数占比(0-100%)`);
+            return;
+          }
+          break;
+      }
+    }
+
+    // Convert to API format
+    const criteria: Criteria[] = criteriaList.map(c => {
+      // IndustryFilter doesn't need column field
+      if (c.type === 'IndustryFilter') {
+        return {
+          type: c.type,
+          industries: c.industries,
+          mode: c.mode === 'exclude' ? 'blacklist' : 'whitelist',
+          level: c.industryLevel || 1
+        };
+      }
+
+      // MarketFilter doesn't need column field
+      if (c.type === 'MarketFilter') {
+        return {
+          type: c.type,
+          markets: c.markets,
+          mode: c.marketMode === 'exclude' ? 'blacklist' : 'whitelist'
+        };
+      }
+
+      // For PositiveDays type
+      if (c.type === 'PositiveDays') {
+        return {
+          type: 'PositiveDays',
+          period: globalTimeRange.mode === 'period' ? globalTimeRange.period : undefined,
+          threshold: c.threshold || 2,
+          min_positive_ratio: ((c.minPositiveRatio || 50) / 100),
+          start_date: globalTimeRange.startDate,
+          end_date: globalTimeRange.endDate
+        };
+      }
+
+      // For avg_amplitude field, use special AmplitudeColumn type
+      if (c.column === 'avg_amplitude') {
+        const base: Criteria = {
+          type: 'AmplitudeColumn',
+          column: c.column,
+          period: globalTimeRange.mode === 'period' ? globalTimeRange.period : undefined,
+          start_date: globalTimeRange.startDate,
+          end_date: globalTimeRange.endDate
+        };
+
+        switch (c.type) {
+          case 'Range':
+            return { ...base, min_val: c.minVal, max_val: c.maxVal };
+          case 'GreaterThan':
+            return { ...base, threshold: c.threshold };
+          case 'LessThan':
+            return { ...base, threshold: c.threshold };
+          default:
+            return base;
+        }
+      }
+
+      // For turnover_rate field, use special TurnoverColumn type
+      if (c.column === 'turnover_rate') {
+        const base: Criteria = {
+          type: 'TurnoverColumn',
+          column: c.column,
+          period: globalTimeRange.mode === 'period' ? globalTimeRange.period : undefined,
+          start_date: globalTimeRange.startDate,
+          end_date: globalTimeRange.endDate
+        };
+
+        switch (c.type) {
+          case 'Range':
+            return { ...base, min_val: c.minVal, max_val: c.maxVal };
+          case 'GreaterThan':
+            return { ...base, threshold: c.threshold };
+          case 'LessThan':
+            return { ...base, threshold: c.threshold };
+          default:
+            return base;
+        }
+      }
+
+      const base: Criteria = {
+        type: c.type,
+        column: c.column
+      };
+
+      switch (c.type) {
+        case 'Range':
+          return { ...base, min_val: c.minVal, max_val: c.maxVal };
+        case 'GreaterThan':
+        case 'LessThan':
+          return { ...base, threshold: c.threshold };
+        case 'Percentile':
+          // Convert percentile from 0-100 to 0-1
+          return { ...base, percentile: (c.percentile || 0) / 100 };
+        case 'IndustryRelative':
+          // Convert percentile from 0-100 to 0-1
+          // Include industry parameter to limit screening to specific industry
+          return {
+            ...base,
+            percentile: (c.percentile || 0) / 100,
+            industry: c.industry,
+            level: c.industryLevel || 1
+          };
+        default:
+          return base;
+      }
+    });
+
+    onSubmit({
+      type: logicType,
+      criteria
+    });
+  };
+
+  const renderIndustrySelector = (criteria: CriteriaFormData, index: number, multiple: boolean = false) => {
+    const level = criteria.industryLevel || 1;
+    const options = industryOptions[level] || [];
+    const isLoading = loadingIndustries[level];
+
+    return (
+      <Space direction="vertical" style={{ width: '100%' }}>
+        {/* Industry Level Selector */}
+        <div>
+          <Text type="secondary" style={{ fontSize: 12 }}>行业级别</Text>
+          <Select
+            placeholder="选择行业级别"
+            value={criteria.industryLevel || 1}
+            onChange={(val) => updateCriteria(index, 'industryLevel', val)}
+            style={{ width: '100%', marginTop: 4 }}
+            options={INDUSTRY_LEVEL_OPTIONS}
+          />
+        </div>
+
+        {/* Industry Selector */}
+        <div>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {multiple ? '选择行业（支持多选）' : '选择行业'}
+          </Text>
+          <Select
+            mode={multiple ? "multiple" : undefined}
+            placeholder={multiple ? "选择行业（支持多选）" : "选择行业"}
+            value={multiple ? criteria.industries : criteria.industry}
+            onChange={(val) => updateCriteria(index, multiple ? 'industries' : 'industry', val)}
+            style={{ width: '100%', marginTop: 4 }}
+            options={options.map(opt => ({
+              value: opt.name,
+              label: opt.name
+            }))}
+            maxTagCount="responsive"
+            optionFilterProp="label"
+            showSearch
+            allowClear
+            loading={isLoading}
+            disabled={isLoading}
+          />
+        </div>
+      </Space>
+    );
+  };
+
+  const renderCriteriaFields = (criteria: CriteriaFormData, index: number) => {
+    const renderValueFields = () => {
+      switch (criteria.type) {
+        case 'Range':
+          return (
+            <Space.Compact style={{ width: '100%' }}>
+              <InputNumber
+                placeholder="最小值"
+                value={criteria.minVal}
+                onChange={(val) => updateCriteria(index, 'minVal', val || 0)}
+                style={{ width: '50%' }}
+                min={0}
+              />
+              <InputNumber
+                placeholder="最大值"
+                value={criteria.maxVal}
+                onChange={(val) => updateCriteria(index, 'maxVal', val || 0)}
+                style={{ width: '50%' }}
+                min={0}
+              />
+            </Space.Compact>
+          );
+        case 'GreaterThan':
+        case 'LessThan':
+          return (
+            <InputNumber
+              placeholder="阈值"
+              value={criteria.threshold}
+              onChange={(val) => updateCriteria(index, 'threshold', val || 0)}
+              style={{ width: '100%' }}
+              min={0}
+            />
+          );
+        case 'Percentile':
+          return (
+            <InputNumber
+              placeholder="百分位 (0-100)"
+              value={criteria.percentile}
+              onChange={(val) => updateCriteria(index, 'percentile', val || 0)}
+              style={{ width: '100%' }}
+              min={0}
+              max={100}
+            />
+          );
+        case 'IndustryRelative':
+          return (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {renderIndustrySelector(criteria, index, false)}
+              <InputNumber
+                placeholder="行业百分位 (0-100)"
+                value={criteria.percentile}
+                onChange={(val) => updateCriteria(index, 'percentile', val || 0)}
+                style={{ width: '100%' }}
+                min={0}
+                max={100}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                筛选所选行业内指标值高于指定百分位的股票
+              </Text>
+            </Space>
+          );
+        case 'IndustryFilter':
+          return (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {renderIndustrySelector(criteria, index, true)}
+              <Radio.Group
+                value={criteria.mode || 'include'}
+                onChange={(e) => updateCriteria(index, 'mode', e.target.value)}
+              >
+                <Radio value="include">
+                  <Tag color="green">包含</Tag> 仅筛选所选行业
+                </Radio>
+                <Radio value="exclude">
+                  <Tag color="red">排除</Tag> 排除所选行业
+                </Radio>
+              </Radio.Group>
+            </Space>
+          );
+        case 'MarketFilter':
+          return (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <div>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  选择市场（支持多选）
+                </Text>
+                <Select
+                  mode="multiple"
+                  placeholder="选择市场（支持多选）"
+                  value={criteria.markets}
+                  onChange={(val) => updateCriteria(index, 'markets', val)}
+                  style={{ width: '100%', marginTop: 4 }}
+                  options={MARKET_OPTIONS}
+                  maxTagCount="responsive"
+                  optionFilterProp="label"
+                  showSearch
+                  allowClear
+                />
+              </div>
+              <Radio.Group
+                value={criteria.marketMode || 'include'}
+                onChange={(e) => updateCriteria(index, 'marketMode', e.target.value)}
+              >
+                <Radio value="include">
+                  <Tag color="green">包含</Tag> 仅筛选所选市场
+                </Radio>
+                <Radio value="exclude">
+                  <Tag color="red">排除</Tag> 排除所选市场
+                </Radio>
+              </Radio.Group>
+            </Space>
+          );
+        case 'PositiveDays':
+          return (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <InputNumber
+                placeholder="涨幅阈值 (%)"
+                value={criteria.threshold}
+                onChange={(val) => updateCriteria(index, 'threshold', val || 2)}
+                style={{ width: '100%' }}
+                min={0}
+                step={0.1}
+              />
+              <InputNumber
+                placeholder="最小正收益天数占比 (%)"
+                value={criteria.minPositiveRatio}
+                onChange={(val) => updateCriteria(index, 'minPositiveRatio', val || 50)}
+                style={{ width: '100%' }}
+                min={0}
+                max={100}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                筛选过去指定时间段内，涨幅超过阈值的交易日占比达到要求值的股票
+              </Text>
+            </Space>
+          );
+        default:
+          return null;
+      }
+    };
+
+    return (
+      <Card
+        key={index}
+        size="small"
+        style={{ marginBottom: 12 }}
+        extra={
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => removeCriteria(index)}
+            disabled={criteriaList.length === 1}
+          />
+        }
+      >
+        <Row gutter={16}>
+          <Col xs={24} sm={8}>
+            <div style={{ marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>字段</Text>
+            </div>
+            <Select
+              value={criteria.column}
+              onChange={(val) => updateCriteria(index, 'column', val)}
+              style={{ width: '100%' }}
+              options={AVAILABLE_COLUMNS}
+              disabled={criteria.type === 'IndustryFilter' || criteria.type === 'MarketFilter'}
+            />
+          </Col>
+          <Col xs={24} sm={8}>
+            <div style={{ marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>条件类型</Text>
+            </div>
+            <Select
+              value={criteria.type}
+              onChange={(val) => updateCriteria(index, 'type', val)}
+              style={{ width: '100%' }}
+              options={CRITERIA_TYPE_OPTIONS.map(opt => ({
+                value: opt.value,
+                label: opt.label
+              }))}
+            />
+          </Col>
+          <Col xs={24} sm={8}>
+            <div style={{ marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>值</Text>
+            </div>
+            {renderValueFields()}
+          </Col>
+        </Row>
+      </Card>
+    );
+  };
+
+  return (
+    <div>
+      <Space direction="vertical" style={{ width: '100%' }} size="large">
+        {/* Logic type selector */}
+        <Card size="small">
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Text type="secondary" style={{ marginRight: 16 }}>条件组合方式：</Text>
+              <Radio.Group value={logicType} onChange={(e) => setLogicType(e.target.value)}>
+                <Radio value="AND">AND (且)</Radio>
+                <Radio value="OR">OR (或)</Radio>
+              </Radio.Group>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Global time range configuration */}
+        <Card size="small" title={
+          <Space>
+            <Text strong>时间段配置</Text>
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+              适用于：平均振幅、换手率、正收益天数
+            </Text>
+          </Space>
+        }>
+          <Row gutter={16}>
+            <Col xs={24} sm={8}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                时间段模式
+              </Text>
+              <Radio.Group
+                value={globalTimeRange.mode}
+                onChange={(e) => setGlobalTimeRange({ ...globalTimeRange, mode: e.target.value })}
+              >
+                <Radio value="period">过去N个交易日</Radio>
+                <Radio value="dateRange">指定时间范围</Radio>
+              </Radio.Group>
+            </Col>
+
+            {globalTimeRange.mode === 'period' && (
+              <Col xs={24} sm={16}>
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  计算周期（交易日）
+                </Text>
+                <InputNumber
+                  placeholder="如: 5, 10, 20"
+                  value={globalTimeRange.period}
+                  onChange={(val) => setGlobalTimeRange({ ...globalTimeRange, period: val || 20 })}
+                  style={{ width: 200 }}
+                  min={1}
+                  max={250}
+                />
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                  计算最近 {globalTimeRange.period || 20} 个交易日
+                </Text>
+              </Col>
+            )}
+
+            {globalTimeRange.mode === 'dateRange' && (
+              <Col xs={24} sm={16}>
+                <Space size="middle">
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                      开始日期 (YYYYMMDD)
+                    </Text>
+                    <InputNumber
+                      placeholder="如: 20250101"
+                      value={globalTimeRange.startDate}
+                      onChange={(val) => setGlobalTimeRange({ ...globalTimeRange, startDate: val ? String(val) : undefined })}
+                      style={{ width: 150 }}
+                      min={19900101}
+                      max={20991231}
+                    />
+                  </div>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                      结束日期 (YYYYMMDD)
+                    </Text>
+                    <InputNumber
+                      placeholder="如: 20250210"
+                      value={globalTimeRange.endDate}
+                      onChange={(val) => setGlobalTimeRange({ ...globalTimeRange, endDate: val ? String(val) : undefined })}
+                      style={{ width: 150 }}
+                      min={19900101}
+                      max={20991231}
+                    />
+                  </div>
+                </Space>
+              </Col>
+            )}
+          </Row>
+        </Card>
+
+        {/* Criteria list */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text strong>筛选条件</Text>
+            <Button
+              type="dashed"
+              icon={<PlusOutlined />}
+              onClick={addCriteria}
+            >
+              添加条件
+            </Button>
+          </div>
+          {criteriaList.map((criteria, index) => renderCriteriaFields(criteria, index))}
+        </div>
+
+        {/* Submit button */}
+        <Button
+          type="primary"
+          icon={<PlayCircleOutlined />}
+          onClick={handleSubmit}
+          loading={loading}
+          block
+          size="large"
+        >
+          开始筛选
+        </Button>
+      </Space>
+    </div>
+  );
+}
+
+export default CustomCriteriaBuilder;
