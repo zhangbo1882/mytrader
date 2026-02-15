@@ -51,6 +51,9 @@ moneyflow_ns = Namespace('moneyflow', description='资金流向接口')
 # Dragon List Namespace
 dragon_list_ns = Namespace('dragon-list', description='龙虎榜接口')
 
+# Alpha Namespace
+alpha_ns = Namespace('alphas', description='101 Formulaic Alphas 因子库接口')
+
 # ============================================================================
 # Models (DTOs) - must be defined AFTER namespaces
 # ============================================================================
@@ -3081,5 +3084,54 @@ class DragonListStatsResource(Resource):
 
         return get_dragon_list_stats(trade_date)
 
+
+# ============================================================================
+# Alpha Endpoints - 101 Formulaic Alphas
+# ============================================================================
+
+@alpha_ns.route('/list')
+class AlphaList(Resource):
+    @alpha_ns.doc('list_alphas', description='列出所有可用的101个Alpha因子')
+    def get(self):
+        """列出所有Alpha因子"""
+        from web.services.alpha_service import list_alphas
+        return list_alphas()
+
+
+alpha_compute_model = alpha_ns.model('AlphaComputeRequest', {
+    'alpha_ids': fields.List(fields.Integer, description='Alpha因子编号列表 (1-101)', required=True, example=[1, 101]),
+    'symbols': fields.List(fields.String, description='股票代码列表', required=True, example=['600382', '000001']),
+    'start_date': fields.String(description='开始日期 YYYY-MM-DD', required=True, example='2025-01-01'),
+    'end_date': fields.String(description='结束日期 YYYY-MM-DD', required=True, example='2025-06-30'),
+    'price_type': fields.String(description='价格类型: qfq/hfq/空字符串', example='', enum=['qfq', 'hfq', ''])
+})
+
+
+@alpha_ns.route('/compute')
+class AlphaCompute(Resource):
+    @alpha_ns.doc('compute_alphas', description='计算指定Alpha因子')
+    @alpha_ns.expect(alpha_compute_model)
+    def post(self):
+        """计算Alpha因子值"""
+        from web.services.alpha_service import compute_alphas
+        return compute_alphas()
+
+
+alpha_snapshot_model = alpha_ns.model('AlphaSnapshotRequest', {
+    'alpha_id': fields.Integer(description='Alpha因子编号 (1-101)', required=True, example=101),
+    'symbols': fields.List(fields.String, description='股票代码列表 (为空则使用全部)', example=['600382', '000001']),
+    'trade_date': fields.String(description='交易日期 YYYY-MM-DD', required=True, example='2025-06-30'),
+    'price_type': fields.String(description='价格类型', example='', enum=['qfq', 'hfq', ''])
+})
+
+
+@alpha_ns.route('/snapshot')
+class AlphaSnapshot(Resource):
+    @alpha_ns.doc('alpha_snapshot', description='获取单日Alpha因子截面数据')
+    @alpha_ns.expect(alpha_snapshot_model)
+    def post(self):
+        """获取Alpha因子截面快照"""
+        from web.services.alpha_service import get_alpha_snapshot
+        return get_alpha_snapshot()
 
 

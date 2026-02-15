@@ -17,7 +17,8 @@ from web.restx_namespaces import (
     backtest_ns,
     screening_ns,
     moneyflow_ns,
-    dragon_list_ns
+    dragon_list_ns,
+    alpha_ns
 )
 
 # Create Blueprint
@@ -57,3 +58,4 @@ api.add_namespace(backtest_ns, path='/backtest')
 api.add_namespace(screening_ns, path='/screening')
 api.add_namespace(moneyflow_ns, path='/moneyflow')
 api.add_namespace(dragon_list_ns, path='/dragon-list')
+api.add_namespace(alpha_ns, path='/alphas')
