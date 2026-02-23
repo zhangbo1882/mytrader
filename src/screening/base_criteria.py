@@ -53,16 +53,24 @@ class BaseCriteria(ABC):
         return OrCriteria(self, other)
 
     @staticmethod
-    def format_date_for_db(date_str: str) -> str:
+    def format_date_for_db(date_val) -> str:
         """
-        将日期字符串格式化为数据库格式 (YYYY-MM-DD)
+        将日期格式化为数据库格式 (YYYY-MM-DD)
 
         支持输入格式:
+        - pandas.Timestamp 对象
         - YYYYMMDD (如: 20251101)
         - YYYY-MM-DD (如: 2025-11-01)
         """
-        if not date_str:
-            return date_str
+        if not date_val:
+            return date_val
+
+        # 处理 pandas Timestamp 对象
+        if isinstance(date_val, pd.Timestamp):
+            return date_val.strftime('%Y-%m-%d')
+
+        # 转为字符串处理
+        date_str = str(date_val)
 
         # 如果已经是 YYYY-MM-DD 格式，直接返回
         if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
@@ -76,7 +84,7 @@ class BaseCriteria(ABC):
                 pass
 
         # 无法解析，返回原字符串
-        logger.warning(f"[BaseCriteria] Unable to parse date format: {date_str}")
+        logger.warning(f"[BaseCriteria] Unable to parse date format: {date_val}")
         return date_str
 
     def __invert__(self):       # ~crit

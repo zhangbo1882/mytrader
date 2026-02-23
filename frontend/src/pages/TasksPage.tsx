@@ -34,6 +34,7 @@ function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
+  const [typeFilter, setTypeFilter] = useState<Task['type'] | 'all'>('all');
   const [cleanupDays, setCleanupDays] = useState<number>(30);
   const [cleanupModalVisible, setCleanupModalVisible] = useState(false);
 
@@ -84,6 +85,7 @@ function TasksPage() {
       update: { text: '数据更新', color: 'blue' },
       screen: { text: '股票筛选', color: 'green' },
       prediction: { text: 'AI预测', color: 'purple' },
+      backtest: { text: '回测', color: 'orange' },
     };
     const info = typeMap[type] || { text: type, color: 'default' };
     return <Tag color={info.color}>{info.text}</Tag>;
@@ -186,8 +188,9 @@ function TasksPage() {
 
   // 过滤任务
   const filteredTasks = tasks.filter((task) => {
-    if (statusFilter === 'all') return true;
-    return task.status === statusFilter;
+    const statusMatch = statusFilter === 'all' || task.status === statusFilter;
+    const typeMatch = typeFilter === 'all' || task.type === typeFilter;
+    return statusMatch && typeMatch;
   });
 
   // 统计信息
@@ -196,6 +199,10 @@ function TasksPage() {
     running: tasks.filter((t) => t.status === 'running').length,
     completed: tasks.filter((t) => t.status === 'completed').length,
     failed: tasks.filter((t) => t.status === 'failed').length,
+    update: tasks.filter((t) => t.type === 'update').length,
+    screen: tasks.filter((t) => t.type === 'screen').length,
+    prediction: tasks.filter((t) => t.type === 'prediction').length,
+    backtest: tasks.filter((t) => t.type === 'backtest').length,
   };
 
   return (
@@ -227,6 +234,23 @@ function TasksPage() {
             <Text type="secondary">失败</Text>
             <div style={{ fontSize: 20, fontWeight: 'bold', color: '#f5222d' }}>{stats.failed}</div>
           </div>
+          <Divider type="vertical" />
+          <div>
+            <Text type="secondary">数据更新</Text>
+            <div style={{ fontSize: 20, fontWeight: 'bold', color: '#1890ff' }}>{stats.update}</div>
+          </div>
+          <div>
+            <Text type="secondary">股票筛选</Text>
+            <div style={{ fontSize: 20, fontWeight: 'bold', color: '#52c41a' }}>{stats.screen}</div>
+          </div>
+          <div>
+            <Text type="secondary">AI预测</Text>
+            <div style={{ fontSize: 20, fontWeight: 'bold', color: '#722ed1' }}>{stats.prediction}</div>
+          </div>
+          <div>
+            <Text type="secondary">回测</Text>
+            <div style={{ fontSize: 20, fontWeight: 'bold', color: '#fa8c16' }}>{stats.backtest}</div>
+          </div>
         </Space>
       </Card>
 
@@ -250,6 +274,21 @@ function TasksPage() {
             </Select>
           </Space>
 
+          <Space>
+            <Text>类型筛选：</Text>
+            <Select
+              value={typeFilter}
+              onChange={setTypeFilter}
+              style={{ width: 120 }}
+            >
+              <Option value="all">全部</Option>
+              <Option value="update">数据更新</Option>
+              <Option value="screen">股票筛选</Option>
+              <Option value="prediction">AI预测</Option>
+              <Option value="backtest">回测</Option>
+            </Select>
+          </Space>
+
           <Button icon={<ReloadOutlined aria-hidden="true" />} onClick={loadTasks}>
             刷新
           </Button>
@@ -262,7 +301,7 @@ function TasksPage() {
           </Button>
         </Space>
 
-        {statusFilter !== 'all' && (
+        {(statusFilter !== 'all' || typeFilter !== 'all') && (
           <Alert
             message={`当前显示：${filteredTasks.length} 个任务`}
             type="info"
@@ -280,8 +319,10 @@ function TasksPage() {
         scroll={{ x: 1200 }}
         pagination={{
           pageSize: 20,
+          pageSizeOptions: ['10', '20', '50', '100'],
           showSizeChanger: true,
           showTotal: (total) => `共 ${total} 条`,
+          hideOnSinglePage: false,
         }}
         expandable={{
           expandedRowRender: (task) => (

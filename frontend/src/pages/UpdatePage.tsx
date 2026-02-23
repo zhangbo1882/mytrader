@@ -47,6 +47,14 @@ import dayjs from 'dayjs';
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
 
+// Compute start date from date range preset (e.g. '2y' → 2 years ago)
+const computeStartDate = (dateRange: string, customStartDate?: string): string | undefined => {
+  if (!dateRange || dateRange === 'incremental' || dateRange === 'custom') return customStartDate;
+  const match = dateRange.match(/^(\d+)y$/);
+  if (match) return dayjs().subtract(parseInt(match[1]), 'year').format('YYYY-MM-DD');
+  return undefined;
+};
+
 // Task status color mapping
 const getStatusColor = (status: string) => {
   const colors: Record<string, string> = {
@@ -101,6 +109,7 @@ const getCronDescription = (cronExpr: string): string => {
 const getTaskTypeName = (taskType: string): string => {
   const taskTypeMap: Record<string, string> = {
     'update_stock_prices': '股价更新',
+    'update_hk_prices': '港股数据更新',
     'update_financial_reports': '财务报表',
     'update_industry_classification': '行业分类',
     'update_index_data': '指数数据',
@@ -237,16 +246,20 @@ function UpdatePage() {
           stockList = favorites.map((f) => f.code);
         }
 
+        const mode = values.mode || 'incremental';
+        const startDate = mode === 'full' ? computeStartDate(values.date_range, values.start_date) : undefined;
+
         // 创建资金流向数据更新任务
         // 全市场更新时，任务完成后会自动触发行业汇总计算
         await taskService.create({
           type: 'update',
           params: {
             content_type: 'moneyflow',
-            mode: values.mode || 'incremental',
+            mode,
             stock_range: scope,
             custom_stocks: stockList,
             exclude_st: true,
+            start_date: startDate,
           },
         });
       } else if (contentType === 'index') {
@@ -276,7 +289,7 @@ function UpdatePage() {
         });
       } else if (contentType === 'dragon_list') {
         // 龙虎榜更新任务
-        const startDate = values.start_date;
+        const startDate = computeStartDate(values.date_range, values.start_date);
         const endDate = values.end_date;
         // 如果有开始日期，则是批量模式，否则是增量模式
         const mode = startDate ? 'batch' : 'incremental';
@@ -289,6 +302,32 @@ function UpdatePage() {
             end_date: endDate,
           },
         });
+      } else if (contentType === 'hk') {
+        // HK stock update logic
+        let stockList: string[] = [];
+        if (scope === 'custom' && values.custom_stocks) {
+          stockList = values.custom_stocks.split('\n')
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+        } else if (scope === 'favorites') {
+          // Filter favorites for HK stocks (ending with .HK or 4-5 digit codes)
+          stockList = favorites
+            .filter(f => f.code.endsWith('.HK') || /^\d{4,5}$/.test(f.code))
+            .map(f => f.code.replace('.HK', ''));
+        }
+
+        const mode = values.mode || 'incremental';
+        const startDate = mode === 'full' ? computeStartDate(values.date_range, values.start_date) : undefined;
+
+        await taskService.create({
+          type: 'update_hk_prices',
+          params: {
+            stock_range: scope,
+            custom_stocks: stockList,
+            mode,
+            start_date: startDate,
+          },
+        });
       } else {
         let stockList: string[] = [];
         if (scope === 'custom' && values.custom_stocks) {
@@ -297,14 +336,27 @@ function UpdatePage() {
           stockList = favorites.map((f) => f.code);
         }
 
+        const mode = values.mode || 'incremental';
+        const startDate = mode === 'full' ? computeStartDate(values.date_range, values.start_date) : undefined;
+
+        // A股数据更新参数
+        const params: any = {
+          content_type: 'stock',
+          mode,
+          stock_range: scope,
+          custom_stocks: stockList,
+          start_date: startDate,
+          exclude_st: values.exclude_st !== false, // 默认排除ST
+        };
+
+        // 如果按市场选择，添加市场参数
+        if (scope === 'market') {
+          params.markets = values.markets || ['main'];
+        }
+
         await taskService.create({
           type: 'update',
-          params: {
-            content_type: 'stock',
-            mode: values.mode || 'incremental',
-            stock_range: scope,
-            custom_stocks: stockList,
-          },
+          params,
         });
       }
 
@@ -337,6 +389,7 @@ function UpdatePage() {
 
       const taskTypeMap: Record<string, string> = {
         'stock': 'update_stock_prices',
+        'hk': 'update_hk_prices',
         'index': 'update_index_data',
         'industry': 'update_industry_classification',
         'financial': 'update_financial_reports',
@@ -360,6 +413,12 @@ function UpdatePage() {
       // 根据任务类型设置不同参数
       if (values.content_type === 'stock' || values.content_type === 'moneyflow') {
         params.stock_range = values.stock_range || 'all';
+        // 添加市场参数（按市场选择时）
+        if (values.stock_range === 'market') {
+          params.markets = values.schedule_markets || ['main'];
+        }
+        // 添加排除ST参数
+        params.exclude_st = values.schedule_exclude_st !== false;
       } else if (values.content_type === 'index') {
         params.markets = values.markets || ['SSE', 'SZSE'];
       }
@@ -773,7 +832,20 @@ function UpdatePage() {
         confirmLoading={loading}
         width={600}
       >
-        <Form form={form} layout="vertical" initialValues={{ content_type: 'stock', mode: 'incremental', scope: 'all' }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ content_type: 'stock', mode: 'incremental', scope: 'all', date_range: '2y' }}
+          onValuesChange={(changedValues) => {
+            if ('content_type' in changedValues) {
+              if (changedValues.content_type === 'dragon_list') {
+                form.setFieldsValue({ date_range: 'incremental' });
+              } else {
+                form.setFieldsValue({ date_range: '2y' });
+              }
+            }
+          }}
+        >
           <Form.Item
             label="更新内容"
             name="content_type"
@@ -781,7 +853,8 @@ function UpdatePage() {
             extra="选择要更新的数据类型"
           >
             <Radio.Group>
-              <Radio value="stock">股价数据</Radio>
+              <Radio value="stock">A股数据</Radio>
+              <Radio value="hk">港股数据</Radio>
               <Radio value="financial">财务数据</Radio>
               <Radio value="index">指数数据</Radio>
               <Radio value="industry">申万行业分类</Radio>
@@ -819,7 +892,7 @@ function UpdatePage() {
             }}
           </Form.Item>
 
-          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type}>
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type || prev.scope !== curr.scope}>
             {({ getFieldValue }) =>
               getFieldValue('content_type') === 'index' ? (
                 <Form.Item
@@ -873,37 +946,62 @@ function UpdatePage() {
                     </Space>
                   </Checkbox.Group>
                 </Form.Item>
-              ) : getFieldValue('content_type') === 'dragon_list' ? (
+              ) : getFieldValue('content_type') === 'dragon_list' ? null : (
                 <>
                   <Form.Item
-                    label="开始日期 (批量模式)"
-                    name="start_date"
-                    extra="批量模式下必需，格式: YYYY-MM-DD"
+                    label={
+                      getFieldValue('content_type') === 'hk'
+                        ? '港股范围'
+                        : '股票范围'
+                    }
+                    name="scope"
+                    rules={[{ required: true, message: '请选择股票范围' }]}
+                    extra={
+                      getFieldValue('content_type') === 'hk'
+                        ? '选择要更新的港股范围'
+                        : '选择要更新的股票范围'
+                    }
                   >
-                    <Input placeholder="例如: 2025-01-01" autoComplete="off" aria-label="开始日期" />
+                    <Radio.Group>
+                      <Radio value="all">
+                        {getFieldValue('content_type') === 'hk' ? '全部港股' : '全部A股'}
+                      </Radio>
+                      {getFieldValue('content_type') !== 'hk' && (
+                        <Radio value="market">按市场选择</Radio>
+                      )}
+                      <Radio value="favorites">收藏列表</Radio>
+                      <Radio value="custom">自定义</Radio>
+                    </Radio.Group>
                   </Form.Item>
-                  <Form.Item
-                    label="结束日期"
-                    name="end_date"
-                    extra="可选，格式: YYYY-MM-DD"
-                  >
-                    <Input placeholder="例如: 2025-01-31" autoComplete="off" aria-label="结束日期" />
-                  </Form.Item>
+                  {getFieldValue('content_type') !== 'hk' && getFieldValue('scope') === 'market' && (
+                    <Form.Item
+                      label="选择市场"
+                      name="markets"
+                      initialValue={['main']}
+                      rules={[{ required: true, message: '请至少选择一个市场' }]}
+                      extra="可多选市场类型"
+                    >
+                      <Checkbox.Group>
+                        <Space direction="vertical">
+                          <Checkbox value="main">主板（沪深主板）</Checkbox>
+                          <Checkbox value="gem">创业板</Checkbox>
+                          <Checkbox value="star">科创板</Checkbox>
+                          <Checkbox value="bse">北交所</Checkbox>
+                        </Space>
+                      </Checkbox.Group>
+                    </Form.Item>
+                  )}
+                  {getFieldValue('content_type') !== 'hk' && (
+                    <Form.Item
+                      name="exclude_st"
+                      valuePropName="checked"
+                      initialValue={true}
+                    >
+                      <Checkbox>排除ST股票</Checkbox>
+                    </Form.Item>
+                  )}
                 </>
-              ) : getFieldValue('content_type') !== 'dragon_list' ? (
-                <Form.Item
-                  label="股票范围"
-                  name="scope"
-                  rules={[{ required: true, message: '请选择股票范围' }]}
-                  extra="选择要更新的股票范围"
-                >
-                  <Radio.Group>
-                    <Radio value="all">全部A股</Radio>
-                    <Radio value="favorites">收藏列表</Radio>
-                    <Radio value="custom">自定义</Radio>
-                  </Radio.Group>
-                </Form.Item>
-              ) : null
+              )
             }
           </Form.Item>
 
@@ -916,25 +1014,98 @@ function UpdatePage() {
               getFieldValue('content_type') !== 'industry' &&
               getFieldValue('scope') === 'custom' ? (
                 <Form.Item
-                  label="自定义股票代码"
+                  label={
+                    getFieldValue('content_type') === 'hk'
+                      ? '自定义港股代码'
+                      : '自定义股票代码'
+                  }
                   name="custom_stocks"
                   rules={[{ required: true, message: '请输入股票代码' }]}
-                  extra="每行一个股票代码，如：000001、600000、600519"
+                  extra={
+                    getFieldValue('content_type') === 'hk'
+                      ? '每行一个港股代码，如：00700、00941、02318'
+                      : '每行一个股票代码，如：000001、600000、600519'
+                  }
                 >
                   <TextArea
-                    placeholder="000001&#10;600000&#10;600519"
+                    placeholder={
+                      getFieldValue('content_type') === 'hk'
+                        ? '00700&#10;00941&#10;02318'
+                        : '000001&#10;600000&#10;600519'
+                    }
                     rows={5}
                     spellCheck={false}
-                    aria-label="股票代码列表"
+                    aria-label={
+                      getFieldValue('content_type') === 'hk'
+                        ? '港股代码列表'
+                        : '股票代码列表'
+                    }
                   />
                 </Form.Item>
               ) : null
             }
           </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) =>
+              prev.content_type !== curr.content_type ||
+              prev.mode !== curr.mode ||
+              prev.date_range !== curr.date_range
+            }
+          >
+            {({ getFieldValue }) => {
+              const contentType = getFieldValue('content_type');
+              const mode = getFieldValue('mode');
+              const dateRange = getFieldValue('date_range');
+              const showForFullMode =
+                (contentType === 'stock' || contentType === 'hk' || contentType === 'moneyflow') && mode === 'full';
+              const showForDragonList = contentType === 'dragon_list';
+              if (!showForFullMode && !showForDragonList) return null;
+              return (
+                <>
+                  <Form.Item
+                    label="数据日期范围"
+                    name="date_range"
+                    extra={
+                      showForDragonList
+                        ? '选择要获取的龙虎榜历史数据范围'
+                        : '选择全量更新的历史数据起始时间'
+                    }
+                  >
+                    <Radio.Group>
+                      {showForDragonList && <Radio value="incremental">增量更新（近期）</Radio>}
+                      <Radio value="1y">过去1年</Radio>
+                      <Radio value="2y">过去2年</Radio>
+                      <Radio value="5y">过去5年</Radio>
+                      <Radio value="10y">过去10年</Radio>
+                      <Radio value="custom">自定义日期</Radio>
+                    </Radio.Group>
+                  </Form.Item>
+                  {dateRange === 'custom' && (
+                    <>
+                      <Form.Item
+                        label="开始日期"
+                        name="start_date"
+                        extra="格式: YYYY-MM-DD"
+                      >
+                        <Input placeholder="例如: 2023-01-01" autoComplete="off" aria-label="开始日期" />
+                      </Form.Item>
+                      <Form.Item
+                        label="结束日期"
+                        name="end_date"
+                        extra="可选，留空表示今天，格式: YYYY-MM-DD"
+                      >
+                        <Input placeholder="例如: 2025-12-31" autoComplete="off" aria-label="结束日期" />
+                      </Form.Item>
+                    </>
+                  )}
+                </>
+              );
+            }}
+          </Form.Item>
         </Form>
       </Modal>
-
-      {/* 创建定时任务弹窗 */}
       <Modal
         title="创建定时任务"
         open={scheduleModalVisible}
@@ -946,7 +1117,20 @@ function UpdatePage() {
         confirmLoading={loading}
         width={600}
       >
-        <Form form={scheduleForm} layout="vertical" initialValues={{ content_type: 'stock', mode: 'incremental', stock_range: 'all' }}>
+        <Form
+          form={scheduleForm}
+          layout="vertical"
+          initialValues={{ content_type: 'stock', mode: 'incremental', stock_range: 'all', schedule_markets: ['main'], schedule_exclude_st: true }}
+          onValuesChange={(changedValues) => {
+            // 当切换到"按市场选择"时，确保设置默认市场值
+            if (changedValues.stock_range === 'market') {
+              const currentMarkets = scheduleForm.getFieldValue('schedule_markets');
+              if (!currentMarkets || currentMarkets.length === 0) {
+                scheduleForm.setFieldsValue({ schedule_markets: ['main'] });
+              }
+            }
+          }}
+        >
           <Form.Item
             label="任务名称"
             name="name"
@@ -1015,7 +1199,8 @@ function UpdatePage() {
             extra="选择定时任务要更新的数据类型"
           >
             <Radio.Group>
-              <Radio value="stock">股价数据</Radio>
+              <Radio value="stock">A股数据</Radio>
+              <Radio value="hk">港股数据</Radio>
               <Radio value="index">指数数据</Radio>
               <Radio value="statistics">行业统计</Radio>
               <Radio value="moneyflow">资金流向</Radio>
@@ -1023,10 +1208,11 @@ function UpdatePage() {
             </Radio.Group>
           </Form.Item>
 
-          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type}>
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.content_type !== curr.content_type || prev.stock_range !== curr.stock_range}>
             {({ getFieldValue }) => {
               const contentType = getFieldValue('content_type');
-              if (contentType === 'stock' || contentType === 'moneyflow') {
+              const stockRange = getFieldValue('stock_range');
+              if (contentType === 'stock' || contentType === 'hk' || contentType === 'moneyflow') {
                 return (
                   <>
                     <Form.Item
@@ -1049,13 +1235,51 @@ function UpdatePage() {
                       label="股票范围"
                       name="stock_range"
                       rules={[{ required: true, message: '请选择股票范围' }]}
-                      extra="选择要更新的股票范围"
+                      extra={
+                        contentType === 'hk'
+                          ? '选择要更新的港股范围'
+                          : '选择要更新的股票范围'
+                      }
                     >
                       <Radio.Group>
-                        <Radio value="all">全部A股</Radio>
+                        <Radio value="all">
+                          {contentType === 'hk' ? '全部港股' : '全部A股'}
+                        </Radio>
+                        {contentType !== 'hk' && (
+                          <Radio value="market">按市场选择</Radio>
+                        )}
                         <Radio value="favorites">收藏列表</Radio>
                       </Radio.Group>
                     </Form.Item>
+
+                    {contentType !== 'hk' && stockRange === 'market' && (
+                      <Form.Item
+                        label="选择市场"
+                        name="schedule_markets"
+                        initialValue={['main']}
+                        rules={[{ required: true, message: '请至少选择一个市场' }]}
+                        extra="可多选市场类型"
+                      >
+                        <Checkbox.Group>
+                          <Space direction="vertical">
+                            <Checkbox value="main">主板（沪深主板）</Checkbox>
+                            <Checkbox value="gem">创业板</Checkbox>
+                            <Checkbox value="star">科创板</Checkbox>
+                            <Checkbox value="bse">北交所</Checkbox>
+                          </Space>
+                        </Checkbox.Group>
+                      </Form.Item>
+                    )}
+
+                    {contentType !== 'hk' && (
+                      <Form.Item
+                        name="schedule_exclude_st"
+                        valuePropName="checked"
+                        initialValue={true}
+                      >
+                        <Checkbox>排除ST股票</Checkbox>
+                      </Form.Item>
+                    )}
                   </>
                 );
               } else if (contentType === 'dragon_list') {

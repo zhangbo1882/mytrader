@@ -56,14 +56,11 @@ def stock_query():
 
     Body (JSON):
         symbols: 股票代码列表
-        start_date: 开始日期 (YYYY-MM-DD)
-        end_date: 结束日期 (YYYY-MM-DD)
+        start_date: 开始日期 (YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS)
+        end_date: 结束日期 (YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS)
+        interval: 时间周期 ('1d', '5m', '15m', '30m', '60m'), 默认 '1d'
         price_type: 价格类型 ('qfq'=前复权, 'hfq'=后复权, 'bfq'=不复权)
     """
-    db, query = get_db()
-    if not db or not query:
-        return {'error': '数据库连接失败'}, 500
-
     try:
         data = request.json
         if not data:
@@ -72,6 +69,7 @@ def stock_query():
         symbols = data.get('symbols', [])
         start_date = data.get('start_date')
         end_date = data.get('end_date')
+        interval = data.get('interval', '1d')
         price_type = data.get('price_type', 'qfq')
 
         if not symbols:
@@ -80,64 +78,115 @@ def stock_query():
         if not start_date or not end_date:
             return {'error': '请指定日期范围'}, 400
 
-        # 查询每只股票的数据
-        results = {}
-        for symbol in symbols:
-            try:
-                df = query.query_bars(symbol, start_date, end_date, price_type=price_type)
+        # 优先使用 DuckDB 查询（支持所有时间周期）
+        try:
+            from web.services.duckdb_query_service import get_duckdb_query_service
+            duckdb_service = get_duckdb_query_service()
 
-                # 将 DataFrame 转换为字典列表
-                if not df.empty:
-                    df = df.copy()
-                    if 'datetime' in df.columns:
-                        df['datetime'] = df['datetime'].dt.strftime('%Y-%m-%d')
+            # 尝试从 DuckDB 查询
+            results = duckdb_service.query_bars(
+                symbols=symbols,
+                start_date=start_date,
+                end_date=end_date,
+                interval=interval,
+                price_type=price_type
+            )
 
-                    # 只保留需要的列
-                    columns_to_keep = [
-                        'datetime', 'open', 'high', 'low', 'close',
-                        'volume', 'turnover', 'pct_chg', 'amount'
-                    ]
-                    df = df[[col for col in columns_to_keep if col in df.columns]]
+            # 检查是否有数据返回
+            has_data = any(len(data_list) > 0 for data_list in results.values())
 
-                    # 转换为字典列表，并处理NaN值
-                    records = []
-                    for _, row in df.iterrows():
-                        record = {}
-                        for col in df.columns:
-                            val = row[col]
-                            if pd.isna(val):
-                                record[col] = None
-                            else:
-                                record[col] = val
-                        records.append(record)
+            if has_data:
+                # DuckDB 有数据，保存到缓存并返回
+                cache_key = f"query_{int(time.time())}_{id(results)}"
+                with _query_cache_lock:
+                    if len(_query_cache) > 10:
+                        old_keys = sorted(_query_cache.keys())[:len(_query_cache) - 10]
+                        for key in old_keys:
+                            del _query_cache[key]
+                    _query_cache[cache_key] = {
+                        'data': results,
+                        'timestamp': time.time(),
+                        'interval': interval,
+                        'symbols': symbols
+                    }
+                session['last_query_cache_key'] = cache_key
 
-                    results[symbol] = records
-                else:
+                return results
+
+        except Exception as e:
+            print(f"DuckDB query failed: {e}, falling back to SQLite")
+
+        # DuckDB 没有数据或查询失败，对于日线数据回退到 SQLite
+        if interval == '1d':
+            db, query = get_db()
+            if not db or not query:
+                return {'error': '数据库连接失败，且 DuckDB 中无可用数据'}, 500
+
+            # 查询每只股票的数据
+            results = {}
+            for symbol in symbols:
+                try:
+                    df = query.query_bars(symbol, start_date, end_date, price_type=price_type)
+
+                    # 将 DataFrame 转换为字典列表
+                    if not df.empty:
+                        df = df.copy()
+                        if 'datetime' in df.columns:
+                            df['datetime'] = df['datetime'].dt.strftime('%Y-%m-%d')
+
+                        # 只保留需要的列
+                        columns_to_keep = [
+                            'datetime', 'open', 'high', 'low', 'close',
+                            'volume', 'turnover', 'pct_chg', 'amount'
+                        ]
+                        df = df[[col for col in columns_to_keep if col in df.columns]]
+
+                        # 转换为字典列表，并处理NaN值
+                        records = []
+                        for _, row in df.iterrows():
+                            record = {}
+                            for col in df.columns:
+                                val = row[col]
+                                if pd.isna(val):
+                                    record[col] = None
+                                else:
+                                    record[col] = val
+                            records.append(record)
+
+                        results[symbol] = records
+                    else:
+                        results[symbol] = []
+
+                except Exception as e:
                     results[symbol] = []
+                    print(f"Error querying {symbol}: {e}")
 
-            except Exception as e:
-                results[symbol] = []
-                print(f"Error querying {symbol}: {e}")
+            # 保存到内存缓存用于导出
+            cache_key = f"query_{int(time.time())}_{id(results)}"
+            with _query_cache_lock:
+                # 清理旧缓存（保留最近10个）
+                if len(_query_cache) > 10:
+                    old_keys = sorted(_query_cache.keys())[:len(_query_cache) - 10]
+                    for key in old_keys:
+                        del _query_cache[key]
+                _query_cache[cache_key] = {
+                    'data': results,
+                    'timestamp': time.time(),
+                    'interval': interval,
+                    'symbols': symbols
+                }
 
-        # 保存到内存缓存用于导出
-        cache_key = f"query_{int(time.time())}_{id(results)}"
-        with _query_cache_lock:
-            # 清理旧缓存（保留最近10个）
-            if len(_query_cache) > 10:
-                old_keys = sorted(_query_cache.keys())[:len(_query_cache) - 10]
-                for key in old_keys:
-                    del _query_cache[key]
-            _query_cache[cache_key] = {
-                'data': results,
-                'timestamp': time.time()
-            }
+            # 在session中只保存缓存key
+            session['last_query_cache_key'] = cache_key
 
-        # 在session中只保存缓存key
-        session['last_query_cache_key'] = cache_key
-
-        return results
+            return results
+        else:
+            # 非日线周期且 DuckDB 无数据
+            return {'error': f'DuckDB 中没有 {interval} 周期的数据，请先导入数据'}, 404
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {'error': f'查询失败: {str(e)}'}, 500
 
 
@@ -192,32 +241,44 @@ def get_min_date():
     Returns:
         最早的日期 (YYYY-MM-DD)
     """
-    db, query = get_db()
-    if not db or not query:
-        return {'date': '2020-01-01'}
-
+    # 优先从 DuckDB 获取（同时查询A股和港股表）
     try:
-        from sqlalchemy import text
+        from src.db.duckdb_manager import get_duckdb_manager
 
-        # 查询bars表中最早的日期
-        with db.engine.connect() as conn:
-            result = conn.execute(text("SELECT MIN(datetime) FROM bars"))
-            min_date = result.fetchone()
+        duckdb_manager = get_duckdb_manager()
+        with duckdb_manager.get_connection() as conn:
+            # 查询A股表
+            a_min = None
+            try:
+                if duckdb_manager.table_exists('bars_a_1d'):
+                    result = conn.execute("SELECT MIN(datetime) as min_date FROM bars_a_1d").fetchone()
+                    if result and result[0]:
+                        a_min = str(result[0]).split(' ')[0]
+            except:
+                pass
 
-            if min_date and min_date[0]:
-                date_str = min_date[0]
-                # 如果是 datetime 类型，转换为字符串
-                if hasattr(date_str, 'strftime'):
-                    date_str = date_str.strftime('%Y-%m-%d')
-                elif ' ' in date_str:
-                    date_str = date_str.split()[0]
-                return {'date': date_str}
+            # 查询港股表
+            hk_min = None
+            try:
+                if duckdb_manager.table_exists('bars_1d'):
+                    result = conn.execute("SELECT MIN(datetime) as min_date FROM bars_1d WHERE exchange = 'HK'").fetchone()
+                    if result and result[0]:
+                        hk_min = str(result[0]).split(' ')[0]
+            except:
+                pass
 
-        return {'date': '2020-01-01'}
-
+            # 返回最早的日期
+            if a_min and hk_min:
+                return {'date': min(a_min, hk_min)}
+            elif a_min:
+                return {'date': a_min}
+            elif hk_min:
+                return {'date': hk_min}
     except Exception as e:
-        print(f"Error getting min date: {e}")
-        return {'date': '2020-01-01'}
+        print(f"Error getting min date from DuckDB: {e}")
+
+    # DuckDB 失败，回退到 SQLite（已废弃，仅用于兼容）
+    return {'date': '2020-01-01'}
 
 
 def stock_screen():
@@ -264,3 +325,110 @@ def stock_screen():
         import traceback
         traceback.print_exc()
         return {'error': f'筛选失败: {str(e)}'}, 500
+
+
+def get_available_intervals():
+    """
+    获取可用的时间周期列表及数据统计（合并SQLite和DuckDB）
+
+    Returns:
+        各时间周期的可用性信息
+    """
+    try:
+        from web.services.duckdb_query_service import get_duckdb_query_service
+        import sqlite3
+
+        # 支持的所有周期
+        all_intervals = ['1d', '5m', '15m', '30m', '60m']
+
+        # 存储每个周期的数据来源信息
+        intervals_data = {}
+
+        # 1. 从DuckDB获取数据
+        duckdb_service = get_duckdb_query_service()
+        duckdb_tables_info = duckdb_service.get_all_tables_info()
+
+        for info in duckdb_tables_info:
+            interval = info['interval']
+            if info['exists']:
+                intervals_data[interval] = {
+                    'interval': interval,
+                    'available': True,
+                    'sources': ['duckdb'],
+                    'table_name': info['table_name'],
+                    'row_count': info['row_count'],
+                    'symbol_count': info.get('symbol_count', 0)
+                }
+                if info.get('date_range'):
+                    intervals_data[interval]['date_range'] = info['date_range']
+
+        # 2. 从SQLite获取数据
+        try:
+            conn = sqlite3.connect(str(TUSHARE_DB_PATH))
+            cursor = conn.cursor()
+
+            # 查询每个周期的数据
+            for interval in all_intervals:
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) as count,
+                        COUNT(DISTINCT substr(symbol, 1, 6)) as symbol_count,
+                        MIN(datetime) as min_date,
+                        MAX(datetime) as max_date
+                    FROM bars
+                    WHERE interval = ?
+                """, (interval,))
+
+                row = cursor.fetchone()
+                if row and row[0] > 0:
+                    # SQLite有这个周期的数据
+                    if interval in intervals_data:
+                        # 已有DuckDB数据，合并
+                        intervals_data[interval]['sources'].append('sqlite')
+                        intervals_data[interval]['row_count'] += row[0]
+                        intervals_data[interval]['symbol_count'] += row[1]
+                    else:
+                        # 只有SQLite数据
+                        intervals_data[interval] = {
+                            'interval': interval,
+                            'available': True,
+                            'sources': ['sqlite'],
+                            'table_name': 'bars',
+                            'row_count': row[0],
+                            'symbol_count': row[1],
+                            'date_range': {
+                                'start': row[2],
+                                'end': row[3]
+                            }
+                        }
+
+            conn.close()
+        except Exception as e:
+            print(f"获取SQLite周期信息失败: {e}")
+
+        # 3. 格式化返回数据
+        intervals = []
+        for interval in all_intervals:
+            if interval in intervals_data:
+                intervals.append(intervals_data[interval])
+            else:
+                # 没有数据的周期
+                intervals.append({
+                    'interval': interval,
+                    'available': False,
+                    'sources': []
+                })
+
+        return {
+            'success': True,
+            'intervals': intervals
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'success': False,
+            'error': str(e),
+            'intervals': []
+        }

@@ -9,6 +9,7 @@ const { RangePicker } = DatePicker;
 export function DateRangePicker() {
   const { dateRange, setDateRange, priceType, setPriceType } = useQueryStore();
   const [internalValue, setInternalValue] = useState<[Dayjs, Dayjs] | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
 
   // 初始化日期范围
   useEffect(() => {
@@ -24,6 +25,7 @@ export function DateRangePicker() {
     if (range) {
       setDateRange(range);
       setInternalValue([dayjs(range.start), dayjs(range.end)]);
+      setActiveKey(key);
     }
   };
 
@@ -36,8 +38,10 @@ export function DateRangePicker() {
       };
       setDateRange(range);
       setInternalValue([dates[0], dates[1]]);
+      setActiveKey(null); // 自定义选择时清除快捷选中状态
     } else {
       setInternalValue(null);
+      setActiveKey(null);
     }
   };
 
@@ -48,19 +52,28 @@ export function DateRangePicker() {
           {/* 快捷日期选择 */}
           <div>
             <span style={{ marginRight: 8, color: '#666' }}>快捷选择：</span>
-            <Button size="small" onClick={() => handleQuickSelect('1M')}>
+            <Button size="small" type={activeKey === '1M' ? 'primary' : 'default'} onClick={() => handleQuickSelect('1M')}>
               1个月
             </Button>
-            <Button size="small" onClick={() => handleQuickSelect('3M')}>
+            <Button size="small" type={activeKey === '3M' ? 'primary' : 'default'} onClick={() => handleQuickSelect('3M')}>
               3个月
             </Button>
-            <Button size="small" onClick={() => handleQuickSelect('6M')}>
+            <Button size="small" type={activeKey === '6M' ? 'primary' : 'default'} onClick={() => handleQuickSelect('6M')}>
               6个月
             </Button>
-            <Button size="small" onClick={() => handleQuickSelect('1Y')}>
+            <Button size="small" type={activeKey === '1Y' ? 'primary' : 'default'} onClick={() => handleQuickSelect('1Y')}>
               1年
             </Button>
-            <Button size="small" onClick={() => handleQuickSelect('YTD')}>
+            <Button size="small" type={activeKey === '2Y' ? 'primary' : 'default'} onClick={() => handleQuickSelect('2Y')}>
+              2年
+            </Button>
+            <Button size="small" type={activeKey === '5Y' ? 'primary' : 'default'} onClick={() => handleQuickSelect('5Y')}>
+              5年
+            </Button>
+            <Button size="small" type={activeKey === '10Y' ? 'primary' : 'default'} onClick={() => handleQuickSelect('10Y')}>
+              10年
+            </Button>
+            <Button size="small" type={activeKey === 'YTD' ? 'primary' : 'default'} onClick={() => handleQuickSelect('YTD')}>
               年初至今
             </Button>
           </div>

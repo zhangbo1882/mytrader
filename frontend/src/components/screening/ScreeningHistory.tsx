@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Table, Button, Space, message, Popconfirm, Modal, Descriptions, Tag, Spin } from 'antd';
-import { EyeOutlined, ReloadOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
+import { EyeOutlined, ReloadOutlined, DeleteOutlined, HistoryOutlined, StarOutlined } from '@ant-design/icons';
 import { screeningService } from '@/services';
+import { useFavoriteStore } from '@/stores';
 import type { ScreeningHistory, ScreeningHistoryDetail } from '@/types';
 
 interface ScreeningHistoryProps {
@@ -17,6 +18,9 @@ function ScreeningHistory({ onLoadHistory, onReRunComplete, refreshTrigger }: Sc
   const [selectedDetail, setSelectedDetail] = useState<ScreeningHistoryDetail | null>(null);
   const [reRunning, setReRunning] = useState<number | null>(null);
   const [detailPagination, setDetailPagination] = useState({ current: 1, pageSize: 50 });
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [batchAdding, setBatchAdding] = useState(false);
+  const { batchAddFavorites, addFavorite, isInFavorites } = useFavoriteStore();
 
   const loadHistories = async () => {
     setLoading(true);
@@ -103,6 +107,52 @@ function ScreeningHistory({ onLoadHistory, onReRunComplete, refreshTrigger }: Sc
       }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '删除失败');
+    }
+  };
+
+  const handleBatchAddFavorites = async () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择要收藏的股票');
+      return;
+    }
+
+    // 过滤已收藏的股票
+    const newCodes = selectedRowKeys.filter((code) => !isInFavorites(code));
+
+    if (newCodes.length === 0) {
+      message.warning('所选股票已在收藏列表中');
+      return;
+    }
+
+    setBatchAdding(true);
+    try {
+      const response = await batchAddFavorites(newCodes);
+      setSelectedRowKeys([]);
+
+      if (response.failed === 0) {
+        message.success(`成功收藏 ${response.success} 只股票`);
+      } else {
+        message.warning(
+          `收藏完成：成功 ${response.success} 只，失败 ${response.failed} 只`
+        );
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '批量收藏失败');
+    } finally {
+      setBatchAdding(false);
+    }
+  };
+
+  const handleAddSingleFavorite = async (stock: any) => {
+    if (isInFavorites(stock.code)) {
+      return;
+    }
+
+    try {
+      await addFavorite(stock.code, stock.name);
+      message.success(`已收藏：${stock.name} (${stock.code})`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '收藏失败');
     }
   };
 
@@ -202,8 +252,10 @@ function ScreeningHistory({ onLoadHistory, onReRunComplete, refreshTrigger }: Sc
         loading={loading}
         pagination={{
           pageSize: 10,
+          pageSizeOptions: ['10', '20', '50', '100'],
           showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`
+          showTotal: (total) => `共 ${total} 条`,
+          hideOnSinglePage: false,
         }}
         size="small"
       />
@@ -212,7 +264,10 @@ function ScreeningHistory({ onLoadHistory, onReRunComplete, refreshTrigger }: Sc
       <Modal
         title="筛选历史详情"
         open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
+        onCancel={() => {
+          setDetailModalVisible(false);
+          setSelectedRowKeys([]);
+        }}
         footer={null}
         width={1200}
         style={{ top: 20 }}
@@ -244,20 +299,42 @@ function ScreeningHistory({ onLoadHistory, onReRunComplete, refreshTrigger }: Sc
 
             {(selectedDetail.stocks?.length ?? 0) > 0 && (
               <div style={{ marginTop: 16 }}>
-                <h4>股票列表 (共 {selectedDetail.stocks.length} 只):</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h4 style={{ margin: 0 }}>股票列表 (共 {selectedDetail.stocks.length} 只):</h4>
+                  {selectedRowKeys.length > 0 && (
+                    <Space>
+                      <span>已选 {selectedRowKeys.length} 只</span>
+                      <Button
+                        type="primary"
+                        icon={<StarOutlined />}
+                        onClick={handleBatchAddFavorites}
+                        loading={batchAdding}
+                      >
+                        批量收藏
+                      </Button>
+                    </Space>
+                  )}
+                </div>
                 <Table
                   dataSource={selectedDetail.stocks}
                   rowKey="code"
                   pagination={{
                     current: detailPagination.current,
                     pageSize: detailPagination.pageSize,
-                    pageSizeOptions: [20, 50, 100, 200],
+                    pageSizeOptions: ['20', '50', '100', '200'],
                     showSizeChanger: true,
                     showTotal: (total) => `共 ${total} 只股票`,
                     showQuickJumper: true,
                     onChange: (page, pageSize) => {
                       setDetailPagination({ current: page, pageSize });
                     }
+                  }}
+                  rowSelection={{
+                    selectedRowKeys,
+                    onChange: (keys) => setSelectedRowKeys(keys as string[]),
+                    getCheckboxProps: (record) => ({
+                      disabled: isInFavorites(record.code),
+                    }),
                   }}
                   columns={[
                     { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
@@ -266,9 +343,25 @@ function ScreeningHistory({ onLoadHistory, onReRunComplete, refreshTrigger }: Sc
                     { title: 'PE(TTM)', dataIndex: 'pe_ttm', key: 'pe_ttm', width: 100, render: (v) => v ? v.toFixed(2) : '-', align: 'right' },
                     { title: 'PB', dataIndex: 'pb', key: 'pb', width: 100, render: (v) => v ? v.toFixed(2) : '-', align: 'right' },
                     { title: '总市值(亿)', dataIndex: 'total_mv_yi', key: 'total_mv_yi', width: 120, render: (v) => v ? v.toFixed(2) : '-', align: 'right' },
+                    {
+                      title: '操作',
+                      key: 'action',
+                      width: 100,
+                      fixed: 'right' as const,
+                      render: (_, record) => (
+                        <Button
+                          size="small"
+                          type={isInFavorites(record.code) ? 'default' : 'primary'}
+                          onClick={() => handleAddSingleFavorite(record)}
+                          disabled={isInFavorites(record.code)}
+                        >
+                          {isInFavorites(record.code) ? '已收藏' : '收藏'}
+                        </Button>
+                      ),
+                    },
                   ]}
                   size="small"
-                  scroll={{ x: 700 }}
+                  scroll={{ x: 800 }}
                 />
               </div>
             )}

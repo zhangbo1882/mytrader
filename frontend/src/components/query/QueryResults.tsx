@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Table, Card, Tabs, Empty, Spin } from 'antd';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { ColumnsType } from 'antd/es/table';
@@ -12,6 +12,7 @@ interface QueryResultsProps {
 
 export function QueryResults({ results, loading }: QueryResultsProps) {
   const stockCodes = Object.keys(results);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 50 });
 
   // 将多只股票的数据合并为表格数据
   const tableData = useMemo(() => {
@@ -21,7 +22,8 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
     const allDates = new Set<string>();
     stockCodes.forEach((code) => {
       results[code].forEach((item) => {
-        allDates.add(item.date);
+        // 后端返回 datetime 字段，前端期望 date 字段
+        allDates.add(item.date || item.datetime);
       });
     });
 
@@ -42,9 +44,11 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
           row[`${code}_high`] = data.high;
           row[`${code}_low`] = data.low;
           row[`${code}_close`] = data.close;
-          row[`${code}_change`] = data.changePercent || 0;
+          // 后端返回 pct_chg 字段，转换为 changePercent
+          row[`${code}_change`] = data.changePercent || data.pct_chg || 0;
           row[`${code}_volume`] = data.volume;
           row[`${code}_amount`] = data.amount || data.turnover;
+          row[`${code}_turnoverRate`] = data.turnoverRate || data.turnover_rate_f;
         }
       });
 
@@ -107,7 +111,9 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
           render: (value: number) => {
             if (value == null) return '-';
             const color = value >= 0 ? '#f5222d' : '#52c41a';
-            return <span style={{ color }}>{formatPercent(value)}</span>;
+            // 后端返回的 pct_chg 已经是百分比值（如 -0.7483 表示 -0.7483%）
+            // 直接添加 % 符号，不需要再转换
+            return <span style={{ color }}>{`${value.toFixed(2)}%`}</span>;
           },
           sorter: (a, b) => (a[`${code}_change`] || 0) - (b[`${code}_change`] || 0),
         },
@@ -126,6 +132,14 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
           width: 120,
           render: (value: number) => (value != null ? formatVolume(value) : '-'),
           sorter: (a, b) => (a[`${code}_amount`] || 0) - (b[`${code}_amount`] || 0),
+        },
+        {
+          title: `${code} 换手率`,
+          dataIndex: `${code}_turnoverRate`,
+          key: `${code}_turnoverRate`,
+          width: 90,
+          render: (value: number) => (value != null ? `${value.toFixed(2)}%` : '-'),
+          sorter: (a, b) => (a[`${code}_turnoverRate`] || 0) - (b[`${code}_turnoverRate`] || 0),
         }
       );
     });
@@ -141,7 +155,8 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
     const allDates = new Set<string>();
     stockCodes.forEach((code) => {
       results[code].forEach((item) => {
-        allDates.add(item.date);
+        // 后端返回 datetime 字段，前端期望 date 字段
+        allDates.add(item.date || item.datetime);
       });
     });
 
@@ -150,7 +165,8 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
     return sortedDates.map((date) => {
       const point: any = { date };
       stockCodes.forEach((code) => {
-        const data = results[code].find((d) => d.date === date);
+        // 后端返回 datetime 字段，前端期望 date 字段
+        const data = results[code].find((d) => (d.date || d.datetime) === date);
         if (data) {
           point[code] = data.close;
         }
@@ -185,9 +201,15 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
                 loading={loading}
                 scroll={{ x: 'max-content' }}
                 pagination={{
-                  pageSize: 50,
+                  current: pagination.current,
+                  pageSize: pagination.pageSize,
+                  pageSizeOptions: ['10', '20', '50', '100', '200'],
                   showSizeChanger: true,
                   showTotal: (total) => `共 ${total} 条`,
+                  hideOnSinglePage: false,
+                  onChange: (page, pageSize) => {
+                    setPagination({ current: page, pageSize });
+                  },
                 }}
               />
             ),

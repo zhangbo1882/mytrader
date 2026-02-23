@@ -18,9 +18,6 @@ DATA_DIR.mkdir(exist_ok=True)
 TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "your_tushare_token_here")
 TUSHARE_DB_PATH = DATA_DIR / "tushare_data.db"
 
-# ============= AKShare 配置 =============
-AKSHARE_DB_PATH = DATA_DIR / "akshare_data.db"
-
 # ============= 数据源配置 =============
 # 复权类型：''=不复权（实盘价格）, 'qfq'=前复权（计算收益）, 'hfq'=后复权
 # 说明：

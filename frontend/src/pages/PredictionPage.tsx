@@ -13,6 +13,7 @@ import {
   Statistic,
   message,
   Spin,
+  Progress,
 } from 'antd';
 import {
   BulbOutlined,
@@ -23,7 +24,7 @@ import {
 import { ModelTrainingForm } from '@/components/ml/ModelTrainingForm';
 import { ModelList } from '@/components/ml/ModelList';
 import { PredictionResults } from '@/components/ml/PredictionResults';
-import type { MLModel, ModelPerformance, PredictionResult } from '@/types';
+import type { MLModel, PredictionResult } from '@/types';
 import { mlService } from '@/services';
 import { formatDate, formatPercent, formatNumber } from '@/utils';
 
@@ -37,7 +38,7 @@ function PredictionPage() {
   const [predictionsLoading, setPredictionsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState<MLModel | null>(null);
   const [modelDetailVisible, setModelDetailVisible] = useState(false);
-  const [performance, setPerformance] = useState<ModelPerformance | null>(null);
+  const [modelDetailLoading, setModelDetailLoading] = useState(false);
 
   // 加载模型列表
   useEffect(() => {
@@ -84,15 +85,22 @@ function PredictionPage() {
 
   // 查看模型详情
   const handleViewModel = async (model: MLModel) => {
+    // 先设置模型基本信息并打开对话框
     setSelectedModel(model);
     setModelDetailVisible(true);
+    setModelDetailLoading(true);
 
-    // 加载性能指标
+    // 加载完整模型信息
     try {
-      const perf = await mlService.getPerformance(model.id);
-      setPerformance(perf);
+      const fullModel = await mlService.getModel(model.id);
+      if (fullModel) {
+        setSelectedModel(fullModel);
+      }
     } catch (error) {
-      console.error('Failed to load performance:', error);
+      console.error('Failed to load full model details:', error);
+      message.error('加载模型详情失败');
+    } finally {
+      setModelDetailLoading(false);
     }
   };
 
@@ -100,8 +108,11 @@ function PredictionPage() {
   const handlePredict = async (model: MLModel) => {
     setPredictionsLoading(true);
     try {
-      const results = await mlService.predict(model.id, model.stockCode, 7);
-      setPredictions(results);
+      const result = await mlService.predict(model.id, model.stockCode, 30);
+      // result 包含 { history: PredictionResult[], current: PredictionResult }
+      // 将历史数据和当前预测合并显示
+      const allPredictions = [...(result.history || []), result.current];
+      setPredictions(allPredictions);
       message.success('预测完成');
     } catch (error) {
       message.error(`预测失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -221,7 +232,11 @@ function PredictionPage() {
         footer={null}
         width={800}
       >
-        {selectedModel && (
+        {modelDetailLoading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Spin size="large" tip="加载模型详情中..." />
+          </div>
+        ) : selectedModel ? (
           <div>
             <Descriptions column={2} bordered size="small">
               <Descriptions.Item label="股票代码">{selectedModel.stockCode}</Descriptions.Item>
@@ -241,47 +256,83 @@ function PredictionPage() {
               </Descriptions.Item>
             </Descriptions>
 
-            {selectedModel.status === 'completed' && performance && (
+            {selectedModel.status === 'completed' && (
               <>
                 <Divider orientation="left">模型性能</Divider>
+
+                {/* 分类指标 - 仅当模型有分类指标时显示 */}
+                {selectedModel.accuracy !== undefined && (
+                  <Row gutter={16} style={{ marginBottom: 16 }}>
+                    <Col span={6}>
+                      <Statistic
+                        title="准确率"
+                        value={formatNumber(selectedModel.accuracy * 100, 2)}
+                        suffix="%"
+                        valueStyle={{ color: selectedModel.accuracy > 0.7 ? '#3f8600' : '#cf1322' }}
+                      />
+                    </Col>
+                    <Col span={6}>
+                      <Statistic
+                        title="精确率"
+                        value={formatNumber((selectedModel.precision || 0) * 100, 2)}
+                        suffix="%"
+                      />
+                    </Col>
+                    <Col span={6}>
+                      <Statistic
+                        title="召回率"
+                        value={formatNumber((selectedModel.recall || 0) * 100, 2)}
+                        suffix="%"
+                      />
+                    </Col>
+                    <Col span={6}>
+                      <Statistic
+                        title="F1分数"
+                        value={formatNumber((selectedModel.f1Score || 0) * 100, 2)}
+                        suffix="%"
+                        valueStyle={{ color: (selectedModel.f1Score || 0) > 0.7 ? '#3f8600' : '#faad14' }}
+                      />
+                    </Col>
+                  </Row>
+                )}
+
+                {/* 回归指标 - 始终显示 */}
                 <Row gutter={16} style={{ marginBottom: 16 }}>
                   <Col span={6}>
                     <Statistic
-                      title="准确率"
-                      value={formatNumber(performance.accuracy * 100, 2)}
-                      suffix="%"
-                      valueStyle={{ color: performance.accuracy > 0.7 ? '#3f8600' : '#cf1322' }}
+                      title="MAE"
+                      value={formatNumber(selectedModel.mae || 0, 6)}
+                      valueStyle={{ color: (selectedModel.mae || 0) < 0.5 ? '#3f8600' : '#cf1322' }}
                     />
                   </Col>
                   <Col span={6}>
                     <Statistic
-                      title="精确率"
-                      value={formatNumber(performance.precision * 100, 2)}
-                      suffix="%"
+                      title="RMSE"
+                      value={formatNumber(selectedModel.rmse || 0, 6)}
                     />
                   </Col>
                   <Col span={6}>
                     <Statistic
-                      title="召回率"
-                      value={formatNumber(performance.recall * 100, 2)}
-                      suffix="%"
+                      title="R²"
+                      value={formatNumber(selectedModel.r2 || 0, 4)}
+                      valueStyle={{ color: (selectedModel.r2 || 0) > 0.5 ? '#3f8600' : '#cf1322' }}
                     />
                   </Col>
                   <Col span={6}>
                     <Statistic
-                      title="F1分数"
-                      value={formatNumber(performance.f1Score * 100, 2)}
+                      title="MAPE"
+                      value={formatNumber(selectedModel.mape || 0, 2)}
                       suffix="%"
-                      valueStyle={{ color: performance.f1Score > 0.7 ? '#3f8600' : '#faad14' }}
+                      valueStyle={{ color: (selectedModel.mape || 0) < 20 ? '#3f8600' : '#faad14' }}
                     />
                   </Col>
                 </Row>
 
-                {performance.featureImportance && performance.featureImportance.length > 0 && (
+                {selectedModel.featureImportance && selectedModel.featureImportance.length > 0 && (
                   <>
-                    <Divider orientation="left">特征重要性</Divider>
+                    <Divider orientation="left">特征重要性（Top 20）</Divider>
                     <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                      {performance.featureImportance.map((item, index) => (
+                      {selectedModel.featureImportance.map((item, index) => (
                         <div key={index} style={{ marginBottom: 8 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <Text>{item.feature}</Text>
@@ -307,7 +358,7 @@ function PredictionPage() {
               </>
             )}
           </div>
-        )}
+        ) : null}
       </Modal>
     </div>
   );

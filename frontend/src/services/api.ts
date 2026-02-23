@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import { message } from 'antd';
 
 // Create a typed axios instance that returns response.data directly
@@ -12,7 +12,7 @@ const api = axios.create({
 
 // Request interceptor
 api.interceptors.request.use(
-  (config) => {
+  (config: InternalAxiosRequestConfig) => {
     return config;
   },
   (error) => {
@@ -23,7 +23,7 @@ api.interceptors.request.use(
 // Response interceptor - returns response.data directly
 api.interceptors.response.use(
   (response) => {
-    return response.data;
+    return response.data as any;
   },
   (error: AxiosError<{ error?: string; message?: string }>) => {
     const errorMessage = error.response?.data?.error || error.response?.data?.message || error.message || '请求失败';

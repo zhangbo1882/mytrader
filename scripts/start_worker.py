@@ -68,15 +68,15 @@ def main():
     parser.add_argument(
         '--log-level',
         type=str,
-        default='DEBUG',
+        default='INFO',
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        help='Logging level (default: DEBUG)'
+        help='Logging level (default: INFO)'
     )
 
     args = parser.parse_args()
 
-    # Configure logging
-    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    # Configure logging with process ID
+    log_format = '%(asctime)s - [PID:%(process)d] - %(name)s - %(levelname)s - %(message)s'
     log_handlers = [logging.StreamHandler()]
 
     if args.log_file:
@@ -88,7 +88,8 @@ def main():
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format=log_format,
-        handlers=log_handlers
+        handlers=log_handlers,
+        force=True  # 强制重新配置，避免重复
     )
 
     logger = logging.getLogger(__name__)

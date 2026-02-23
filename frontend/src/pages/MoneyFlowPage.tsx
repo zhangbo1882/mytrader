@@ -199,6 +199,9 @@ function MoneyFlowPage() {
   // 展开行数据
   const [expandedRows, setExpandedRows] = useState<Record<string, ExpandedRow>>({});
 
+  // 分页状态
+  const [stockPagination, setStockPagination] = useState({ current: 1, pageSize: 20 });
+
   // 查询个股资金流向
   const handleQueryStock = async () => {
     if (!stockCode.trim()) {
@@ -659,10 +662,15 @@ function MoneyFlowPage() {
                 rowKey={(record) => `${record.ts_code}-${record.trade_date}`}
                 loading={loading}
                 pagination={{
-                  defaultPageSize: 20,
+                  current: stockPagination.current,
+                  pageSize: stockPagination.pageSize,
                   pageSizeOptions: ['10', '20', '50', '100'],
                   showSizeChanger: true,
                   showTotal: (total) => `共 ${total} 条记录`,
+                  hideOnSinglePage: false,
+                  onChange: (page, pageSize) => {
+                    setStockPagination({ current: page, pageSize });
+                  },
                 }}
                 size="small"
               />

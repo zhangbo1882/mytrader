@@ -150,7 +150,7 @@ class PredefinedStrategies:
 
         特点：
         1. 高股息率：使用前25%的股票
-        2. 稳定性：市值 > 100亿
+        2. 稳定性：流通市值 > 100亿
         3. 合理估值：PE < 30
 
         Returns:
@@ -160,7 +160,7 @@ class PredefinedStrategies:
         # 注意：股息率需要从其他数据源获取，这里使用percentile作为示例
         criteria = AndCriteria(
             PercentileCriteria('pe_ttm', 0.25),  # 低估值前25%
-            GreaterThanCriteria('total_mv', 1000000),  # 市值>100亿 (单位万元)
+            GreaterThanCriteria('circ_mv', 1000000),  # 流通市值>100亿 (单位万元)
             GreaterThanCriteria('amount', 5000)
         )
         logger.debug(f"[PredefinedStrategies] dividend strategy created with {len(criteria.criteria)} criteria")
@@ -172,7 +172,7 @@ class PredefinedStrategies:
         低波动策略
 
         特点：
-        1. 大盘股：市值 > 200亿
+        1. 大盘股：流通市值 > 200亿
         2. 低估值：PE < 30
         3. 行业内质量前30%
 
@@ -181,7 +181,7 @@ class PredefinedStrategies:
         """
         logger.info(f"[PredefinedStrategies] Creating low_volatility strategy")
         criteria = AndCriteria(
-            GreaterThanCriteria('total_mv', 2000000),  # 市值>200亿
+            GreaterThanCriteria('circ_mv', 2000000),  # 流通市值>200亿
             RangeCriteria('pe_ttm', 0, 30),
             IndustryRelativeCriteria('latest_roe', percentile=0.3, min_stocks=5),
             GreaterThanCriteria('amount', 10000)

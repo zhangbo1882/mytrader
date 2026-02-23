@@ -18,4 +18,6 @@ export interface DateRange {
 
 export type PriceType = 'qfq' | 'hfq' | 'bfq';
 
+export type IntervalType = '5m' | '15m' | '30m' | '60m' | '1d';
+
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped';

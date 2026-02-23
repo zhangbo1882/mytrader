@@ -6,9 +6,33 @@ Each handler receives the TaskManager, task_id, and task parameters.
 """
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def convert_numpy_to_native(obj):
+    """Convert numpy and pandas types to native Python types for DuckDB/JSON compatibility"""
+    if isinstance(obj, dict):
+        return {k: convert_numpy_to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_to_native(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    # Handle pandas Timestamp
+    elif isinstance(obj, pd.Timestamp):
+        return obj.strftime('%Y-%m-%d')
+    # Handle any object with strftime method (datetime, Timestamp, etc.)
+    elif hasattr(obj, 'strftime'):
+        return obj.strftime('%Y-%m-%d')
+    else:
+        return obj
 
 
 def execute_update_stock_prices(tm, task_id, params):
@@ -18,7 +42,7 @@ def execute_update_stock_prices(tm, task_id, params):
     Args:
         tm: TaskManager instance
         task_id: Task identifier
-        params: Task parameters (stock_range, custom_stocks, etc.)
+        params: Task parameters (stock_range, custom_stocks, mode, start_date, markets, exclude_st, etc.)
     """
     from src.data_sources.tushare import TushareDB
     from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
@@ -30,9 +54,24 @@ def execute_update_stock_prices(tm, task_id, params):
     stock_range = params.get('stock_range', 'all')
     custom_stocks = params.get('custom_stocks', [])
     stocks_param = params.get('stocks', [])  # For backward compatibility
+    markets = params.get('markets', [])  # Market types: main, gem, star, bse
+    exclude_st = params.get('exclude_st', True)  # Exclude ST stocks
+    start_date_param = params.get('start_date')  # YYYY-MM-DD format, optional
+
+    # Convert start_date from YYYY-MM-DD to YYYYMMDD
+    if start_date_param:
+        start_date_yyyymmdd = start_date_param.replace('-', '')
+    else:
+        start_date_yyyymmdd = None
+
+    # Default start date for stocks with no existing data
+    default_start_date = start_date_yyyymmdd or '20240101'
 
     # Get stock list
-    stock_list = get_stock_list_for_task(stock_range, custom_stocks, db, stocks_param)
+    stock_list = get_stock_list_for_task(
+        stock_range, custom_stocks, db, stocks_param,
+        markets=markets, exclude_st=exclude_st
+    )
 
     if not stock_list:
         tm.update_task(
@@ -45,11 +84,11 @@ def execute_update_stock_prices(tm, task_id, params):
     # Load checkpoint if exists
     checkpoint = tm.load_checkpoint(task_id)
     start_index = 0
-    stats = {'success': 0, 'failed': 0, 'skipped': 0}
+    stats = {'success': 0, 'failed': 0, 'skipped': 0, 'duckdb_saved': 0}
 
     if checkpoint:
         start_index = checkpoint.get('current_index', 0)
-        stats = checkpoint.get('stats', stats)
+        stats = convert_numpy_to_native(checkpoint.get('stats', stats))
         print(f"[Task-{task_id[:8]}] Resuming from index {start_index}")
 
     # Update task progress
@@ -64,35 +103,35 @@ def execute_update_stock_prices(tm, task_id, params):
     # Execute updates
     end_date = datetime.now().strftime('%Y%m%d')
 
+    # Create stop flag path for checking
+    stop_flag_path = tm.checkpoint_dir / f".stop_{task_id}"
+
     for i in range(start_index, len(stock_list)):
         stock_code = stock_list[i]
 
-        # Check stop request
-        if tm.is_stop_requested(task_id):
-            print(f"[Task-{task_id[:8]}] Stop requested, stopping at index {i}")
-            task = tm.get_task(task_id)
-            task_stats = task.get('stats') if task else stats
-            tm.save_checkpoint(task_id, i, task_stats)
+        # Check for stop flag file (every iteration)
+        # Using flag file to avoid database connection conflicts
+        if stop_flag_path.exists():
+            print(f"[Task-{task_id[:8]}] Stop requested via flag file, stopping at index {i}")
+            stop_flag_path.unlink(missing_ok=True)
+            tm.save_checkpoint(task_id, i, stats)
             tm.update_task(task_id, status='stopped', message='任务已停止')
-            tm.clear_stop_request(task_id)
             return
 
         # Check pause request
         while tm.is_pause_requested(task_id):
-            tm.update_task(task_id, status='paused', message='任务已暂停')
-            time.sleep(1)
-            # Re-check stop request while paused
-            if tm.is_stop_requested(task_id):
-                task = tm.get_task(task_id)
-                task_stats = task.get('stats') if task else stats
-                tm.save_checkpoint(task_id, i, task_stats)
-                tm.update_task(task_id, status='stopped', message='任务已停止')
-                tm.clear_stop_request(task_id)
+            tm.update_task(task_id, status='paused', message=f'任务已暂停 ({i}/{len(stock_list)})')
+            print(f"[Task-{task_id[:8]}] Paused at index {i}, waiting...")
+            import time
+            time.sleep(2)
+            # Check if pause is cleared or stop is requested
+            if stop_flag_path.exists():
                 tm.clear_pause_request(task_id)
-                return
-            # Resume if pause cleared
+                break
             if not tm.is_pause_requested(task_id):
-                tm.update_task(task_id, status='running', message='任务已恢复执行')
+                tm.update_task(task_id, status='running', message=f'任务已恢复 ({i}/{len(stock_list)})')
+                print(f"[Task-{task_id[:8]}] Resumed at index {i}")
+                break
 
         try:
             # Update progress
@@ -106,33 +145,26 @@ def execute_update_stock_prices(tm, task_id, params):
 
             # Save checkpoint every 10 stocks
             if i % 10 == 0:
-                current_task = tm.get_task(task_id)
-                current_stats = current_task.get('stats') if current_task else stats
-                tm.save_checkpoint(task_id, i, current_stats)
+                # Use local stats variable instead of reading from database
+                tm.save_checkpoint(task_id, i, stats)
 
-            # Update stock data
             print(f"[Task-{task_id[:8]}] Updating stock {stock_code} ({i+1}/{len(stock_list)})...")
-            stats_result = db.save_all_stocks_by_code_incremental(
-                default_start_date='20240101',
-                end_date=end_date,
-                stock_list=[stock_code]
-            )
-            print(f"[Task-{task_id[:8]}] Stock {stock_code} update complete")
 
-            # Update stats
-            if stats_result:
-                if stats_result.get('success', 0) > 0:
-                    stats['success'] += stats_result.get('success', 0)
-                    tm.increment_stats(task_id, 'success', stats_result.get('success', 0))
-                if stats_result.get('failed', 0) > 0:
-                    stats['failed'] += stats_result.get('failed', 0)
-                    tm.increment_stats(task_id, 'failed', stats_result.get('failed', 0))
-                if stats_result.get('skipped', 0) > 0:
-                    stats['skipped'] += stats_result.get('skipped', 0)
-                    tm.increment_stats(task_id, 'skipped', stats_result.get('skipped', 0))
+            # Save to DuckDB only (no SQLite write)
+            # The method will automatically determine the start_date based on existing data
+            duck_start = start_date_yyyymmdd if start_date_yyyymmdd else None
+            result = db.save_a_daily_to_duckdb(stock_code, start_date=duck_start, end_date=end_date)
+
+            if result and result.get('rows_saved', 0) > 0:
+                rows_saved = result['rows_saved']
+                stats['success'] += 1
+                stats['duckdb_saved'] = stats.get('duckdb_saved', 0) + rows_saved
+                tm.increment_stats(task_id, 'success')
+                print(f"[Task-{task_id[:8]}] Saved {rows_saved} rows to DuckDB for {stock_code}")
             else:
                 stats['failed'] += 1
                 tm.increment_stats(task_id, 'failed')
+                print(f"[WARN] No data saved for {stock_code}")
 
         except Exception as e:
             stats['failed'] += 1
@@ -145,8 +177,8 @@ def execute_update_stock_prices(tm, task_id, params):
         status='completed',
         progress=100,
         current_stock_index=len(stock_list),
-        message='更新完成',
-        result={'updated_stocks': stats.get('success', 0)},
+        message=f'更新完成 (成功: {stats.get("success", 0)}只, 失败: {stats.get("failed", 0)}只, DuckDB记录: {stats.get("duckdb_saved", 0)}条)',
+        result={'updated_stocks': stats.get('success', 0), 'duckdb_saved': stats.get('duckdb_saved', 0)},
         stats=stats
     )
 
@@ -509,7 +541,7 @@ def execute_update_index_data(tm, task_id, params):
 
     if checkpoint:
         start_index = checkpoint.get('current_index', 0)
-        stats = checkpoint.get('stats', stats)
+        stats = convert_numpy_to_native(checkpoint.get('stats', stats))
         print(f"[Task-{task_id[:8]}] Resuming from index {start_index}")
 
     # Update each index individually to track progress
@@ -740,133 +772,6 @@ def execute_test_handler(tm, task_id, params):
     print(f"[TestHandler-{task_id[:8]}] Test completed with stats: {stats}")
 
 
-def execute_train_quarterly_model(tm, task_id, params):
-    """
-    Execute quarterly financial prediction model training task.
-
-    Args:
-        tm: TaskManager instance
-        task_id: Task identifier
-        params: Task parameters:
-            - symbols: List of stock codes
-            - start_quarter: Start quarter (e.g., "2020Q1")
-            - end_quarter: End quarter (e.g., "2024Q4")
-            - feature_mode: Feature mode ("financial_only", "with_reports", "with_valuation")
-            - train_mode: Training mode ("single" or "multi")
-            - model_id: Optional model ID
-            - optimize_hyperparams: Whether to optimize hyperparameters (default: False)
-            - train_ratio: Training set ratio (default: 0.7)
-            - val_ratio: Validation set ratio (default: 0.15)
-    """
-    from src.ml.trainers.quarterly_trainer import QuarterlyTrainer
-    from config.settings import TUSHARE_DB_PATH
-
-    print(f"[QuarterlyModel-{task_id[:8]}] Starting quarterly model training")
-
-    # Get parameters
-    symbols = params.get('symbols', [])
-    start_quarter = params.get('start_quarter', '2020Q1')
-    end_quarter = params.get('end_quarter', '2024Q4')
-    feature_mode = params.get('feature_mode', 'financial_only')
-    train_mode = params.get('train_mode', 'multi')
-    model_id = params.get('model_id')
-    optimize_hyperparams = params.get('optimize_hyperparams', False)
-    train_ratio = params.get('train_ratio', 0.7)
-    val_ratio = params.get('val_ratio', 0.15)
-
-    # Validate parameters
-    if not symbols:
-        tm.update_task(
-            task_id,
-            status='failed',
-            message='必须提供股票代码列表 (symbols)'
-        )
-        return
-
-    if train_mode == 'single' and len(symbols) > 1:
-        tm.update_task(
-            task_id,
-            status='failed',
-            message='单股票模式 (single) 只能提供一只股票代码'
-        )
-        return
-
-    # Update task
-    tm.update_task(
-        task_id,
-        status='running',
-        message=f'开始训练季度模型: {train_mode} 模式, {len(symbols)} 只股票, {start_quarter} - {end_quarter}'
-    )
-
-    try:
-        # Initialize trainer
-        trainer = QuarterlyTrainer(db_path=str(TUSHARE_DB_PATH))
-
-        # Check stop request
-        if tm.is_stop_requested(task_id):
-            print(f"[QuarterlyModel-{task_id[:8]}] Stop requested before training")
-            tm.update_task(task_id, status='stopped', message='任务已停止')
-            tm.clear_stop_request(task_id)
-            return
-
-        # Train model
-        print(f"[QuarterlyModel-{task_id[:8]}] Loading data and training model...")
-        result = trainer.train(
-            symbols=symbols,
-            start_quarter=start_quarter,
-            end_quarter=end_quarter,
-            feature_mode=feature_mode,
-            train_mode=train_mode,
-            train_ratio=train_ratio,
-            val_ratio=val_ratio,
-            optimize_hyperparams=optimize_hyperparams,
-            model_id=model_id
-        )
-
-        # Check stop request during training
-        if tm.is_stop_requested(task_id):
-            print(f"[QuarterlyModel-{task_id[:8]}] Stop requested during training")
-            tm.update_task(task_id, status='stopped', message='训练已停止')
-            tm.clear_stop_request(task_id)
-            return
-
-        # Generate report
-        report = trainer.generate_report(result)
-        print(report)
-
-        # Complete task
-        tm.update_task(
-            task_id,
-            status='completed',
-            progress=100,
-            message=f'训练完成: MAE={result["test_metrics"]["mae"]:.4f}, R²={result["test_metrics"]["r2"]:.4f}',
-            result={
-                'model_id': result['model_id'],
-                'train_mode': train_mode,
-                'symbols': symbols,
-                'mae': result['test_metrics']['mae'],
-                'r2': result['test_metrics']['r2'],
-                'direction_accuracy': result['test_metrics']['direction_accuracy'],
-                'n_features': result['n_features'],
-                'train_samples': result['train_samples'],
-                'test_samples': result['test_samples']
-            }
-        )
-
-        print(f"[QuarterlyModel-{task_id[:8]}] Training completed successfully")
-
-    except Exception as e:
-        print(f"[ERROR] Quarterly model training failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-        tm.update_task(
-            task_id,
-            status='failed',
-            message=f'训练失败: {str(e)}'
-        )
-
-
 def execute_update_industry_statistics(tm, task_id, params):
     """
     Execute industry statistics update task.
@@ -878,7 +783,6 @@ def execute_update_industry_statistics(tm, task_id, params):
     """
     from src.screening.calculators.industry_statistics_calculator import IndustryStatisticsCalculator
     from config.settings import TUSHARE_DB_PATH
-    import pandas as pd
     from datetime import datetime
 
     try:
@@ -993,7 +897,9 @@ def execute_backtest(tm, task_id, params):
     strategy_type = params.get('strategy', 'sma_cross')
 
     strategy_name = {
-        'sma_cross': 'SMA交叉策略'
+        'sma_cross': 'SMA交叉策略',
+        'price_breakout': '价格突破策略',
+        'price_breakout_v2': '价格突破策略V2'
     }.get(strategy_type, strategy_type)
 
     tm.update_task(
@@ -1011,12 +917,21 @@ def execute_backtest(tm, task_id, params):
 
         logger.info(f"[Backtest-{task_id[:8]}] Backtest completed, total_trades={result['trade_stats']['total_trades']}")
 
+        # 构建完成消息，包含股票代码提示（如果有）
+        message = f'{strategy_name}回测完成: {stock_code}, 总收益率: {result["basic_info"]["total_return"]:.2%}'
+
+        # 如果有代码提示信息，添加到消息中
+        code_warning = result.get('code_warning')
+        if code_warning:
+            message = f'{strategy_name}回测完成: {stock_code}, 总收益率: {result["basic_info"]["total_return"]:.2%}\n\n{code_warning}'
+            logger.info(f"[Backtest-{task_id[:8]}] Including stock code warning in message")
+
         # 完成任务
         tm.update_task(
             task_id,
             status='completed',
             progress=100,
-            message=f'{strategy_name}回测完成: {stock_code}, 总收益率: {result["basic_info"]["total_return"]:.2%}',
+            message=message,
             result=result
         )
 
@@ -1024,6 +939,10 @@ def execute_backtest(tm, task_id, params):
         print(f"  Total Return: {result['basic_info']['total_return']:.2%}")
         print(f"  Sharpe Ratio: {result['health_metrics']['sharpe_ratio']:.2f}")
         print(f"  Max Drawdown: {result['health_metrics']['max_drawdown']:.2%}")
+
+        # 如果有代码提示，也输出到控制台
+        if code_warning:
+            print(f"\n{code_warning}")
 
     except Exception as e:
         print(f"[ERROR] Backtest failed: {e}")
@@ -1050,8 +969,8 @@ def execute_update_moneyflow(tm, task_id, params):
             - mode: "incremental" | "full" (默认: "incremental")
             - stock_range: "all" | "favorites" | "custom" (默认: "all")
             - custom_stocks: 自定义股票列表
-            - start_date: 开始日期 (可选)
-            - end_date: 结束日期 (可选)
+            - start_date: 开始日期 YYYY-MM-DD格式 (可选)
+            - end_date: 结束日期 YYYY-MM-DD格式 (可选)
             - exclude_st: 是否排除ST股 (默认 True)
     """
     from src.data_sources.tushare import TushareDB
@@ -1063,9 +982,21 @@ def execute_update_moneyflow(tm, task_id, params):
     mode = params.get('mode', 'incremental')
     stock_range = params.get('stock_range', 'all')
     custom_stocks = params.get('custom_stocks', [])
-    start_date = params.get('start_date')
-    end_date = params.get('end_date')
+    start_date_param = params.get('start_date')  # YYYY-MM-DD format, optional
+    end_date_param = params.get('end_date')  # YYYY-MM-DD format, optional
     exclude_st = params.get('exclude_st', True)
+
+    # Convert start_date from YYYY-MM-DD to YYYYMMDD
+    if start_date_param:
+        start_date = start_date_param.replace('-', '')
+    else:
+        start_date = None
+
+    # Convert end_date from YYYY-MM-DD to YYYYMMDD
+    if end_date_param:
+        end_date = end_date_param.replace('-', '')
+    else:
+        end_date = None
 
     db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
 
@@ -1270,9 +1201,178 @@ def execute_update_dragon_list(tm, task_id, params):
         raise
 
 
+def execute_update_hk_prices(tm, task_id, params):
+    """
+    Execute HK stock price update task.
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Dictionary with keys:
+            - stock_range: "all" | "favorites" | "custom"
+            - custom_stocks: List of stock codes (for custom range)
+            - mode: "incremental" | "full"
+            - start_date: Start date YYYY-MM-DD (for full mode)
+            - end_date: End date YYYY-MM-DD (optional)
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+    from worker.utils import get_hk_stock_list_for_task
+
+    # Parse parameters
+    stock_range = params.get('stock_range', 'all')
+    custom_stocks = params.get('custom_stocks', [])
+    mode = params.get('mode', 'incremental')
+    start_date_param = params.get('start_date')  # YYYY-MM-DD format, optional
+
+    # Log task parameters
+    logger.info(f"[HK-Task-{task_id[:8]}] ======== 港股数据更新任务开始 ========")
+    logger.info(f"[HK-Task-{task_id[:8]}] 参数: stock_range={stock_range}, mode={mode}, start_date={start_date_param}")
+    if custom_stocks:
+        logger.info(f"[HK-Task-{task_id[:8]}] 自定义股票列表: {', '.join(custom_stocks[:5])}{'...' if len(custom_stocks) > 5 else ''}")
+
+    # Convert start_date from YYYY-MM-DD to YYYYMMDD
+    start_date_yyyymmdd = None
+    if start_date_param:
+        start_date_yyyymmdd = start_date_param.replace('-', '')
+
+    # Get HK stock list
+    try:
+        stock_list = get_hk_stock_list_for_task(stock_range, custom_stocks)
+        logger.info(f"[HK-Task-{task_id[:8]}] 获取到 {len(stock_list)} 只港股待更新")
+    except ValueError as e:
+        logger.error(f"[HK-Task-{task_id[:8]}] 获取港股列表失败: {e}")
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'获取港股列表失败: {e}'
+        )
+        return
+
+    if not stock_list:
+        logger.warning(f"[HK-Task-{task_id[:8]}] 港股列表为空")
+        tm.update_task(
+            task_id,
+            status='failed',
+            message='无法获取港股列表'
+        )
+        return
+
+    # Initialize TushareDB instance
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    # Load checkpoint if exists (for resumability)
+    checkpoint = tm.load_checkpoint(task_id)
+    start_index = 0
+    stats = {'success': 0, 'failed': 0, 'skipped': 0, 'duckdb_saved': 0}
+
+    if checkpoint:
+        start_index = checkpoint.get('current_index', 0)
+        stats = convert_numpy_to_native(checkpoint.get('stats', stats))
+        logger.info(f"[HK-Task-{task_id[:8]}] 从检查点恢复，从第 {start_index + 1} 只股票开始")
+
+    # Update task progress
+    tm.update_task(
+        task_id,
+        total_stocks=len(stock_list),
+        current_stock_index=start_index,
+        stats=stats,
+        status='running',
+        message=f'正在更新港股数据 ({len(stock_list)} 只)...'
+    )
+
+    # Set end date
+    end_date = datetime.now().strftime('%Y%m%d')
+    logger.info(f"[HK-Task-{task_id[:8]}] 更新时间范围: {start_date_yyyymmdd or '自动'} 至 {end_date}")
+
+    # Check for stop flag file at task start (before processing begins)
+    # This is the ONLY database check we do - using flag file as fallback
+    stop_flag_path = tm.checkpoint_dir / f".stop_{task_id}"
+    if stop_flag_path.exists():
+        logger.info(f"[HK-Task-{task_id[:8]}] 发现停止标志文件，任务启动即停止")
+        stop_flag_path.unlink(missing_ok=True)
+        tm.update_task(task_id, status='stopped', message='任务已停止')
+        return
+
+    # Loop through stocks with progress tracking
+    for i in range(start_index, len(stock_list)):
+        stock_code = stock_list[i]
+
+        # Check for stop flag file every stock (not just every 10)
+        # Using flag file to avoid database connection conflicts
+        if stop_flag_path.exists():
+            logger.info(f"[HK-Task-{task_id[:8]}] 发现停止标志文件，在索引 {i} 处停止")
+            stop_flag_path.unlink(missing_ok=True)
+            tm.save_checkpoint(task_id, i, stats)
+            tm.update_task(task_id, status='stopped', message='任务已停止')
+            return
+
+        try:
+            # Update progress
+            progress = int(((i + 1) / len(stock_list)) * 100)
+            tm.update_task(
+                task_id,
+                current_stock_index=i + 1,
+                progress=progress,
+                message=f'正在更新 {stock_code} ({i+1}/{len(stock_list)})...'
+            )
+
+            # Save checkpoint every 10 stocks
+            if i % 10 == 0:
+                # Use local stats variable instead of reading from database
+                tm.save_checkpoint(task_id, i, stats)
+                logger.info(f"[HK-Task-{task_id[:8]}] 进度: {i}/{len(stock_list)} ({progress}%), 成功:{stats['success']}, 跳过:{stats['skipped']}, 失败:{stats['failed']}")
+
+            logger.info(f"[HK-Task-{task_id[:8]}] [{i+1}/{len(stock_list)}] 开始更新 {stock_code}...")
+
+            # For full mode with start_date, use specified date; for incremental, let method determine
+            hk_start_date = start_date_yyyymmdd if mode == 'full' else None
+
+            # Call save_hk_daily_to_duckdb for each stock
+            result = db.save_hk_daily_to_duckdb(stock_code, start_date=hk_start_date, end_date=end_date)
+
+            rows_saved = result.get('rows_saved', 0)
+            result_start = result.get('start_date', 'N/A')
+            result_end = result.get('end_date', 'N/A')
+
+            if rows_saved > 0:
+                stats['success'] += 1
+                stats['duckdb_saved'] += rows_saved
+                tm.increment_stats(task_id, 'success')
+                logger.info(f"[HK-Task-{task_id[:8]}] ✓ {stock_code} 保存成功: {rows_saved} 条记录 ({result_start} ~ {result_end})")
+            else:
+                stats['skipped'] += 1
+                tm.increment_stats(task_id, 'skipped')
+                logger.info(f"[HK-Task-{task_id[:8]}] ⊘ {stock_code} 跳过: 无新数据")
+
+        except Exception as e:
+            stats['failed'] += 1
+            tm.increment_stats(task_id, 'failed')
+            logger.error(f"[HK-Task-{task_id[:8]}] ✗ {stock_code} 失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Complete task
+    tm.delete_checkpoint(task_id)
+
+    final_message = f'港股数据更新完成 (成功:{stats["success"]}, 跳过:{stats["skipped"]}, 失败:{stats["failed"]}, DuckDB:{stats["duckdb_saved"]}条)'
+    logger.info(f"[HK-Task-{task_id[:8]}] ======== 任务完成 ========")
+    logger.info(f"[HK-Task-{task_id[:8]}] {final_message}")
+
+    tm.update_task(task_id,
+        status='completed',
+        progress=100,
+        current_stock_index=len(stock_list),
+        message=final_message,
+        result={'updated_stocks': stats.get('success', 0), 'duckdb_saved': stats.get('duckdb_saved', 0)},
+        stats=stats
+    )
+
+
 # Task type to handler mapping
 TASK_HANDLERS = {
     'update_stock_prices': execute_update_stock_prices,
+    'update_hk_prices': execute_update_hk_prices,  # 港股数据更新
     'update_industry_classification': execute_update_industry_classification,
     'update_financial_reports': execute_update_financial_reports,
     'update_index_data': execute_update_index_data,
@@ -1281,7 +1381,6 @@ TASK_HANDLERS = {
     'calculate_industry_moneyflow': execute_calculate_industry_moneyflow,  # 行业资金流向汇总计算
     'update_dragon_list': execute_update_dragon_list,  # 龙虎榜数据更新
     'test_handler': execute_test_handler,
-    'train_quarterly_model': execute_train_quarterly_model,  # 季度模型训练
     'backtest': execute_backtest,  # 回测任务
     # Backward compatibility for old task types
     'update_all_stocks': execute_update_stock_prices,

@@ -71,6 +71,50 @@ class ModelEvaluator:
             'mae_pct': float(mae_pct)
         }
 
+    def evaluate_classification(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray
+    ) -> Dict[str, float]:
+        """
+        评估分类模型性能（用于direction目标）
+
+        Args:
+            y_true: 真实值（将转换为方向：1表示上涨，0表示下跌/持平）
+            y_pred: 预测值（将转换为方向）
+
+        Returns:
+            分类指标字典
+        """
+        from sklearn.metrics import (
+            accuracy_score,
+            precision_score,
+            recall_score,
+            f1_score,
+            confusion_matrix
+        )
+
+        # 将连续值转换为方向类别（>0为上涨，<=0为下跌/持平）
+        y_true_class = (y_true > 0).astype(int)
+        y_pred_class = (y_pred > 0).astype(int)
+
+        # 计算分类指标
+        accuracy = accuracy_score(y_true_class, y_pred_class)
+        precision = precision_score(y_true_class, y_pred_class, zero_division=0)
+        recall = recall_score(y_true_class, y_pred_class, zero_division=0)
+        f1 = f1_score(y_true_class, y_pred_class, zero_division=0)
+
+        # 计算混淆矩阵
+        cm = confusion_matrix(y_true_class, y_pred_class)
+
+        return {
+            'accuracy': float(accuracy),
+            'precision': float(precision),
+            'recall': float(recall),
+            'f1_score': float(f1),
+            'confusion_matrix': cm.tolist() if cm is not None else []
+        }
+
     def _direction_accuracy(
         self,
         y_true: np.ndarray,
@@ -269,6 +313,92 @@ class ModelEvaluator:
             'std_importance': float(np.std(values))
         }
 
+    def evaluate_stock_prediction(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray
+    ) -> Dict[str, float]:
+        """
+        股票预测专用综合评估（包含量化核心指标）
+
+        量化指标解读标准：
+        - IC (Pearson) > 0.03：模型具有预测价值
+        - IC > 0.05：较强预测能力
+        - 方向准确率 > 55%：显著优于随机
+        - 夏普比率 > 1.0：可用于实盘
+
+        Args:
+            y_true: 真实值（收益率序列）
+            y_pred: 预测值
+
+        Returns:
+            综合评估指标字典
+        """
+        from scipy.stats import pearsonr, spearmanr
+
+        if len(y_true) < 5:
+            return {}
+
+        # 1. 基础回归指标
+        mae = float(np.mean(np.abs(y_true - y_pred)))
+        rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+
+        # 2. 信息系数（IC）- 量化最重要指标
+        try:
+            ic_pearson, ic_p = pearsonr(y_pred, y_true)
+            ic_spearman, _ = spearmanr(y_pred, y_true)
+            ic_pearson = float(ic_pearson) if not np.isnan(ic_pearson) else 0.0
+            ic_spearman = float(ic_spearman) if not np.isnan(ic_spearman) else 0.0
+            ic_p = float(ic_p)
+        except Exception:
+            ic_pearson = ic_spearman = ic_p = 0.0
+
+        # 3. 方向准确率（最直观的预测质量指标）
+        direction_true = (y_true > 0).astype(int)
+        direction_pred = (y_pred > 0).astype(int)
+        direction_accuracy = float((direction_true == direction_pred).mean())
+
+        # 4. 多空组合收益分析（仅对收益率型目标有意义）
+        long_short_return = 0.0
+        sharpe_ratio = 0.0
+        top_quintile_return = 0.0
+        bottom_quintile_return = 0.0
+
+        if len(y_true) >= 10 and np.abs(y_true).mean() < 0.5:
+            n = len(y_true)
+            top_n = max(1, n // 5)  # 前20%
+
+            # 按预测值排序，取前20%做多、后20%做空
+            sorted_idx = np.argsort(y_pred)
+            top_idx = sorted_idx[-top_n:]
+            bottom_idx = sorted_idx[:top_n]
+
+            top_quintile_return = float(y_true[top_idx].mean())
+            bottom_quintile_return = float(y_true[bottom_idx].mean())
+            long_short_return = top_quintile_return - bottom_quintile_return
+
+            # 多空组合夏普比率
+            ls_daily = np.where(
+                np.isin(np.arange(n), top_idx), y_true,
+                np.where(np.isin(np.arange(n), bottom_idx), -y_true, 0)
+            )
+            ls_std = ls_daily.std()
+            if ls_std > 1e-8:
+                sharpe_ratio = float(ls_daily.mean() / ls_std * np.sqrt(252))
+
+        return {
+            'mae': mae,
+            'rmse': rmse,
+            'ic_pearson': ic_pearson,
+            'ic_spearman': ic_spearman,
+            'ic_p_value': ic_p,
+            'direction_accuracy': direction_accuracy,
+            'long_short_return': long_short_return,
+            'top_quintile_return': top_quintile_return,
+            'bottom_quintile_return': bottom_quintile_return,
+            'sharpe_ratio': sharpe_ratio,
+        }
+
     def generate_evaluation_report(
         self,
         y_true: np.ndarray,
@@ -276,7 +406,7 @@ class ModelEvaluator:
         model_id: str = "unknown"
     ) -> str:
         """
-        生成评估报告
+        生成综合评估报告
 
         Args:
             y_true: 真实值
@@ -288,6 +418,7 @@ class ModelEvaluator:
         """
         regression_metrics = self.evaluate_regression(y_true, y_pred)
         ic_metrics = self.calculate_information_coefficient(y_true, y_pred)
+        stock_metrics = self.evaluate_stock_prediction(y_true, y_pred)
 
         report = f"""
 {'='*60}
@@ -302,16 +433,25 @@ MAE:      {regression_metrics['mae']:.6f}
 RMSE:     {regression_metrics['rmse']:.6f}
 MAPE:     {regression_metrics['mape']:.2f}%
 R²:       {regression_metrics['r2']:.4f}
-MAE %:    {regression_metrics['mae_pct']:.2f}%
 
 Direction Analysis:
 -------------------
-Direction Accuracy: {regression_metrics['direction_accuracy']:.2%}
+Direction Accuracy: {stock_metrics.get('direction_accuracy', 0):.2%}
+  (>55% = 显著优于随机)
 
-Information Coefficient:
-------------------------
+Information Coefficient (IC):
+------------------------------
 Pearson IC:  {ic_metrics['pearson_ic']:.4f} (p={ic_metrics['pearson_p_value']:.4f})
+  (>0.03 = 具有预测价值, >0.05 = 较强)
 Spearman IC: {ic_metrics['spearman_ic']:.4f} (p={ic_metrics['spearman_p_value']:.4f})
+
+Long-Short Analysis:
+--------------------
+Top Quintile Return:    {stock_metrics.get('top_quintile_return', 0):.4f}
+Bottom Quintile Return: {stock_metrics.get('bottom_quintile_return', 0):.4f}
+Long-Short Return:      {stock_metrics.get('long_short_return', 0):.4f}
+Sharpe Ratio:           {stock_metrics.get('sharpe_ratio', 0):.4f}
+  (>1.0 = 可用于实盘)
 
 {'='*60}
 """

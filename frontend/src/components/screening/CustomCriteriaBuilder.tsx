@@ -45,6 +45,7 @@ const MARKET_OPTIONS = [
   { value: '创业板', label: '创业板' },
   { value: '科创板', label: '科创板' },
   { value: '北交所', label: '北交所' },
+  { value: '港股', label: '港股' },
 ];
 
 // Criteria type options - only basic comparison types

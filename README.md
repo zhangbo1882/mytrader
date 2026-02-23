@@ -1,6 +1,6 @@
 # MyTrader - 量化交易系统
 
-一个基于 Python 的量化交易回测系统，支持多数据源（Tushare、AKShare），提供完整的股票筛选、估值分析和策略回测功能。
+一个基于 Python 的量化交易回测系统，使用 Tushare 数据源，提供完整的股票筛选、估值分析和策略回测功能。
 
 ## 目录
 
@@ -26,8 +26,7 @@ mytrader/
 │
 ├── data/                       # 数据目录
 │   ├── tushare_data.db        # Tushare 数据库
-│   ├── tasks.db               # 任务数据库
-│   └── akshare_data.db        # AKShare 数据库
+│   └── tasks.db               # 任务数据库
 │
 ├── frontend/                   # React 前端
 │   ├── src/
@@ -57,7 +56,6 @@ mytrader/
 │   ├── data_sources/          # 数据源模块
 │   │   ├── base.py            # 基类
 │   │   ├── tushare.py         # Tushare 实现
-│   │   ├── akshare.py         # AKShare 实现
 │   │   └── query/             # 查询模块
 │   ├── strategies/            # 交易策略
 │   │   ├── sma_cross_strategy.py
@@ -278,12 +276,6 @@ open http://localhost:5002
 - 复权因子
 - 换手率（需要积分 2000+）
 
-### AKShare
-- A 股日线数据
-- 港股日线数据
-- 前复权
-- 换手率（免费）
-
 ## 配置说明
 
 主要配置项在 `config/settings.py`：
@@ -292,7 +284,6 @@ open http://localhost:5002
 |--------|------|--------|
 | TUSHARE_TOKEN | Tushare API Token | - |
 | TUSHARE_DB_PATH | Tushare 数据库路径 | data/tushare_data.db |
-| AKSHARE_DB_PATH | AKShare 数据库路径 | data/akshare_data.db |
 | DEFAULT_INITIAL_CASH | 初始资金 | 1000000 |
 | DEFAULT_COMMISSION | 手续费率 | 0.002 |
 | WORKER_POLL_INTERVAL | Worker 轮询间隔（秒） | 5 |

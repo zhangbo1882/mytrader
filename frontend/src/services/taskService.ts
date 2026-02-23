@@ -23,9 +23,10 @@ function transformTask(task: any): Task {
   }
 
   // Map backend task_type to frontend type
-  const taskTypeMap: Record<string, 'update' | 'screen' | 'prediction'> = {
+  const taskTypeMap: Record<string, 'update' | 'screen' | 'prediction' | 'backtest'> = {
     // Update tasks
     'update_stock_prices': 'update',
+    'update_hk_prices': 'update',
     'update_financial_reports': 'update',
     'update_index_data': 'update',
     'update_industry_classification': 'update',
@@ -38,15 +39,17 @@ function transformTask(task: any): Task {
     'screen_stocks': 'screen',
 
     // Prediction/AI tasks
-    'backtest': 'prediction',
     'price_breakout': 'prediction',
     'sma_cross': 'prediction',
+
+    // Backtest tasks
+    'backtest': 'backtest',
   };
 
   // Determine type: use metadata type first, then mapped task_type, default to 'update'
   const backendType = task.metadata?.type || task.task_type;
   const mappedType = backendType ? taskTypeMap[backendType] : undefined;
-  const type: 'update' | 'screen' | 'prediction' = mappedType || 'update';
+  const type: 'update' | 'screen' | 'prediction' | 'backtest' = mappedType || 'update';
 
   return {
     id: task.task_id,
@@ -106,8 +109,9 @@ export const taskService = {
 
   // Create a new task
   create: (params: CreateTaskParams) => {
-    // If type is already specified (e.g., 'update_dragon_list'), use it directly
-    if (params.type) {
+    // If type is a specific backend task_type (not a frontend category), use it directly
+    const frontendTypes = ['update', 'screen', 'prediction', 'backtest'];
+    if (params.type && !frontendTypes.includes(params.type)) {
       return api.post<Task>('/tasks/create', {
         task_type: params.type,
         params: params.params
@@ -119,6 +123,9 @@ export const taskService = {
     let taskType: string;
 
     switch (contentType) {
+      case 'hk':
+        taskType = 'update_hk_prices';
+        break;
       case 'financial':
         taskType = 'update_financial_reports';
         break;
@@ -174,8 +181,9 @@ export const taskService = {
   },
 
   // Clean up old tasks
-  cleanup: (days?: number) => {
-    return api.post<{ success: boolean; deleted: number }>('/tasks/cleanup', { days });
+  cleanup: async (days?: number) => {
+    const response = await api.post<{ success: boolean; deleted: number }>('/tasks/cleanup', { days });
+    return response as { success: boolean; deleted: number };
   },
 
   // Get task result

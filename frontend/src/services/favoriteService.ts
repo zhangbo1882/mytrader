@@ -6,6 +6,9 @@ export interface FavoriteItem {
   stock_name: string;
   added_at: string;
   notes: string | null;
+  safety_rating: string | null;
+  fundamental_rating: string | null;
+  entry_price: number | null;
 }
 
 export interface FavoriteListResponse {
@@ -23,13 +26,29 @@ export interface BatchAddResult {
   stock_name?: string;
   success: boolean;
   error?: string;
+  skipped?: boolean;
 }
 
 export interface BatchAddResponse {
   success: number;
   failed: number;
+  skipped?: number;
   total: number;
   results: BatchAddResult[];
+}
+
+export interface UpdateFavoriteData {
+  safety_rating?: string;
+  fundamental_rating?: string;
+  entry_price?: number;
+  notes?: string;
+}
+
+export interface StockImportData {
+  code: string;
+  safety_rating?: string;
+  fundamental_rating?: string;
+  entry_price?: number;
 }
 
 export const favoriteService = {
@@ -42,8 +61,20 @@ export const favoriteService = {
   /**
    * 添加收藏
    */
-  add: (stockCode: string, notes = '') =>
-    api.post<FavoriteItem>('/favorites', { stock_code: stockCode, notes }, {
+  add: (stockCode: string, notes = '', data?: UpdateFavoriteData) =>
+    api.post<FavoriteItem>('/favorites', {
+      stock_code: stockCode,
+      notes,
+      ...data
+    }, {
+      params: { user_id: 'default' }
+    }),
+
+  /**
+   * 更新收藏字段
+   */
+  update: (stockCode: string, data: UpdateFavoriteData) =>
+    api.put<FavoriteItem>(`/favorites/${stockCode}`, data, {
       params: { user_id: 'default' }
     }),
 
@@ -64,12 +95,21 @@ export const favoriteService = {
     }),
 
   /**
-   * 批量添加收藏
+   * 批量添加收藏（支持新格式，包含额外字段）
    */
-  batchAdd: (stockCodes: string[], notes = '') =>
-    api.post<BatchAddResponse>('/favorites/batch', { stock_codes: stockCodes, notes }, {
+  batchAdd: (stocks: StockImportData[] | string[], notes = '') => {
+    // 兼容旧格式：如果传入的是字符串数组，转换为新格式
+    const stocksData = typeof stocks[0] === 'string'
+      ? (stocks as string[]).map(code => ({ code }))
+      : stocks as StockImportData[];
+
+    return api.post<BatchAddResponse>('/favorites/batch', {
+      stocks_data: stocksData,
+      notes
+    }, {
       params: { user_id: 'default' }
-    }),
+    });
+  },
 
   /**
    * 清空收藏

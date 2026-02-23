@@ -4,7 +4,7 @@ ML Model Routes for Flask
 Provides API endpoints for machine learning model training, prediction,
 and management.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 import logging
 import threading
 import traceback
@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from pathlib import Path
+import json
 
 from config.settings import TUSHARE_DB_PATH
 from src.ml.data_loader import MlDataLoader
@@ -22,6 +24,23 @@ from src.ml.utils import MLDatabase
 from web.tasks import init_task_manager
 
 logger = logging.getLogger(__name__)
+
+# 辅助函数：确保所有数据都是JSON可序列化的
+def make_json_serializable(obj):
+    """递归转换numpy类型为Python原生类型"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_serializable(item) for item in obj]
+    elif pd.isna(obj) or obj is None or (isinstance(obj, float) and np.isnan(obj)):
+        return None
+    return obj
 
 # 创建 ML Blueprint
 ml_bp = Blueprint('ml_routes', __name__)
@@ -71,6 +90,12 @@ def run_training_task(task_id, params):
         target_type = params.get('target_type', 'return_1d')
         model_type = params.get('model_type', 'lgb')
         add_technical = params.get('add_technical', True)
+        train_ratio = params.get('train_ratio', 0.7)
+        val_ratio = params.get('val_ratio', 0.15)
+        use_feature_selection = params.get('use_feature_selection', True)
+        top_k_features = params.get('top_k_features', 30)  # 默认30，包含多空胜率+趋势方向特征
+        walk_forward = params.get('walk_forward', True)  # 默认开启滚动窗口
+        n_splits = params.get('n_splits', 5)
 
         logger.info(f"Training params: symbol={symbol}, target_type={target_type}, model_type={model_type}")
 
@@ -96,12 +121,27 @@ def run_training_task(task_id, params):
 
         # 训练模型
         trainer = get_trainer()
-        result = trainer.train(
-            df=df,
-            target_type=target_type,
-            symbol=symbol,
-            add_technical=add_technical
-        )
+        if walk_forward:
+            result = trainer.train_walk_forward(
+                df=df,
+                target_type=target_type,
+                symbol=symbol,
+                n_splits=n_splits,
+                add_technical=add_technical,
+                use_feature_selection=use_feature_selection,
+                top_k_features=top_k_features,
+            )
+        else:
+            result = trainer.train(
+                df=df,
+                target_type=target_type,
+                symbol=symbol,
+                add_technical=add_technical,
+                train_ratio=train_ratio,
+                val_ratio=val_ratio,
+                use_feature_selection=use_feature_selection,
+                top_k_features=top_k_features
+            )
 
         # 保存到数据库
         ml_db = get_ml_db()
@@ -120,15 +160,40 @@ def run_training_task(task_id, params):
             val_samples=result['val_samples'],
             test_samples=result['test_samples'],
             target_type=target_type,
-            metadata={'trained_by': 'api'}
+            metadata={
+                'trained_by': 'api',
+                'walk_forward': result.get('walk_forward', False),
+                'n_splits': result.get('n_splits'),
+                'cv_score': result.get('cv_score'),
+                'cv_std': result.get('cv_std'),
+                'cv_metric': result.get('cv_metric'),
+            }
         )
 
         # 更新任务状态
+        ic_info = ""
+        if 'ic_pearson' in result.get('test_metrics', {}):
+            ic_val = result['test_metrics']['ic_pearson']
+            ic_info = f", IC={ic_val:.4f}"
+        dir_acc = result['test_metrics'].get('direction_accuracy') or result['test_metrics'].get('accuracy')
+        dir_info = f", 方向准确率={dir_acc:.2%}" if dir_acc is not None else ""
+        mae_val = result['test_metrics'].get('mae')
+        mae_info = f"{mae_val:.6f}" if mae_val is not None else "N/A"
+
+        if result.get('walk_forward'):
+            cv_metric = result.get('cv_metric', 'score')
+            cv_mean = result.get('cv_score', 0)
+            cv_std = result.get('cv_std', 0)
+            n_sp = result.get('n_splits', 0)
+            wf_info = f"（滚动窗口 {n_sp} 折，CV {cv_metric}={cv_mean:.4f}±{cv_std:.4f}）"
+        else:
+            wf_info = f"（使用{result['n_features']}个特征）"
+
         task_manager.update_task(
             task_id,
             status='completed',
             progress=100,
-            message=f'训练完成！测试集 MAE: {result["test_metrics"].get("mae", "N/A"):.6f}',
+            message=f'训练完成！测试集 MAE: {mae_info}{ic_info}{dir_info}{wf_info}',
             result=result
         )
 
@@ -292,6 +357,7 @@ def api_predict():
         model_id: 模型ID
         symbol: 股票代码
         date: 预测日期 (可选，默认最新)
+        days: 返回历史预测天数 (可选，用于绘制对比图，默认0只返回最新预测)
     """
     try:
         data = request.json
@@ -300,6 +366,7 @@ def api_predict():
 
         model_id = data.get('model_id')
         symbol = data.get('symbol')
+        history_days = data.get('days', 0)  # 新增：返回历史预测天数
 
         if not model_id:
             return jsonify({'error': '请指定模型ID'}), 400
@@ -340,8 +407,18 @@ def api_predict():
         # 添加横截面特征
         df = engineer.add_cross_sectional_features(df)
 
+        # 添加精选核心特征（与训练时保持一致）
+        df = engineer.add_essential_features(df)
+
         # 创建目标（用于删除最后一行没有目标值的数据）
-        df = engineer.create_target(df, target_type='return_1d')
+        # 注意：需要先获取模型的 target_type，然后创建对应的目标
+        ml_db = get_ml_db()
+        model_info = ml_db.get_model(model_id)
+        model_target_type = model_info.get('target_type', 'return_1d') if model_info else 'return_1d'
+
+        logger.info(f"Model target_type: {model_target_type}")
+
+        df = engineer.create_target(df, target_type=model_target_type)
 
         # 只保留模型需要的特征列
         available_features = [f for f in feature_names if f in df.columns]
@@ -357,8 +434,22 @@ def api_predict():
         for col in available_features:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # 删除包含 NaN 的行
-        df_clean = df[available_features + ['target']].dropna()
+        # 保留日期信息用于历史预测
+        date_col = None
+        if 'datetime' in df.columns:
+            date_col = 'datetime'
+        elif 'date' in df.columns:
+            date_col = 'date'
+        elif isinstance(df.index, pd.DatetimeIndex):
+            # 索引是日期，创建一个日期列
+            df = df.reset_index()
+            date_col = df.columns[0]  # 通常是 'index' 或 'datetime'
+
+        # 删除包含 NaN 的行，保留日期列
+        cols_to_keep = available_features + ['target']
+        if date_col:
+            cols_to_keep.append(date_col)
+        df_clean = df[cols_to_keep].dropna()
 
         if len(df_clean) == 0:
             return jsonify({'error': '清洗后无有效数据'}), 400
@@ -366,7 +457,7 @@ def api_predict():
         # 提取特征 - 确保列顺序与训练时一致
         X = df_clean[available_features].values
 
-        logger.info(f"Prepared prediction data: X shape={X.shape}, features={len(available_features)}")
+        logger.info(f"Prepared prediction data: X shape={X.shape}, features={len(available_features)}, date_col={date_col}")
 
         # 获取最后一行作为预测输入
         X_latest = X[-1:, :]
@@ -377,7 +468,21 @@ def api_predict():
 
         # 生成预测
         try:
+            # 确定是否为分类任务（用于后续去偏处理）
+            is_classification = 'direction' in model_target_type
+
             prediction = model.predict(X_latest_scaled)[0]
+
+            # 对回归任务进行预测去偏处理
+            # 模型训练时保存了 y_train_mean，预测时需要减去这个均值
+            # 因为模型在训练数据上学习的是围绕均值的偏差
+            y_train_mean = model.metadata.get('y_train_mean', 0.0)
+            if not is_classification and y_train_mean != 0:
+                original_prediction = prediction
+                prediction = prediction - y_train_mean
+                logger.info(
+                    f"Prediction debias: {original_prediction:.6f} - {y_train_mean:.6f} = {prediction:.6f}"
+                )
 
             # 检查预测值是否有效
             if not np.isfinite(prediction):
@@ -386,35 +491,158 @@ def api_predict():
             # 生成带置信区间的预测
             try:
                 pred_with_conf, confidence = model.predict_with_confidence(X_latest_scaled)
-                conf_lower = float(confidence[0][0]) if len(confidence) > 0 else prediction - 0.01
-                conf_upper = float(confidence[0][1]) if len(confidence) > 0 else prediction + 0.01
+                # 对回归任务的置信区间也需要去偏
+                if not is_classification and y_train_mean != 0:
+                    conf_lower = float(confidence[0][0]) - y_train_mean if len(confidence) > 0 else prediction - 0.01
+                    conf_upper = float(confidence[0][1]) - y_train_mean if len(confidence) > 0 else prediction + 0.01
+                else:
+                    conf_lower = float(confidence[0][0]) if len(confidence) > 0 else prediction - 0.01
+                    conf_upper = float(confidence[0][1]) if len(confidence) > 0 else prediction + 0.01
 
                 # 确保置信区间有效
                 if not np.isfinite(conf_lower):
                     conf_lower = prediction - 0.01
                 if not np.isfinite(conf_upper):
                     conf_upper = prediction + 0.01
+
+                interval_width = abs(conf_upper - conf_lower)
+                logger.info(f"Prediction confidence interval: [{conf_lower:.6f}, {conf_upper:.6f}], width={interval_width:.6f}")
             except Exception as conf_err:
                 logger.warning(f"Could not generate confidence interval: {conf_err}")
                 # 使用默认置信区间
                 conf_lower = prediction - 0.01
                 conf_upper = prediction + 0.01
 
-            # 获取模型的目标类型
-            ml_db = get_ml_db()
-            model_info = ml_db.get_model(model_id)
-            target_type = model_info.get('target_type', 'return_1d') if model_info else 'return_1d'
+            # 记录模型信息用于调试（使用前面获取的 model_target_type）
+            logger.info(f"Model {model_id}: target_type={model_target_type}, is_classification={is_classification}, prediction={prediction:.6f}")
 
-            return jsonify({
+            # 构建响应
+            response = {
                 'success': True,
                 'prediction': float(prediction),
-                'confidence_lower': conf_lower,
-                'confidence_upper': conf_upper,
+                'confidence_lower': float(conf_lower),
+                'confidence_upper': float(conf_upper),
                 'symbol': symbol,
                 'model_id': model_id,
-                'date': end_date,
-                'target_type': target_type
-            })
+                'date': str(end_date),
+                'target_type': model_target_type
+            }
+
+            # 转换所有numpy类型
+            response = make_json_serializable(response)
+
+            # 如果请求了历史预测数据
+            if history_days > 0:
+                history_predictions = []
+
+                # 确定起始索引：从训练结束日期之后开始
+                training_end_date = model_info.get('training_end') if model_info else None
+                post_train_start_idx = 0
+
+                if training_end_date and date_col and date_col in df_clean.columns:
+                    training_end_dt = pd.to_datetime(training_end_date)
+                    after_mask = df_clean[date_col] > training_end_dt
+                    if after_mask.any():
+                        post_train_start_idx = int(after_mask.values.argmax())
+                    else:
+                        # 没有训练后数据，回退到最近 history_days 天
+                        post_train_start_idx = max(0, len(X_scaled) - history_days)
+                    logger.info(f"Post-training start index: {post_train_start_idx} (training_end={training_end_date})")
+                else:
+                    # 无日期信息，回退到最近 history_days 个点
+                    post_train_start_idx = max(0, len(X_scaled) - history_days)
+
+                # 最多取 history_days 个点，且不包含最后一行（已用于当前预测）
+                start_idx = post_train_start_idx
+                end_idx = len(X_scaled)  # 包含最后一行（当天）
+
+                logger.info(f"Generating historical predictions from index {start_idx} to {end_idx}, date_col={date_col}")
+
+                for i in range(start_idx, end_idx):
+                    hist_pred = model.predict(X_scaled[i:i+1])[0]
+
+                    # 对回归任务进行预测去偏处理
+                    if not is_classification and y_train_mean != 0:
+                        hist_pred = hist_pred - y_train_mean
+
+                    # 获取实际值和日期
+                    hist_actual = None
+                    hist_date = end_date  # 默认使用当前日期
+
+                    if i < len(df_clean):
+                        actual_val = df_clean['target'].iloc[i]
+                        if pd.notna(actual_val) and np.isfinite(actual_val):
+                            hist_actual = float(actual_val)
+
+                        # 确定日期偏移：
+                        # - 1日模型：target[i] 在 day i+1 实现，显示 i+1 的日期
+                        # - 5日模型：target[i] 跨越 i 到 i+5，显示特征日期 i
+                        is_5d = '5d' in model_target_type
+                        date_offset_i = i if is_5d else (i + 1)
+
+                        if date_col and date_col in df_clean.columns:
+                            if date_offset_i < len(df_clean):
+                                date_val = df_clean[date_col].iloc[date_offset_i]
+                            else:
+                                date_val = df_clean[date_col].iloc[i]
+                            if isinstance(date_val, pd.Timestamp):
+                                hist_date = date_val.strftime('%Y-%m-%d')
+                            else:
+                                hist_date = str(date_val)
+                        elif date_offset_i < len(df_clean) and isinstance(df_clean.index[date_offset_i], pd.Timestamp):
+                            hist_date = df_clean.index[date_offset_i].strftime('%Y-%m-%d')
+                        elif isinstance(df_clean.index[i], pd.Timestamp):
+                            hist_date = df_clean.index[i].strftime('%Y-%m-%d')
+
+                    history_predictions.append({
+                        'date': hist_date,
+                        'prediction': float(hist_pred),
+                        'actual': hist_actual
+                    })
+
+                # 统计分析
+                if history_predictions:
+                    preds = [h['prediction'] for h in history_predictions]
+                    actuals = [h['actual'] for h in history_predictions if h['actual'] is not None]
+                    up_count = sum(1 for p in preds if p > (0.5 if 'direction' in model_target_type else 0))
+                    down_count = len(preds) - up_count
+
+                    # 计算IC和方向准确率（有实际值时）
+                    ic_pearson = None
+                    ic_spearman = None
+                    direction_accuracy = None
+                    if len(actuals) >= 5:
+                        try:
+                            from src.ml.evaluators.metrics import ModelEvaluator
+                            _evaluator = ModelEvaluator()
+                            pred_arr = np.array([h['prediction'] for h in history_predictions
+                                                 if h['actual'] is not None])
+                            actual_arr = np.array(actuals)
+                            ic_metrics = _evaluator.calculate_information_coefficient(actual_arr, pred_arr)
+                            ic_pearson = round(float(ic_metrics.get('pearson_ic', 0)), 4)
+                            ic_spearman = round(float(ic_metrics.get('spearman_ic', 0)), 4)
+                            stock_metrics = _evaluator.evaluate_stock_prediction(actual_arr, pred_arr)
+                            direction_accuracy = round(float(stock_metrics.get('direction_accuracy', 0)), 4)
+                        except Exception as metric_err:
+                            logger.warning(f"Could not compute IC: {metric_err}")
+
+                    response['history_stats'] = {
+                        'pred_up': up_count,
+                        'pred_down': down_count,
+                        'total': len(preds),
+                        'actual_count': len(actuals),
+                        'ic_pearson': ic_pearson,
+                        'ic_spearman': ic_spearman,
+                        'direction_accuracy': direction_accuracy,
+                    }
+
+                    logger.info(f"History stats: pred_up={up_count}/{len(preds)}, "
+                               f"IC={ic_pearson}, dir_acc={direction_accuracy}")
+
+                response['history'] = history_predictions
+                logger.info(f"Generated {len(history_predictions)} historical predictions, first date: {history_predictions[0]['date'] if history_predictions else 'N/A'}")
+
+            return jsonify(response)
         except Exception as pred_err:
             logger.error(f"Prediction failed: {pred_err}")
             return jsonify({'error': f'预测失败: {str(pred_err)}'}), 500
@@ -514,239 +742,6 @@ def api_get_model_performance(model_id):
 
 
 # ==================== Quarterly Model Routes ====================
-
-@ml_bp.route('/api/ml/quarterly/train', methods=['POST'])
-def api_train_quarterly_model():
-    """
-    训练季度财务预测模型 API
-
-    Body (JSON):
-        symbols: 股票代码列表
-        start_quarter: 开始季度 (e.g., "2020Q1")
-        end_quarter: 结束季度 (e.g., "2024Q4")
-        feature_mode: 特征模式 ("financial_only", "with_reports", "with_valuation")
-        train_mode: 训练模式 ("single", "multi")
-        optimize_hyperparams: 是否优化超参数 (default: false)
-        train_ratio: 训练集比例 (default: 0.7)
-        val_ratio: 验证集比例 (default: 0.15)
-    """
-    try:
-        from web.services.quarterly_ml_service import create_quarterly_training_task
-
-        data = request.json
-        if not data:
-            return jsonify({'error': '请求数据为空'}), 400
-
-        # Extract parameters
-        symbols = data.get('symbols', [])
-        start_quarter = data.get('start_quarter', '2020Q1')
-        end_quarter = data.get('end_quarter', '2024Q4')
-        feature_mode = data.get('feature_mode', 'financial_only')
-        train_mode = data.get('train_mode', 'multi')
-        optimize_hyperparams = data.get('optimize_hyperparams', False)
-        train_ratio = data.get('train_ratio', 0.7)
-        val_ratio = data.get('val_ratio', 0.15)
-
-        # Validate parameters
-        if not symbols:
-            return jsonify({'error': '必须提供股票代码列表 (symbols)'}), 400
-
-        if train_mode == 'single' and len(symbols) > 1:
-            return jsonify({'error': '单股票模式 (single) 只能提供一只股票代码'}), 400
-
-        # Create training task
-        result = create_quarterly_training_task({
-            'symbols': symbols,
-            'start_quarter': start_quarter,
-            'end_quarter': end_quarter,
-            'feature_mode': feature_mode,
-            'train_mode': train_mode,
-            'optimize_hyperparams': optimize_hyperparams,
-            'train_ratio': train_ratio,
-            'val_ratio': val_ratio
-        })
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 400
-
-    except Exception as e:
-        logger.error(f"Error in api_train_quarterly_model: {str(e)}\n{traceback.format_exc()}")
-        return jsonify({'error': f'请求失败: {str(e)}'}), 500
-
-
-@ml_bp.route('/api/ml/quarterly/models')
-def api_list_quarterly_models():
-    """
-    列出所有季度模型
-
-    Query params:
-        symbol: 股票代码过滤 (可选)
-        limit: 返回数量限制 (默认50)
-    """
-    try:
-        from web.services.quarterly_ml_service import get_quarterly_models
-
-        symbol = request.args.get('symbol')
-        limit = int(request.args.get('limit', 50))
-
-        result = get_quarterly_models(symbol=symbol, limit=limit)
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 500
-
-    except Exception as e:
-        logger.error(f"Error listing quarterly models: {str(e)}")
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
-
-
-@ml_bp.route('/api/ml/quarterly/models/<model_id>')
-def api_get_quarterly_model(model_id):
-    """
-    获取季度模型详细信息
-
-    Path params:
-        model_id: 模型ID
-    """
-    try:
-        from web.services.quarterly_ml_service import get_quarterly_model
-
-        result = get_quarterly_model(model_id)
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 404 if 'not found' in result.get('error', '') else 500
-
-    except Exception as e:
-        logger.error(f"Error getting quarterly model: {str(e)}")
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
-
-
-@ml_bp.route('/api/ml/quarterly/predict', methods=['POST'])
-def api_predict_quarterly():
-    """
-    使用季度模型进行预测
-
-    Body (JSON):
-        model_id: 模型ID
-        symbols: 股票代码列表
-    """
-    try:
-        from web.services.quarterly_ml_service import predict_quarterly_return
-
-        data = request.json
-        if not data:
-            return jsonify({'error': '请求数据为空'}), 400
-
-        model_id = data.get('model_id')
-        symbols = data.get('symbols', [])
-
-        if not model_id:
-            return jsonify({'error': '请指定模型ID'}), 400
-
-        if not symbols:
-            return jsonify({'error': '请提供股票代码列表'}), 400
-
-        result = predict_quarterly_return(model_id, symbols)
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 500
-
-    except Exception as e:
-        logger.error(f"Error in quarterly prediction: {str(e)}\n{traceback.format_exc()}")
-        return jsonify({'error': f'预测失败: {str(e)}'}), 500
-
-
-@ml_bp.route('/api/ml/quarterly/models/<model_id>/evaluation')
-def api_evaluate_quarterly_model(model_id):
-    """
-    获取季度模型评估报告
-
-    Path params:
-        model_id: 模型ID
-
-    Query params:
-        test_start_quarter: 测试期开始季度 (可选)
-        test_end_quarter: 测试期结束季度 (可选)
-    """
-    try:
-        from web.services.quarterly_ml_service import evaluate_quarterly_model
-
-        test_start_quarter = request.args.get('test_start_quarter')
-        test_end_quarter = request.args.get('test_end_quarter')
-
-        result = evaluate_quarterly_model(
-            model_id,
-            test_start_quarter=test_start_quarter,
-            test_end_quarter=test_end_quarter
-        )
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 404 if 'not found' in result.get('error', '') else 500
-
-    except Exception as e:
-        logger.error(f"Error evaluating quarterly model: {str(e)}")
-        return jsonify({'error': f'评估失败: {str(e)}'}), 500
-
-
-@ml_bp.route('/api/ml/quarterly/models/<model_id>/importance')
-def api_get_quarterly_feature_importance(model_id):
-    """
-    获取季度模型特征重要性
-
-    Path params:
-        model_id: 模型ID
-
-    Query params:
-        top_n: 返回前N个特征 (默认20)
-    """
-    try:
-        from web.services.quarterly_ml_service import get_feature_importance
-
-        top_n = int(request.args.get('top_n', 20))
-
-        result = get_feature_importance(model_id, top_n=top_n)
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 404 if 'not found' in result.get('error', '') else 500
-
-    except Exception as e:
-        logger.error(f"Error getting feature importance: {str(e)}")
-        return jsonify({'error': f'查询失败: {str(e)}'}), 500
-
-
-@ml_bp.route('/api/ml/quarterly/models/<model_id>', methods=['DELETE'])
-def api_delete_quarterly_model(model_id):
-    """
-    删除季度模型
-
-    Path params:
-        model_id: 模型ID
-    """
-    try:
-        from web.services.quarterly_ml_service import delete_quarterly_model
-
-        result = delete_quarterly_model(model_id)
-
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 500
-
-    except Exception as e:
-        logger.error(f"Error deleting quarterly model: {str(e)}")
-        return jsonify({'error': f'删除失败: {str(e)}'}), 500
-
 
 def register_ml_routes(app):
     """

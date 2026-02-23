@@ -12,7 +12,6 @@ from web.restx_namespaces import (
     sw_industry_ns,
     boards_ns,
     favorites_ns,
-    liquidity_ns,
     valuation_ns,
     backtest_ns,
     screening_ns,
@@ -52,7 +51,6 @@ api.add_namespace(financial_ns, path='/financial')
 api.add_namespace(sw_industry_ns, path='/sw-industry')
 api.add_namespace(boards_ns, path='/boards')
 api.add_namespace(favorites_ns, path='/favorites')
-api.add_namespace(liquidity_ns, path='/liquidity')
 api.add_namespace(valuation_ns, path='/valuation')
 api.add_namespace(backtest_ns, path='/backtest')
 api.add_namespace(screening_ns, path='/screening')

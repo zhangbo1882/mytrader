@@ -269,11 +269,13 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
           total,
           current: filters.page,
           pageSize: filters.page_size,
+          pageSizeOptions: ['10', '20', '50', '100'],
           showSizeChanger: true,
           showTotal: (t) => `共 ${t} 条记录`,
           onChange: (page, pageSize) => {
             setFilters(prev => ({ ...prev, page, page_size: pageSize }));
-          }
+          },
+          hideOnSinglePage: false,
         }}
         scroll={{ x: 1200 }}
       />

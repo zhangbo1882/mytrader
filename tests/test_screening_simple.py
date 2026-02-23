@@ -1,5 +1,5 @@
 """
-Simple stock screening test - without complex industry joins
+Simple stock screening test - using DuckDB
 """
 import sys
 import os
@@ -12,52 +12,61 @@ from src.screening.base_criteria import AndCriteria
 
 
 def test_basic_screening():
-    """Test basic screening without complex joins"""
+    """Test basic screening using DuckDB"""
     print("=" * 50)
-    print("Simple Screening Test (No Industry Joins)")
+    print("Simple Screening Test (DuckDB - A-share)")
     print("=" * 50)
 
-    db_path = 'data/tushare_data.db'
-    if not os.path.exists(db_path):
-        print(f"Database not found: {db_path}")
-        return
+    from src.db.duckdb_manager import get_duckdb_manager
+    from config.settings import TUSHARE_DB_PATH
+    from sqlalchemy import create_engine
+    import pandas as pd
 
-    # Test 1: Simple PE filter
-    print("\nTest 1: PE Filter (0 < PE < 30)")
-    engine = ScreeningEngine(db_path)
+    # Test 1: Simple PE filter from DuckDB
+    print("\nTest 1: PE Filter (0 < PE < 30) from DuckDB")
 
-    # Get available dates first
-    dates = engine.get_available_dates(limit=5)
-    print(f"Available dates: {dates[:3]}")
+    a_share_table = 'bars_a_1d'
 
-    if dates:
+    duckdb_manager = get_duckdb_manager()
+    with duckdb_manager.get_connection() as conn:
+        # Get available dates first
+        dates_df = conn.execute(f"""
+            SELECT DISTINCT datetime as trade_date
+            FROM {a_share_table}
+            ORDER BY datetime DESC
+            LIMIT 5
+        """).fetchdf()
+
+        if dates_df.empty:
+            print("No data found in DuckDB")
+            return
+
+        dates = dates_df['trade_date'].tolist()
+        print(f"Available dates: {dates[:3]}")
+
         trade_date = dates[0]
         print(f"Using date: {trade_date}")
 
-        # Load data without industry joins
-        query = """
+        # Load data from DuckDB
+        query = f"""
         SELECT
-            b.symbol,
+            b.stock_code as symbol,
             b.datetime as trade_date,
-            b.close, b.volume, b.amount, b.turnover,
-            b.pe_ttm, b.pb, b.total_mv, b.circ_mv,
-            sn.name as stock_name
-        FROM bars b
-        LEFT JOIN stock_names sn ON b.symbol = sn.code
-        WHERE b.datetime = :trade_date
-          AND b.interval = '1d'
+            b.close, b.volume, b.amount, b.turnover_rate_f as turnover,
+            b.pe_ttm, b.pb, b.total_mv, b.circ_mv
+        FROM {a_share_table} b
+        WHERE b.datetime = ?::DATE
           AND b.pe_ttm IS NOT NULL
           AND b.pe_ttm > 0
         LIMIT 20
         """
 
-        import pandas as pd
-        df = pd.read_sql_query(query, engine.engine, params={'trade_date': trade_date})
+        df = conn.execute(query, [str(trade_date)]).fetchdf()
 
         if not df.empty:
             print(f"\nLoaded {len(df)} stocks")
             print("\nSample data:")
-            print(df[['symbol', 'stock_name', 'pe_ttm', 'pb']].head(10))
+            print(df[['symbol', 'pe_ttm', 'pb']].head(10))
 
             # Test basic filter
             criteria = RangeCriteria('pe_ttm', 0, 30)

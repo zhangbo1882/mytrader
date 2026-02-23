@@ -126,5 +126,15 @@ export const backtestService = {
 
   deleteHistory: (taskId: string) => {
     return api.delete<{success: boolean; message: string}>(`/backtest/history/${taskId}`);
+  },
+
+  // 获取股票的最优优化参数
+  getOptimizedParams: (stockCode: string) => {
+    return api.get<any>(`/backtest/optimized-params/${stockCode}`);
+  },
+
+  // 检查股票是否有优化参数
+  hasOptimizedParams: (stockCode: string) => {
+    return api.get<{ stock_code: string; has_params: boolean; updated_at?: string }>(`/backtest/has-optimized-params/${stockCode}`);
   }
 };

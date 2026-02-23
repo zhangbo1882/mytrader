@@ -9,7 +9,9 @@ export function formatNumber(value: number | string, decimals: number = 2): stri
 export function formatPercent(value: number | string, decimals: number = 2): string {
   const num = typeof value === 'string' ? parseFloat(value) : value;
   if (isNaN(num)) return '-';
-  return `${num.toFixed(decimals)}%`;
+  // 如果绝对值小于1（小数形式如0.05表示5%），则乘以100转换为百分比
+  const percentValue = Math.abs(num) < 1 ? num * 100 : num;
+  return `${percentValue.toFixed(decimals)}%`;
 }
 
 export function formatCurrency(value: number | string): string {

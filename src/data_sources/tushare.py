@@ -6,8 +6,11 @@ from datetime import datetime, timedelta
 import os
 import time
 import json
+import logging
 from pathlib import Path
 from src.data_sources.base import BaseStockDB
+
+logger = logging.getLogger(__name__)
 
 
 class TushareDB(BaseStockDB):
@@ -34,8 +37,8 @@ class TushareDB(BaseStockDB):
     def _standardize_code(self, symbol: str) -> str:
         """
         标准化股票代码格式
-        输入: 600382 或 600382.SH
-        输出: 600382.SH
+        输入: 600382 或 600382.SH 或 00941
+        输出: 600382.SH 或 00941.HK
         """
         # Ensure symbol is a string
         if not isinstance(symbol, str):
@@ -48,7 +51,13 @@ class TushareDB(BaseStockDB):
         if symbol.startswith(('600', '601', '603', '604', '605', '688', '689')):
             return f"{symbol}.SH"  # 上交所
         elif symbol.startswith(('000', '001', '002', '003', '300', '301')):
+            # 检查是否是港股（4-5位且不在A股范围内）
+            if len(symbol) in [4, 5] and not symbol.startswith(('300', '301')):
+                return f"{symbol}.HK"  # 港股
             return f"{symbol}.SZ"  # 深交所
+        elif len(symbol) in [4, 5]:
+            # 4-5位数字代码，判断为港股
+            return f"{symbol}.HK"  # 港股
         else:
             raise ValueError(f"无法识别股票代码: {symbol}")
 
@@ -61,13 +70,20 @@ class TushareDB(BaseStockDB):
                 return 'SSE'
             elif suffix == 'SZ':
                 return 'SZSE'
+            elif suffix == 'HK':
+                return 'HKEX'
 
         # 否则根据代码前缀判断
         code = symbol.split('.')[0] if '.' in symbol else symbol
         if code.startswith(('600', '601', '603', '604', '605', '688', '689')):
             return 'SSE'
         elif code.startswith(('000', '001', '002', '003', '300', '301')):
+            # 检查是否是港股
+            if len(code) in [4, 5] and not code.startswith(('300', '301')):
+                return 'HKEX'
             return 'SZSE'
+        elif len(code) in [4, 5]:
+            return 'HKEX'
         else:
             return 'UNKNOWN'
 
@@ -362,14 +378,23 @@ class TushareDB(BaseStockDB):
 
         # 获取股票列表
         if symbols is None:
-            # 从数据库获取所有股票代码
-            query = """
-            SELECT DISTINCT symbol FROM bars
-            WHERE interval = '1d'
-            """
-            with self.engine.connect() as conn:
-                df = pd.read_sql_query(query, conn)
-            symbols = df['symbol'].tolist() if not df.empty else []
+            # 从DuckDB获取所有A股股票代码
+            from src.db.duckdb_manager import get_duckdb_manager
+            duckdb_manager = get_duckdb_manager()
+            with duckdb_manager.get_connection() as conn:
+                # 检查A股表是否存在
+                if duckdb_manager.table_exists('bars_a_1d'):
+                    df = conn.execute("SELECT DISTINCT stock_code as symbol FROM bars_a_1d").fetchdf()
+                    symbols = df['symbol'].tolist() if not df.empty else []
+                else:
+                    # 回退到SQLite（兼容旧逻辑）
+                    query = """
+                    SELECT DISTINCT symbol FROM bars
+                    WHERE interval = '1d'
+                    """
+                    with self.engine.connect() as conn:
+                        df = pd.read_sql_query(query, conn)
+                    symbols = df['symbol'].tolist() if not df.empty else []
 
         if not symbols:
             print("❌ 没有找到股票")
@@ -783,22 +808,44 @@ class TushareDB(BaseStockDB):
         for ts_code in all_stocks:
             try:
                 code = ts_code.split('.')[0]
+                exchange = 'SH' if ts_code.endswith('.SH') else 'SZ' if ts_code.endswith('.SZ') else None
 
-                # 查询该股票的最新数据日期
-                query = """
-                SELECT datetime FROM bars
-                WHERE symbol = :symbol AND interval = '1d'
-                ORDER BY datetime DESC LIMIT 1
-                """
-                with self.engine.connect() as conn:
-                    df = pd.read_sql_query(
-                        query,
-                        conn,
-                        params={"symbol": code}
-                    )
+                # 优先从DuckDB查询该股票的最新数据日期
+                from src.db.duckdb_manager import get_duckdb_manager
+                duckdb_manager = get_duckdb_manager()
+                latest_date = None
 
-                if not df.empty:
-                    latest_date = pd.to_datetime(df['datetime'].iloc[0])
+                with duckdb_manager.get_connection() as conn:
+                    # 检查A股表
+                    if duckdb_manager.table_exists('bars_a_1d'):
+                        query = f"""
+                        SELECT datetime FROM bars_a_1d
+                        WHERE stock_code = '{code}'
+                        """
+                        if exchange:
+                            query += f" AND exchange = '{exchange}'"
+                        query += " ORDER BY datetime DESC LIMIT 1"
+                        df = conn.execute(query).fetchdf()
+                        if not df.empty and df['datetime'][0] is not None:
+                            latest_date = pd.to_datetime(df['datetime'][0])
+
+                # 如果DuckDB没有数据，回退到SQLite（兼容旧逻辑）
+                if latest_date is None:
+                    query = """
+                    SELECT datetime FROM bars
+                    WHERE symbol = :symbol AND interval = '1d'
+                    ORDER BY datetime DESC LIMIT 1
+                    """
+                    with self.engine.connect() as conn:
+                        df = pd.read_sql_query(
+                            query,
+                            conn,
+                            params={"symbol": code}
+                        )
+                    if not df.empty:
+                        latest_date = pd.to_datetime(df['datetime'].iloc[0])
+
+                if latest_date is not None:
                     end_date_dt = pd.to_datetime(end_date)
 
                     # 如果最新数据已经是今天或之后，跳过
@@ -2516,6 +2563,23 @@ class TushareDB(BaseStockDB):
             df['net_lg_amount'] = df['buy_lg_amount'] - df['sell_lg_amount']
             df['net_elg_amount'] = df['buy_elg_amount'] - df['sell_elg_amount']
 
+            # 删除该股票在指定日期范围内的已有数据（避免主键冲突）
+            if start_date or end_date:
+                with self.engine.connect() as conn:
+                    delete_query = text("""
+                        DELETE FROM stock_moneyflow
+                        WHERE ts_code = :ts_code
+                        AND (:start_date IS NULL OR trade_date >= :start_date)
+                        AND (:end_date IS NULL OR trade_date <= :end_date)
+                    """)
+                    result = conn.execute(delete_query, {
+                        'ts_code': ts_code,
+                        'start_date': start_date,
+                        'end_date': end_date
+                    })
+                    deleted_count = result.rowcount
+                    conn.commit()
+
             # 保存数据
             df.to_sql('stock_moneyflow', self.engine, if_exists='append', index=False, method='multi')
 
@@ -2564,6 +2628,16 @@ class TushareDB(BaseStockDB):
             # 计算净流向字段
             df['net_lg_amount'] = df['buy_lg_amount'] - df['sell_lg_amount']
             df['net_elg_amount'] = df['buy_elg_amount'] - df['sell_elg_amount']
+
+            # 删除该日期的已有数据（避免主键冲突）
+            with self.engine.connect() as conn:
+                delete_query = text("""
+                    DELETE FROM stock_moneyflow
+                    WHERE trade_date = :trade_date
+                """)
+                result = conn.execute(delete_query, {'trade_date': trade_date})
+                deleted_count = result.rowcount
+                conn.commit()
 
             # 保存数据
             df.to_sql('stock_moneyflow', self.engine, if_exists='append', index=False, method='multi')
@@ -2707,11 +2781,26 @@ class TushareDB(BaseStockDB):
                     df['net_lg_amount'] = df['buy_lg_amount'] - df['sell_lg_amount']
                     df['net_elg_amount'] = df['buy_elg_amount'] - df['sell_elg_amount']
 
+                    # 删除该股票在指定日期范围内的已有数据（避免主键冲突）
+                    with self.engine.connect() as conn:
+                        delete_query = text("""
+                            DELETE FROM stock_moneyflow
+                            WHERE ts_code = :ts_code
+                            AND trade_date BETWEEN :start_date AND :end_date
+                        """)
+                        result = conn.execute(delete_query, {
+                            'ts_code': ts_code,
+                            'start_date': start_date,
+                            'end_date': end_date
+                        })
+                        deleted_count = result.rowcount
+                        conn.commit()
+
                     # 保存数据
                     df.to_sql('stock_moneyflow', self.engine, if_exists='append', index=False, method='multi')
 
                     stats['success'] += len(df)
-                    print(f"  ✓ [{i}/{len(stock_list)}] {stock_code}: {len(df)} 条记录")
+                    print(f"  ✓ [{i}/{len(stock_list)}] {stock_code}: {len(df)} 条记录 (删除了 {deleted_count} 条旧数据)")
 
                     # 等待限流
                     self._wait_for_rate_limit()
@@ -3125,3 +3214,487 @@ class TushareDB(BaseStockDB):
 
         print(f"[save_dragon_list_batch] 批量处理完成，总共保存 {total_count} 条记录")
         return total_count
+
+    # ========================================================================
+    # HK Stock Data (港股数据) 相关方法
+    # ========================================================================
+
+    def save_hk_daily_to_duckdb(self, symbol: str, start_date: str = None, end_date: str = None):
+        """
+        保存港股日线数据到DuckDB
+
+        Uses Tushare APIs:
+        - pro.hk_daily() for OHLCV data
+        - pro.hk_adjfactor() for adjustment factors
+        - NO daily_basic data (not available for HK stocks)
+
+        Data is written directly to DuckDB, NOT to SQLite.
+
+        Args:
+            symbol: Stock code (e.g., "00700" or "00700.HK")
+            start_date: Start date in YYYYMMDD format (None = check existing data)
+            end_date: End date in YYYYMMDD format (None = today)
+
+        Returns:
+            Dictionary with statistics (rows_saved, start_date, end_date)
+        """
+        from src.db.duckdb_manager import get_duckdb_writer
+
+        # 1. Standardize code to XXXXX.HK format
+        ts_code = self._standardize_code(symbol)
+        stock_code = ts_code.split('.')[0]
+
+        # 2. Check existing data in DuckDB to determine start_date if not provided
+        db_writer = get_duckdb_writer()
+        try:
+            with db_writer.get_connection() as conn:
+                # Check if table exists
+                if not db_writer.table_exists('bars_1d'):
+                    db_writer.create_table('bars_1d', '1d')
+
+                # Get latest date for this stock
+                check_query = f"""
+                    SELECT MAX(datetime) as max_date
+                    FROM bars_1d
+                    WHERE stock_code = '{stock_code}' AND exchange = 'HK'
+                """
+                result_df = conn.execute(check_query).fetchdf()
+
+                if start_date is None:
+                    if not result_df.empty and result_df['max_date'][0] is not None:
+                        # Incremental update: start from next day
+                        max_date = result_df['max_date'][0]
+                        # Check for NaT (pandas Not a Time)
+                        if pd.isna(max_date):
+                            # No valid date, use default
+                            start_date = '20200101'
+                            logger.info(f"  [HK] 首次下载: 从 {start_date} 开始 (日期无效)")
+                        else:
+                            # Handle both DATE and TIMESTAMP types
+                            if isinstance(max_date, str):
+                                # Remove time part if present
+                                max_date = max_date.split(' ')[0]
+                            else:
+                                # Convert to string first
+                                max_date = str(max_date).split(' ')[0]
+                            start_date = (datetime.strptime(max_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y%m%d')
+                            logger.info(f"  [HK] 增量更新: 从 {start_date} 开始 (最新数据: {max_date})")
+                    else:
+                        # No existing data, use default
+                        start_date = '20200101'
+                        logger.info(f"  [HK] 首次下载: 从 {start_date} 开始 (无历史数据)")
+                else:
+                    logger.info(f"  [HK] 指定日期范围: {start_date} ~ {end_date or 'today'}")
+
+        except Exception as e:
+            logger.error(f"  [HK] 检查现有数据失败: {e}")
+            if start_date is None:
+                start_date = '20200101'
+
+        # 3. Set end_date to today if not provided
+        if end_date is None:
+            end_date = datetime.today().strftime('%Y%m%d')
+
+        # 4. Fetch data from both APIs:
+        #    - pro.hk_daily: 原始价格 + 真实涨跌幅 (pct_chg)
+        #    - pro.hk_daily_adj: 复权因子 + 市值数据
+        logger.info(f"  [HK] 正在获取 {ts_code} 数据: {start_date} ~ {end_date}")
+
+        # 获取原始价格和涨跌幅
+        df_daily = self._retry_api_call(
+            self.pro.hk_daily,
+            ts_code=ts_code,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if df_daily is None or df_daily.empty:
+            logger.warning(f"  [HK] {ts_code} 无数据 (API返回空)")
+            return {'rows_saved': 0, 'start_date': start_date, 'end_date': end_date}
+
+        logger.info(f"  [HK] 获取到 {len(df_daily)} 条原始数据")
+
+        # 获取复权因子和市值数据
+        df_adj = self._retry_api_call(
+            self.pro.hk_daily_adj,
+            ts_code=ts_code,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if df_adj is not None and not df_adj.empty:
+            logger.info(f"  [HK] 获取到 {len(df_adj)} 条复权数据")
+
+            # 合并两个数据集
+            df = df_daily.merge(
+                df_adj[['trade_date', 'adj_factor', 'turnover_ratio', 'total_share', 'free_share', 'total_mv', 'free_mv']],
+                on='trade_date',
+                how='left'
+            )
+        else:
+            logger.warning(f"  [HK] 未能获取复权因子和市值数据")
+            df = df_daily
+
+        # 5. Calculate 前复权 prices using adj_factor (如果有的话)
+        if 'adj_factor' in df.columns:
+            df['open_qfq'] = df['open'] * df['adj_factor']
+            df['high_qfq'] = df['high'] * df['adj_factor']
+            df['low_qfq'] = df['low'] * df['adj_factor']
+            df['close_qfq'] = df['close'] * df['adj_factor']
+
+            # Log adj_factor range
+            unique_factors = df['adj_factor'].dropna().unique()
+            if len(unique_factors) > 0:
+                logger.info(f"  [HK] 复权因子范围: {unique_factors.min():.6f} ~ {unique_factors.max():.6f}")
+
+        # 6. Prepare DataFrame for DuckDB
+        df_to_save = pd.DataFrame({
+            'stock_code': stock_code,
+            'exchange': 'HK',
+            'datetime': pd.to_datetime(df['trade_date'], format='%Y%m%d', errors='coerce'),
+            'open': df['open'],
+            'high': df['high'],
+            'low': df['low'],
+            'close': df['close'],
+            'pre_close': df.get('pre_close'),
+            'change': df.get('change'),
+            'pct_chg': df.get('pct_chg'),  # 使用 hk_daily 的真实涨跌幅
+            'volume': df.get('vol', df.get('volume')),
+            'amount': df.get('amount'),
+            'open_qfq': df.get('open_qfq'),
+            'high_qfq': df.get('high_qfq'),
+            'low_qfq': df.get('low_qfq'),
+            'close_qfq': df.get('close_qfq'),
+            # 添加换手率和市值字段
+            'turnover_rate_f': df.get('turnover_ratio'),  # 换手率
+            'total_share': df.get('total_share'),  # 总股本
+            'free_share': df.get('free_share'),  # 流通股本
+            'total_mv': df.get('total_mv'),  # 总市值
+            'circ_mv': df.get('free_mv'),  # 流通市值
+        })
+
+        # Remove rows with NaT datetime
+        before_count = len(df_to_save)
+        df_to_save = df_to_save.dropna(subset=['datetime'])
+        after_count = len(df_to_save)
+        if before_count != after_count:
+            logger.info(f"  [HK] 过滤掉 {before_count - after_count} 条无效日期的记录")
+
+        # 7. Write directly to DuckDB bars_1d table
+        try:
+            with db_writer.get_connection() as conn:
+                # Register as temp table and insert
+                conn.register('temp_hk_import', df_to_save)
+
+                columns_str = ', '.join(df_to_save.columns)
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO bars_1d ({columns_str})
+                    SELECT {columns_str} FROM temp_hk_import
+                """)
+                conn.unregister('temp_hk_import')
+
+                rows_saved = len(df_to_save)
+                if df_to_save['datetime'].min() != df_to_save['datetime'].max():
+                    date_range = f"{df_to_save['datetime'].min().date()} ~ {df_to_save['datetime'].max().date()}"
+                else:
+                    date_range = f"{df_to_save['datetime'].min().date()}"
+
+                logger.info(f"  [HK] ✓ {ts_code} 成功保存 {rows_saved} 条记录 ({date_range})")
+
+                return {
+                    'rows_saved': rows_saved,
+                    'start_date': start_date,
+                    'end_date': end_date
+                }
+
+        except Exception as e:
+            logger.error(f"  [HK] ✗ 保存到 DuckDB 失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'rows_saved': 0, 'start_date': start_date, 'end_date': end_date}
+
+        finally:
+            db_writer.close()
+
+    def save_a_daily_to_duckdb(self, symbol: str, start_date: str = None, end_date: str = None):
+        """
+        保存A股日线数据到DuckDB（不写SQLite）
+
+        Uses Tushare APIs:
+        - pro.daily() for OHLCV data
+        - pro.adj_factor() for adjustment factors
+        - pro.daily_basic() for valuation metrics (if available)
+
+        Data is written directly to DuckDB bars_a_1d table (A-share specific table),
+        NOT to SQLite and NOT to bars_1d (which is for HK stocks).
+
+        Args:
+            symbol: Stock code (e.g. "600382" or "600382.SH")
+            start_date: Start date in YYYYMMDD format (None = check existing data)
+            end_date: End date in YYYYMMDD format (None = today)
+
+        Returns:
+            Dictionary with statistics (rows_saved, start_date, end_date)
+        """
+        from src.db.duckdb_manager import get_duckdb_writer
+        from config.settings import A_SHARE_TABLE_MAP
+
+        # 1. Standardize code to XXXXX.SH/SZ format
+        ts_code = self._standardize_code(symbol)
+        stock_code = ts_code.split('.')[0]
+        exchange = 'SH' if ts_code.endswith('.SH') else 'SZ'
+
+        # A股专用表名
+        a_share_table = A_SHARE_TABLE_MAP.get('1d', 'bars_a_1d')
+
+        # 2. Check existing data in DuckDB to determine start_date if not provided
+        db_writer = get_duckdb_writer()
+        try:
+            with db_writer.get_connection() as conn:
+                # Check if A-share table exists, create if not
+                if not db_writer.table_exists(a_share_table):
+                    # Create A-share specific table
+                    conn.execute(f"""
+                        CREATE TABLE {a_share_table} (
+                            stock_code VARCHAR NOT NULL,
+                            exchange VARCHAR,
+                            datetime DATE NOT NULL,
+                            open FLOAT,
+                            high FLOAT,
+                            low FLOAT,
+                            close FLOAT,
+                            open_qfq FLOAT,
+                            high_qfq FLOAT,
+                            low_qfq FLOAT,
+                            close_qfq FLOAT,
+                            pre_close FLOAT,
+                            change FLOAT,
+                            pct_chg FLOAT,
+                            volume DOUBLE,
+                            turnover FLOAT,
+                            amount DOUBLE,
+                            pe FLOAT,
+                            pe_ttm FLOAT,
+                            pb FLOAT,
+                            ps FLOAT,
+                            ps_ttm FLOAT,
+                            total_mv FLOAT,
+                            circ_mv FLOAT,
+                            total_share FLOAT,
+                            float_share FLOAT,
+                            free_share FLOAT,
+                            volume_ratio FLOAT,
+                            turnover_rate_f FLOAT,
+                            dv_ratio FLOAT,
+                            dv_ttm FLOAT,
+                            PRIMARY KEY (stock_code, datetime)
+                        )
+                    """)
+                    logger.info(f"  [A股] 创建表 {a_share_table}")
+
+                # Get latest date for this stock
+                check_query = f"""
+                    SELECT MAX(datetime) as max_date
+                    FROM {a_share_table}
+                    WHERE stock_code = '{stock_code}' AND exchange = '{exchange}'
+                """
+                result_df = conn.execute(check_query).fetchdf()
+
+                if start_date is None:
+                    if not result_df.empty and result_df['max_date'][0] is not None:
+                        # Incremental update: start from next day
+                        max_date = result_df['max_date'][0]
+                        # Check for NaT (pandas Not a Time)
+                        if pd.isna(max_date):
+                            # No valid date, use default
+                            start_date = '20240101'
+                            logger.info(f"  [A股] 首次下载: 从 {start_date} 开始 (日期无效)")
+                        else:
+                            # Handle both DATE and TIMESTAMP types
+                            if isinstance(max_date, str):
+                                # Remove time part if present
+                                max_date = max_date.split(' ')[0]
+                            else:
+                                # Convert to string first
+                                max_date = str(max_date).split(' ')[0]
+                            start_date = (datetime.strptime(max_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y%m%d')
+                            logger.info(f"  [A股] 增量更新: 从 {start_date} 开始 (最新数据: {max_date})")
+                    else:
+                        # No existing data, use default
+                        start_date = '20240101'
+                        logger.info(f"  [A股] 首次下载: 从 {start_date} 开始 (无历史数据)")
+                else:
+                    logger.info(f"  [A股] 指定日期范围: {start_date} ~ {end_date or 'today'}")
+
+        except Exception as e:
+            logger.error(f"  [A股] 检查现有数据失败: {e}")
+            if start_date is None:
+                start_date = '20240101'
+
+        # 3. Set end_date to today if not provided
+        if end_date is None:
+            end_date = datetime.today().strftime('%Y%m%d')
+
+        # 4. Fetch original OHLCV data using pro.daily()
+        logger.info(f"  [A股] 正在获取 {ts_code} 原始价格数据: {start_date} ~ {end_date}")
+        df = self._retry_api_call(
+            self.pro.daily,
+            ts_code=ts_code,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if df is None or df.empty:
+            logger.warning(f"  [A股] {ts_code} 无数据 (API返回空)")
+            return {'rows_saved': 0, 'start_date': start_date, 'end_date': end_date}
+
+        logger.info(f"  [A股] 获取到 {len(df)} 条原始数据")
+
+        # 5. Fetch adjustment factors using pro.adj_factor()
+        # Then calculate: 前复权价格 = 原始价格 × adj_factor
+        logger.info(f"  [A股] 正在获取复权因子...")
+        adj_df = self._retry_api_call(
+            self.pro.adj_factor,
+            ts_code=ts_code,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if adj_df is None or adj_df.empty:
+            logger.warning(f"  [A股] 无法获取复权因子，将使用原始价格")
+            df['open_qfq'] = df['open']
+            df['high_qfq'] = df['high']
+            df['low_qfq'] = df['low']
+            df['close_qfq'] = df['close']
+            df['adj_factor'] = None
+        else:
+            logger.info(f"  [A股] 获取到 {len(adj_df)} 条复权因子数据")
+            # Merge and calculate: 前复权价格 = 原始价格 × adj_factor
+            df = df.merge(
+                adj_df[['ts_code', 'trade_date', 'adj_factor']],
+                on=['ts_code', 'trade_date'],
+                how='left'
+            )
+
+            # Calculate 前复权 prices
+            df['open_qfq'] = df['open'] * df['adj_factor']
+            df['high_qfq'] = df['high'] * df['adj_factor']
+            df['low_qfq'] = df['low'] * df['adj_factor']
+            df['close_qfq'] = df['close'] * df['adj_factor']
+
+            # Log adj_factor range
+            unique_factors = df['adj_factor'].dropna().unique()
+            if len(unique_factors) > 0:
+                logger.info(f"  [A股] 复权因子范围: {unique_factors.min():.6f} ~ {unique_factors.max():.6f}")
+
+        # 6. (Optional) Try to fetch daily_basic for valuation metrics
+        # This may fail due to permission limits
+        try:
+            logger.info(f"  [A股] 正在获取每日指标（估值数据）...")
+            basic_df = self._retry_api_call(
+                self.pro.daily_basic,
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+            if basic_df is not None and not basic_df.empty:
+                logger.info(f"  [A股] 获取到 {len(basic_df)} 条估值数据")
+                # Merge valuation metrics
+                basic_cols = ['ts_code', 'trade_date', 'pe', 'pe_ttm', 'pb', 'ps', 'ps_ttm',
+                             'total_mv', 'circ_mv', 'total_share', 'float_share', 'free_share',
+                             'turnover_rate_f', 'volume_ratio', 'dv_ratio', 'dv_ttm']
+                # 只保留存在的列
+                basic_cols_to_merge = [col for col in basic_cols if col in basic_df.columns]
+                df = df.merge(
+                    basic_df[basic_cols_to_merge],
+                    on=['ts_code', 'trade_date'],
+                    how='left'
+                )
+        except Exception as e:
+            logger.warning(f"  [A股] 获取每日指标失败（可能需要更高权限）: {e}")
+
+        # 7. Prepare DataFrame for DuckDB
+        df_to_save = pd.DataFrame({
+            'stock_code': stock_code,
+            'exchange': exchange,
+            'datetime': pd.to_datetime(df['trade_date'], format='%Y%m%d', errors='coerce'),
+            'open': df['open'],
+            'high': df['high'],
+            'low': df['low'],
+            'close': df['close'],
+            'pre_close': df.get('pre_close'),
+            'change': df.get('change'),
+            'pct_chg': df.get('pct_chg'),  # A股 daily 接口返回的是 pct_chg
+            'volume': df.get('vol', df.get('volume')),
+            'amount': df.get('amount'),
+            'open_qfq': df.get('open_qfq'),
+            'high_qfq': df.get('high_qfq'),
+            'low_qfq': df.get('low_qfq'),
+            'close_qfq': df.get('close_qfq'),
+            # Valuation fields (from daily_basic)
+            'turnover_rate_f': df.get('turnover_rate_f'),
+            'total_share': df.get('total_share'),
+            'float_share': df.get('float_share'),
+            'free_share': df.get('free_share'),
+            'total_mv': df.get('total_mv'),
+            'circ_mv': df.get('circ_mv'),
+            'volume_ratio': df.get('volume_ratio'),
+            'pe': df.get('pe'),
+            'pe_ttm': df.get('pe_ttm'),
+            'pb': df.get('pb'),
+            'ps': df.get('ps'),
+            'ps_ttm': df.get('ps_ttm'),
+            'dv_ratio': df.get('dv_ratio'),
+            'dv_ttm': df.get('dv_ttm'),
+        })
+
+        # Remove rows with NaT datetime
+        before_count = len(df_to_save)
+        df_to_save = df_to_save.dropna(subset=['datetime'])
+        after_count = len(df_to_save)
+        if before_count != after_count:
+            logger.info(f"  [A股] 过滤掉 {before_count - after_count} 条无效日期的记录")
+
+        # 8. Write directly to DuckDB bars_a_1d table
+        try:
+            with db_writer.get_connection() as conn:
+                # Register as temp table and insert
+                conn.register('temp_a_import', df_to_save)
+
+                # Get columns that exist in the table
+                table_columns = conn.execute(
+                    f"SELECT column_name FROM information_schema.columns WHERE table_name = '{a_share_table}'"
+                ).fetchdf()['column_name'].tolist()
+
+                # Only insert columns that exist in both the DataFrame and the table
+                available_columns = [col for col in df_to_save.columns if col in table_columns]
+                columns_str = ', '.join(available_columns)
+
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO {a_share_table} ({columns_str})
+                    SELECT {columns_str} FROM temp_a_import
+                """)
+                conn.unregister('temp_a_import')
+
+                rows_saved = len(df_to_save)
+                if df_to_save['datetime'].min() != df_to_save['datetime'].max():
+                    date_range = f"{df_to_save['datetime'].min().date()} ~ {df_to_save['datetime'].max().date()}"
+                else:
+                    date_range = f"{df_to_save['datetime'].min().date()}"
+
+                logger.info(f"  [A股] ✓ {ts_code} 成功保存 {rows_saved} 条记录 ({date_range})")
+
+                return {
+                    'rows_saved': rows_saved,
+                    'start_date': start_date,
+                    'end_date': end_date
+                }
+
+        except Exception as e:
+            logger.error(f"  [A股] ✗ 保存到 DuckDB 失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'rows_saved': 0, 'start_date': start_date, 'end_date': end_date}
+
+        finally:
+            db_writer.close()

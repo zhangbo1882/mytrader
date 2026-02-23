@@ -8,6 +8,8 @@ import sys
 import os
 import logging
 from pathlib import Path
+from datetime import datetime
+import pandas as pd
 
 # 添加项目根目录到 Python 路径
 project_root = Path(__file__).parent.parent
@@ -40,6 +42,25 @@ app.config['JSON_AS_ASCII'] = False  # 支持中文
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.secret_key = 'your-secret-key-here'  # Required for session
 
+
+# Set custom JSON provider to handle NaT and datetime
+from flask.json.provider import DefaultJSONProvider
+
+class CustomJSONProvider(DefaultJSONProvider):
+    def default(self, obj):
+        # Handle pandas NaT (Not a Time)
+        if pd.isna(obj):
+            return None
+        # Handle datetime objects
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        # Handle pandas Timestamp
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        return super().default(obj)
+
+app.json = CustomJSONProvider(app)
+
 # 配置 Flask 日志
 app.logger.setLevel(logging.INFO)
 app.logger.handlers = logging.getLogger().handlers
@@ -57,6 +78,10 @@ app.register_blueprint(bp)
 # 注册 RESTX API Blueprint (Swagger UI at /api/docs)
 from web.restx_api import restx_bp
 app.register_blueprint(restx_bp)
+
+# 注册数据导入 Blueprint
+from web.data_import_routes import register_data_import_routes
+register_data_import_routes(app)
 
 # 初始化任务管理器和调度器
 from web.tasks import init_task_manager

@@ -60,6 +60,8 @@ export const TaskCard = memo(function TaskCard({ task, onResume, onPause, onStop
         return '股票筛选';
       case 'prediction':
         return 'AI预测';
+      case 'backtest':
+        return '回测';
       default:
         return task.type;
     }

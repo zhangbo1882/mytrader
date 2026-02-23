@@ -75,6 +75,11 @@ class MlDataLoader:
             if not financial_df.empty:
                 price_df = self._merge_financial_data(price_df, financial_df)
 
+        # 3.5 加载并合并资金流向数据
+        moneyflow_df = self._load_moneyflow_features(symbol, start_date, end_date)
+        if not moneyflow_df.empty:
+            price_df = self._merge_moneyflow_data(price_df, moneyflow_df)
+
         # 4. 添加时间特征
         price_df = self._add_time_features(price_df)
 
@@ -390,3 +395,136 @@ class MlDataLoader:
                        and pd.api.types.is_numeric_dtype(df[c])]
 
         return feature_cols
+
+    def _load_moneyflow_features(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        加载资金流向数据并计算特征
+
+        资金流向数据包含特大单、大单、中单、小单的买卖情况，
+        是反映主力资金动向的重要指标。
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+
+        Returns:
+            资金流向特征DataFrame
+        """
+        # 转换日期格式
+        start_yyyymmdd = start_date.replace('-', '')
+        end_yyyymmdd = end_date.replace('-', '')
+
+        # 转换股票代码格式 600012 -> 600012.SH
+        if '.' not in symbol:
+            ts_code = f"{symbol}.SH" if symbol.startswith('6') else f"{symbol}.SZ"
+        else:
+            ts_code = symbol
+
+        try:
+            # 查询资金流向数据
+            query = """
+            SELECT
+                trade_date,
+                buy_elg_vol, buy_elg_amount,
+                sell_elg_vol, sell_elg_amount,
+                buy_lg_vol, buy_lg_amount,
+                sell_lg_vol, sell_lg_amount,
+                buy_md_vol, buy_md_amount,
+                sell_md_vol, sell_md_amount,
+                buy_sm_vol, buy_sm_amount,
+                sell_sm_vol, sell_sm_amount,
+                net_mf_vol, net_mf_amount,
+                net_lg_amount, net_elg_amount
+            FROM stock_moneyflow
+            WHERE ts_code = ?
+              AND trade_date >= ?
+              AND trade_date <= ?
+            ORDER BY trade_date
+            """
+
+            import sqlite3
+            conn = sqlite3.connect(str(self.db_path))
+            df = pd.read_sql_query(query, conn, params=(ts_code, start_yyyymmdd, end_yyyymmdd))
+            conn.close()
+
+            if df.empty:
+                logger.info(f"No moneyflow data found for {symbol}")
+                return pd.DataFrame()
+
+            # 转换日期格式
+            df['trade_date'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+            df.rename(columns={'trade_date': 'datetime'}, inplace=True)
+
+            # 计算关键特征
+            # 1. 特大单净流入比例（占总成交额的比例）
+            df['elg_net_ratio'] = df['net_elg_amount'] / (df['buy_elg_amount'] + df['sell_elg_amount'] + 1e-8)
+
+            # 2. 大单净流入比例
+            df['lg_net_ratio'] = df['net_lg_amount'] / (df['buy_lg_amount'] + df['sell_lg_amount'] + 1e-8)
+
+            # 3. 主力净流入（特大单+大单）
+            df['main_net_amount'] = df['net_elg_amount'] + df['net_lg_amount']
+
+            # 4. 主力买入占比
+            total_buy = df['buy_elg_amount'] + df['buy_lg_amount'] + df['buy_md_amount'] + df['buy_sm_amount']
+            df['main_buy_ratio'] = (df['buy_elg_amount'] + df['buy_lg_amount']) / (total_buy + 1e-8)
+
+            # 5. 特大单纯买入天数（连续买入）
+            df['elg_buy_signal'] = (df['buy_elg_amount'] > df['sell_elg_amount'] * 2).astype(float)
+
+            # 6. 资金流向强度（净流入/总成交）
+            total_amount = df['buy_elg_amount'] + df['sell_elg_amount'] + \
+                         df['buy_lg_amount'] + df['sell_lg_amount']
+            df['moneyflow_strength'] = df['main_net_amount'] / (total_amount + 1e-8)
+
+            logger.info(f"Loaded {len(df)} rows of moneyflow data for {symbol}")
+            return df
+
+        except Exception as e:
+            logger.warning(f"Failed to load moneyflow data for {symbol}: {e}")
+            return pd.DataFrame()
+
+    def _merge_moneyflow_data(self, price_df: pd.DataFrame, moneyflow_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        合并价格数据和资金流向数据
+
+        Args:
+            price_df: 日线价格数据
+            moneyflow_df: 日线资金流向数据
+
+        Returns:
+            合并后的DataFrame
+        """
+        # 确保按时间排序
+        price_df = price_df.sort_values('datetime')
+        moneyflow_df = moneyflow_df.sort_values('datetime')
+
+        # 选择要合并的资金流向特征列
+        mf_cols = [
+            'datetime',
+            'buy_elg_amount', 'sell_elg_amount', 'net_elg_amount',
+            'buy_lg_amount', 'sell_lg_amount', 'net_lg_amount',
+            'main_net_amount', 'main_buy_ratio', 'elg_net_ratio',
+            'lg_net_ratio', 'elg_buy_signal', 'moneyflow_strength'
+        ]
+
+        # 只选择存在的列
+        available_mf_cols = [col for col in mf_cols if col in moneyflow_df.columns]
+        moneyflow_to_merge = moneyflow_df[available_mf_cols].copy()
+
+        # 左连接：价格数据为主，补充资金流向数据
+        merged = price_df.merge(
+            moneyflow_to_merge,
+            on='datetime',
+            how='left'
+        )
+
+        # 前向填充缺失值（资金流向数据可能不连续）
+        mf_value_cols = [col for col in available_mf_cols if col != 'datetime']
+        for col in mf_value_cols:
+            merged[col] = merged[col].ffill().fillna(0)
+
+        logger.info(f"Merged moneyflow data: {len(price_df)} -> {len(merged)} rows")
+
+        return merged

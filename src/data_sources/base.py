@@ -1,7 +1,7 @@
 # base.py
 """
 股票数据库基类
-抽象 Tushare 和 AKShare 的共同功能
+Tushare 数据源基类
 """
 import pandas as pd
 from sqlalchemy import create_engine, text

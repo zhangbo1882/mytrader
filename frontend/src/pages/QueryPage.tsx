@@ -1,19 +1,22 @@
 import { useCallback, useEffect } from 'react';
-import { Card, Space, Button, Alert, Divider, Typography, message } from 'antd';
-import { SearchOutlined, ClearOutlined } from '@ant-design/icons';
+import { Card, Space, Button, Alert, Divider, Typography, message, Modal, Row, Col } from 'antd';
+import { SearchOutlined, ClearOutlined, StarOutlined } from '@ant-design/icons';
 import { StockSelector } from '@/components/query/StockSelector';
 import { DateRangePicker } from '@/components/query/DateRangePicker';
+import { IntervalSelector } from '@/components/query/IntervalSelector';
 import { QueryResults } from '@/components/query/QueryResults';
 import { ExportButtons } from '@/components/query/ExportButtons';
 import { useQueryStore } from '@/stores';
+import { useFavoriteStore } from '@/stores';
 import { useQuery } from '@/hooks';
 import { stockService } from '@/services';
 
 const { Title, Text } = Typography;
 
 function QueryPage() {
-  const { symbols, dateRange, priceType, loading, error, results, clearResults } = useQueryStore();
+  const { symbols, dateRange, priceType, interval, setInterval, loading, error, results, clearResults } = useQueryStore();
   const { executeQuery } = useQuery();
+  const { batchAddFavorites, isInFavorites } = useFavoriteStore();
 
   // 初始化最小日期
   useEffect(() => {
@@ -48,18 +51,56 @@ function QueryPage() {
         symbols: symbols.map((s) => s.code),
         startDate: dateRange.start,
         endDate: dateRange.end,
+        interval,
         priceType,
       });
     } catch (error) {
       console.error('Query error:', error);
     }
-  }, [symbols, dateRange, priceType, executeQuery]);
+  }, [symbols, dateRange, interval, priceType, executeQuery]);
 
   // 清空结果
   const handleClear = useCallback(() => {
     clearResults();
     message.success('已清空查询结果');
   }, [clearResults]);
+
+  // 批量收藏查询结果
+  const handleBatchAddQueryResults = useCallback(async () => {
+    if (symbols.length === 0) {
+      message.warning('没有可收藏的股票');
+      return;
+    }
+
+    const stockCodes = symbols.map((s) => s.code);
+    const newCodes = stockCodes.filter((code) => !isInFavorites(code));
+
+    if (newCodes.length === 0) {
+      message.warning('所有股票已在收藏列表中');
+      return;
+    }
+
+    Modal.confirm({
+      title: '确认批量收藏',
+      content: `确定要将查询的 ${symbols.length} 只股票添加到收藏列表吗？其中 ${newCodes.length} 只为新股票。`,
+      okText: '确定',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const response = await batchAddFavorites(newCodes);
+          if (response.failed === 0) {
+            message.success(`成功收藏 ${response.success} 只股票`);
+          } else {
+            message.warning(
+              `收藏完成：成功 ${response.success} 只，失败 ${response.failed} 只`
+            );
+          }
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '批量收藏失败');
+        }
+      },
+    });
+  }, [symbols, isInFavorites, batchAddFavorites]);
 
   const hasResults = Object.keys(results).length > 0;
   const canQuery = symbols.length > 0 && dateRange.start && dateRange.end;
@@ -79,7 +120,19 @@ function QueryPage() {
 
         {/* 日期范围和复权类型 */}
         <Card title="选择日期范围" size="small">
-          <DateRangePicker />
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Row gutter={16}>
+              <Col>
+                <Text>时间周期：</Text>
+                <IntervalSelector
+                  value={interval}
+                  onChange={setInterval}
+                  style={{ width: 120, marginLeft: 8 }}
+                />
+              </Col>
+            </Row>
+            <DateRangePicker />
+          </Space>
         </Card>
 
         {/* 操作按钮 */}
@@ -96,6 +149,13 @@ function QueryPage() {
             </Button>
             <Button icon={<ClearOutlined aria-hidden="true" />} onClick={handleClear} disabled={!hasResults}>
               清空结果
+            </Button>
+            <Button
+              icon={<StarOutlined aria-hidden="true" />}
+              onClick={handleBatchAddQueryResults}
+              disabled={symbols.length === 0}
+            >
+              批量收藏
             </Button>
             <ExportButtons disabled={!hasResults} />
           </Space>

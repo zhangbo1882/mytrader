@@ -8,6 +8,24 @@ import type {
   ScreenResult,
 } from '@/types';
 
+export interface IntervalInfo {
+  interval: string;
+  available: boolean;
+  table_name: string;
+  row_count?: number;
+  symbol_count?: number;
+  date_range?: {
+    start: string;
+    end: string;
+  };
+  sources?: string[];  // 数据源: ['sqlite'], ['duckdb'], 或 ['sqlite', 'duckdb']
+}
+
+export interface IntervalsResponse {
+  success: boolean;
+  intervals: IntervalInfo[];
+}
+
 export const stockService = {
   // Search stocks by code or name
   search: (q: string) => {
@@ -21,6 +39,7 @@ export const stockService = {
       symbols: params.symbols,
       start_date: params.startDate,
       end_date: params.endDate,
+      interval: params.interval || '1d',
       price_type: params.priceType,
     };
     return api.post<Record<string, StockData[]>>('/stock/query', backendParams);
@@ -36,12 +55,18 @@ export const stockService = {
     return api.get<{ date: string }>('/stock/min-date');
   },
 
+  // Get available intervals
+  getAvailableIntervals: () => {
+    return api.get<IntervalsResponse>('/stock/intervals');
+  },
+
   // Export data to CSV
   exportCSV: (params: QueryParams) => {
     const backendParams = {
       symbols: params.symbols,
       start_date: params.startDate,
       end_date: params.endDate,
+      interval: params.interval || '1d',
       price_type: params.priceType,
     };
     return api.post('/stock/export/csv', backendParams, { responseType: 'blob' });
@@ -53,6 +78,7 @@ export const stockService = {
       symbols: params.symbols,
       start_date: params.startDate,
       end_date: params.endDate,
+      interval: params.interval || '1d',
       price_type: params.priceType,
     };
     return api.post('/stock/export/excel', backendParams, { responseType: 'blob' });

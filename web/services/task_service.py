@@ -75,11 +75,26 @@ def stop_task(task_id):
     return {'message': '任务已停止'}, 200
 
 
-def cleanup_tasks():
-    """清理陈旧任务"""
+def cleanup_tasks(days=None):
+    """
+    清理旧的已完成/失败任务
+
+    Args:
+        days: 清理多少天之前的任务（默认30天）
+    """
+    from flask import request
+
+    # 尝试从请求中获取天数
+    if days is None:
+        data = request.get_json() or {}
+        days = data.get('days', 30)
+
+    # 转换为小时
+    max_age_hours = days * 24
+
     tm = get_task_manager()
-    tm.cleanup_stale_tasks(stale_threshold_hours=24)
-    return {'message': '任务已清理'}, 200
+    deleted_count = tm.cleanup_old_tasks(max_age_hours=max_age_hours)
+    return {'success': True, 'deleted': deleted_count}, 200
 
 
 def active_check():

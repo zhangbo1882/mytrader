@@ -7,21 +7,21 @@
 """
 import backtrader as bt
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional, List
 import logging
 
-from src.strategies.registry import (
+from src.strategies.base.registry import (
     get_strategy_class,
     validate_strategy_params,
     get_strategy_description,
     get_default_params,
     get_supported_strategies
 )
-from src.strategies.analyzers import PortfolioValueAnalyzer, TradeAnalyzer, calculate_strategy_metrics
-from src.strategies.metrics import strategy_health_check, calculate_backtest_returns
-from src.data_sources.tushare import TushareDB
-from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+from src.strategies.base.analyzers import PortfolioValueAnalyzer, TradeAnalyzer, calculate_strategy_metrics
+from src.strategies.base.metrics import strategy_health_check, calculate_backtest_returns
+from src.backtrader.slippage import set_percentage_slippage
+from src.utils.stock_lookup import search_stocks
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +48,40 @@ def _serialize_trade(trade: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         序列化后的交易记录
     """
-    serialized = trade.copy()
-    if 'buy_date' in serialized and hasattr(serialized['buy_date'], 'strftime'):
-        serialized['buy_date'] = serialized['buy_date'].strftime('%Y-%m-%d')
-    if 'sell_date' in serialized and hasattr(serialized['sell_date'], 'strftime'):
-        serialized['sell_date'] = serialized['sell_date'].strftime('%Y-%m-%d')
+    serialized = {}
+    for key, value in trade.items():
+        if isinstance(value, date):
+            serialized[key] = value.strftime('%Y-%m-%d')
+        elif hasattr(value, 'strftime'):  # Handle datetime objects
+            serialized[key] = value.strftime('%Y-%m-%d')
+        else:
+            serialized[key] = value
     return serialized
+
+
+def _serialize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    递归序列化结果字典，将所有日期对象转换为字符串
+
+    Args:
+        result: 原始结果字典
+
+    Returns:
+        序列化后的结果字典
+    """
+    def serialize_value(value):
+        if isinstance(value, dict):
+            return {k: serialize_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [serialize_value(v) for v in value]
+        elif isinstance(value, (date,)):
+            return value.strftime('%Y-%m-%d')
+        elif hasattr(value, 'strftime'):  # Handle datetime, Timestamp, etc.
+            return value.strftime('%Y-%m-%d')
+        else:
+            return value
+
+    return serialize_value(result)
 
 
 # ============================================================================
@@ -70,6 +98,7 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
                 - stock: 股票代码（必需）
                 - start_date: 开始日期（必需）
                 - end_date: 结束日期（可选）
+                - interval: 时间周期（可选，默认'1d'，支持'1d', '5m', '15m', '30m', '60m'）
                 - cash: 初始资金（可选，默认100万）
                 - commission: 手续费率（可选，默认0.02%）
                 - benchmark: 基准指数（可选）
@@ -89,10 +118,20 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
             'benchmark_comparison': {...}   # 基准对比（可选）
         }
     """
+    import os
+
+    # Check for quiet mode (used during optimization to reduce log noise)
+    quiet_mode = os.environ.get('BACKTEST_QUIET_MODE', '0') == '1'
+
+    # Set quiet mode for strategy logs
+    if quiet_mode:
+        os.environ['STRATEGY_QUIET_MODE'] = '1'
+
     # 1. 提取回测共有参数
     stock_code = params.get('stock')
     start_date = params.get('start_date')
     end_date = params.get('end_date')
+    interval = params.get('interval', '1d')  # 默认日线
     cash = params.get('cash', DEFAULT_BACKTEST_PARAMS['cash'])
     commission = params.get('commission', DEFAULT_BACKTEST_PARAMS['commission'])
     benchmark = params.get('benchmark')
@@ -123,44 +162,196 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     # 从strategy_params中移除commission，避免覆盖策略的默认值
     strategy_params_filtered = {k: v for k, v in strategy_params.items() if k != 'commission'}
     default_params = get_default_params(strategy_type)
+
     merged_strategy_params = {**default_params, **strategy_params_filtered}
 
-    # 7. 获取股票数据
-    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
-
-    # 标准化股票代码并加载数据
-    ts_code = db._standardize_code(stock_code)
+    # 7. 获取股票数据（从 DuckDB）
     end = end_date or datetime.now().strftime('%Y-%m-%d')
 
-    # 加载不复权数据（用于策略回测和显示）
-    stock_df_qfq = db.load_bars(
-        symbol=stock_code,
-        start=start_date,
-        end=end,
-        interval='1d',
-        price_type=''  # 使用不复权数据
-    )
+    # 打印实际使用的策略参数
+    logger.info(f"[Backtest] 策略参数详情:")
+    logger.info(f"  策略类型: {strategy_type}")
+    logger.info(f"  策略名称: {get_strategy_description(strategy_type)['name']}")
+    logger.info(f"  用户传入参数: {strategy_params}")
+    logger.info(f"  策略默认参数: {default_params}")
+    logger.info(f"  实际使用参数: {merged_strategy_params}")
+    logger.info(f"  回测共有参数: stock={stock_code}, start={start_date}, end={end}, cash={cash}, commission={commission}")
 
-    # 复制一份用于显示（不复权数据本身就是原始价格）
-    stock_df_original = stock_df_qfq.copy()
+    # 打印牛熊市自适应参数（适用于 price_breakout_v2 策略）
+    if strategy_type in ['price_breakout', 'price_breakout_v2']:
+        try:
+            from src.market.market_regime import get_regime_params
+            regime_params = get_regime_params()
+            logger.info(f"  牛熊市自适应参数:")
+            for regime, params in regime_params.items():
+                logger.info(f"    {regime}: buy_mult={params['buy_threshold_multiplier']}, "
+                           f"sell_mult={params['sell_threshold_multiplier']}, "
+                           f"stop_mult={params['stop_loss_multiplier']}")
+        except Exception as e:
+            logger.warning(f"  获取牛熊市参数失败: {e}")
 
+    # 预热期：为市场状态分析提前加载至少250个交易日数据
+    # 假设一年有250个交易日，为确保有足够数据，提前500天（约1.4年）
+    # 这样可以应对股票停牌、节假日等情况，确保至少有240+个交易日
+    from datetime import datetime as dt, timedelta
+    start_dt = dt.strptime(start_date, '%Y-%m-%d')
+    warmup_start_dt = start_dt - timedelta(days=500)  # 提前500天（约340个交易日）
+    warmup_start_date = warmup_start_dt.strftime('%Y-%m-%d')
+
+    logger.info(f"开始加载回测数据: stock={stock_code}, start={start_date}, end={end}, interval={interval}")
+    logger.info(f"预热期: 从 {warmup_start_date} 加载数据以满足市场状态分析需求（至少250个交易日）")
+
+    # 从 DuckDB 加载数据
+    stock_df_qfq = None
+    actual_code_used = stock_code  # 记录实际使用的代码
+    code_warning_message = None  # 存储代码提示信息
+
+    try:
+        from web.services.duckdb_query_service import get_duckdb_query_service
+
+        duckdb_service = get_duckdb_query_service()
+        duckdb_results = duckdb_service.query_bars(
+            symbols=[stock_code],
+            start_date=warmup_start_date,  # 使用预热期开始日期
+            end_date=end,
+            interval=interval,
+            price_type='qfq'  # 前复权 - 保持价格序列连续性，技术指标更准确
+        )
+
+        logger.info(f"DuckDB 查询结果 keys: {list(duckdb_results.keys())}")
+
+        if stock_code in duckdb_results and duckdb_results[stock_code]:
+            duckdb_data_list = duckdb_results[stock_code]
+            logger.info(f"DuckDB 返回 {len(duckdb_data_list)} 条数据 for {stock_code}")
+
+            if duckdb_data_list:
+                # 检查实际返回的股票代码
+                first_record = duckdb_data_list[0]
+                actual_code = first_record.get('ts_code', first_record.get('stock_code', stock_code))
+                actual_code_used = actual_code
+                exchange = first_record.get('exchange', '')
+
+                # 如果用户输入纯数字，但实际使用的是带后缀的代码，给出提示
+                if stock_code.isdigit() and actual_code != stock_code:
+                    logger.warning(f"用户输入: {stock_code}, 实际使用: {actual_code}")
+                    # 搜索相似代码给出提示
+                    similar_stocks = search_stocks(stock_code, limit=5, asset_type='stock')
+                    if similar_stocks:
+                        suggestions = []
+                        for stock in similar_stocks:
+                            code = stock['code']
+                            name = stock['name']
+                            if code == actual_code:
+                                suggestions.append(f"✓ {code} ({name})")
+                            else:
+                                suggestions.append(f"  {code} ({name})")
+                        # 将提示信息转换为字符串
+                        code_warning_message = (
+                            f"代码提示: 输入 '{stock_code}'，实际使用 '{actual_code}'\\n"
+                            f"可选代码:\\n" + "\\n".join(suggestions)
+                        )
+                        logger.warning(f"股票代码提示: {code_warning_message}")
+
+                # DuckDB 有数据
+                stock_df_qfq = pd.DataFrame(duckdb_data_list)
+                # 确保必需列存在
+                required_cols = ['datetime', 'open', 'high', 'low', 'close', 'volume']
+                if all(col in stock_df_qfq.columns for col in required_cols):
+                    stock_df_qfq['datetime'] = pd.to_datetime(stock_df_qfq['datetime'])
+                    logger.info(f"从 DuckDB 加载了 {len(stock_df_qfq)} 条 {interval} 数据用于 {stock_code} (实际代码: {actual_code_used})")
+                else:
+                    logger.warning(f"DuckDB 数据缺少必需列: {stock_df_qfq.columns.tolist()}")
+                    stock_df_qfq = None
+            else:
+                logger.warning(f"DuckDB 返回空数据列表 for {stock_code}")
+                stock_df_qfq = None
+        else:
+            logger.warning(f"DuckDB 查询结果中不包含 {stock_code}，keys: {list(duckdb_results.keys())}")
+    except Exception as e:
+        logger.error(f"DuckDB 查询失败: {e}")
+        stock_df_qfq = None
+
+    # 如果没有数据，尝试查找相似的股票代码
     if stock_df_qfq is None or stock_df_qfq.empty:
-        raise ValueError(f"数据库中没有股票 {stock_code} 在指定时间范围内的数据")
+        # 搜索相似的股票代码
+        similar_stocks = search_stocks(stock_code, limit=5, asset_type='stock')
+
+        error_msg = f"数据库中没有股票 {stock_code} 在指定时间范围内的数据"
+        if similar_stocks:
+            # 构建提示信息
+            suggestions = []
+            for stock in similar_stocks:
+                code = stock['code']
+                name = stock['name']
+                if code == stock_code:
+                    # 完全匹配的代码但没有数据
+                    suggestions.append(f"- {code} ({name}): 代码正确，但可能在指定时间范围内无数据")
+                else:
+                    # 相似代码
+                    suggestions.append(f"- {code} ({name}): 相似代码，可能您想查询这个？")
+
+            error_msg += "\n\n您是否在找以下股票：\n" + "\n".join(suggestions)
+            error_msg += f"\n\n提示："
+            error_msg += f"\n- A股代码通常是6位数字，如 600941（中国移动）"
+            error_msg += f"\n- 港股代码通常是5位数字，如 00941.HK"
+            error_msg += f"\n- 请检查输入的股票代码是否正确"
+
+        raise ValueError(error_msg)
 
     # 8. 准备数据：将 datetime 设置为索引（backtrader 要求）
     stock_df = stock_df_qfq.set_index('datetime')
     stock_df = stock_df.sort_index()
 
-    # 创建不复权价格的日期映射，供分析器使用
-    original_price_map = {}
-    for idx, row in stock_df.iterrows():
-        date_str = idx.strftime('%Y-%m-%d')
-        original_price_map[date_str] = {
-            'open': row['open'],
-            'high': row['high'],
-            'low': row['low'],
-            'close': row['close']
-        }
+    # 加载不复权数据用于交易明细显示
+    stock_df_bfq = None
+    try:
+        # 使用actual_code_used查询，确保能找到数据
+        duckdb_results_bfq = duckdb_service.query_bars(
+            symbols=[actual_code_used],  # 使用实际代码（带交易所后缀）
+            start_date=start_date,  # 不复权数据只需要回测期间
+            end_date=end,
+            interval=interval,
+            price_type=''  # 空字符串表示不复权
+        )
+        # 检查返回的key，可能是actual_code_used或stock_code
+        bfq_data = None
+        if actual_code_used in duckdb_results_bfq and duckdb_results_bfq[actual_code_used]:
+            bfq_data = duckdb_results_bfq[actual_code_used]
+        elif stock_code in duckdb_results_bfq and duckdb_results_bfq[stock_code]:
+            bfq_data = duckdb_results_bfq[stock_code]
+
+        if bfq_data:
+            stock_df_bfq = pd.DataFrame(bfq_data)
+            stock_df_bfq['datetime'] = pd.to_datetime(stock_df_bfq['datetime'])
+            stock_df_bfq = stock_df_bfq.set_index('datetime').sort_index()
+            logger.info(f"从 DuckDB 加载了 {len(stock_df_bfq)} 条不复权数据用于 {actual_code_used}")
+        else:
+            logger.warning(f"不复权数据查询返回为空: keys={list(duckdb_results_bfq.keys())}")
+    except Exception as e:
+        logger.warning(f"加载不复权数据失败: {e}")
+
+    # 创建不复权价格的日期映射，供分析器使用（交易明细显示实际价格）
+    bfq_price_map = {}
+    if stock_df_bfq is not None:
+        for idx, row in stock_df_bfq.iterrows():
+            date_str = idx.strftime('%Y-%m-%d')
+            bfq_price_map[date_str] = {
+                'open': row['open'],
+                'high': row['high'],
+                'low': row['low'],
+                'close': row['close']
+            }
+    else:
+        # 如果无法加载不复权数据，使用前复权数据作为后备
+        for idx, row in stock_df.iterrows():
+            date_str = idx.strftime('%Y-%m-%d')
+            bfq_price_map[date_str] = {
+                'open': row['open'],
+                'high': row['high'],
+                'low': row['low'],
+                'close': row['close']
+            }
+        logger.warning("无法加载不复权数据，交易明细将显示前复权价格")
 
     # 9. 创建 Cerebro 引擎
     cerebro = bt.Cerebro()
@@ -168,6 +359,7 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     # 10. 添加数据
     data = bt.feeds.PandasData(
         dataname=stock_df,
+        name=stock_code,  # 设置数据源名称，供策略日志显示股票代码
         datetime=None,
         open='open',
         high='high',
@@ -178,8 +370,13 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     )
     cerebro.adddata(data)
 
-    # 10. 添加策略
-    cerebro.addstrategy(strategy_class, **merged_strategy_params)
+    # 10. 添加策略（传递回测开始日期参数）
+    # 策略可以使用这个参数来跳过预热期的交易
+    merged_strategy_params_with_warmup = {
+        **merged_strategy_params,
+        'backtest_start_date': start_date  # 传递回测实际开始日期
+    }
+    cerebro.addstrategy(strategy_class, **merged_strategy_params_with_warmup)
 
     # 11. 设置初始资金
     cerebro.broker.setcash(cash)
@@ -187,15 +384,27 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     # 12. 设置手续费
     cerebro.broker.setcommission(commission=commission)
 
+    # 12.5 设置滑点（针对 price_breakout_v2 策略）
+    if strategy_type == 'price_breakout_v2':
+        # Note: backtrader's built-in slippage uses same percentage for both buy and sell
+        # We use the average of buy and sell slippage parameters
+        slippage_buy = merged_strategy_params.get('slippage_buy', 0.002)
+        slippage_sell = merged_strategy_params.get('slippage_sell', 0.002)
+        slippage_avg = (slippage_buy + slippage_sell) / 2
+        set_percentage_slippage(cerebro, slip_perc=slippage_avg)
+        logger.info(f"[Backtest] Slippage enabled for {strategy_type}: avg={slippage_avg:.4f} (buy={slippage_buy}, sell={slippage_sell})")
+
     # 13. 添加分析器
     cerebro.addanalyzer(PortfolioValueAnalyzer, _name='portfolio_value')
-    cerebro.addanalyzer(TradeAnalyzer, _name='trade_analyzer', original_price_map=original_price_map)
+    cerebro.addanalyzer(TradeAnalyzer, _name='trade_analyzer', price_map=bfq_price_map)  # 使用不复权价格用于交易明细
 
     # 14. 运行回测
     logger.info(f"[Backtest] Running cerebro.run() for {stock_code}...")
+    logger.info(f"[Backtest] 执行策略: {strategy_type}, 股票: {stock_code}, 日期范围: {start_date} ~ {end}")
     strats = cerebro.run()
     strat = strats[0]
     logger.info(f"[Backtest] Cerebro.run() completed")
+    logger.info(f"[Backtest] 回测结果: 初始资金={cash:.2f}, 最终价值={cerebro.broker.getvalue():.2f}, 收益率={((cerebro.broker.getvalue() - cash) / cash * 100):.2f}%")
 
     # 15. 获取分析器结果
     portfolio_analysis = strat.analyzers.portfolio_value.get_analysis()
@@ -218,13 +427,27 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     benchmark_symbol = benchmark if benchmark else stock_code  # 默认使用当前股票
 
     try:
-        # 使用 load_bars 获取基准数据
-        benchmark_df = db.load_bars(
-            symbol=benchmark_symbol,
-            start=start_date,
-            end=end,
-            interval='1d'
-        )
+        # 从 DuckDB 获取基准数据
+        benchmark_df = None
+
+        try:
+            from web.services.duckdb_query_service import get_duckdb_query_service
+            duckdb_service = get_duckdb_query_service()
+            duckdb_results = duckdb_service.query_bars(
+                symbols=[benchmark_symbol],
+                start_date=start_date,
+                end_date=end,
+                interval='1d',
+                price_type='qfq'  # 前复权 - 与策略回测保持一致
+            )
+
+            if benchmark_symbol in duckdb_results and duckdb_results[benchmark_symbol]:
+                benchmark_df = pd.DataFrame(duckdb_results[benchmark_symbol])
+                benchmark_df['datetime'] = pd.to_datetime(benchmark_df['datetime'])
+                logger.info(f"从 DuckDB 加载了基准数据 {benchmark_symbol}")
+        except Exception as duckdb_err:
+            logger.warning(f"DuckDB 加载基准数据失败: {duckdb_err}")
+
         if benchmark_df is not None and not benchmark_df.empty:
             # 计算买入持有策略的收益
             # 假设在开始日期用全部资金买入，一直持有到结束
@@ -269,6 +492,7 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     result = {
         'basic_info': {
             'stock': stock_code,
+            'actual_code': actual_code_used,  # 实际查询的代码（可能是 00941.HK）
             'start_date': start_date,
             'end_date': end_date_str,
             'initial_cash': cash,
@@ -292,8 +516,16 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
         },
         'trades': serialized_trades,
         'health_metrics': health_metrics,
-        'benchmark_comparison': benchmark_comparison
+        'benchmark_comparison': benchmark_comparison,
+        'code_warning': code_warning_message  # 股票代码提示信息（如果有）
     }
+
+    # Add market state distribution if available (for price_breakout strategy)
+    if hasattr(strat, 'market_state_distribution'):
+        result['market_state_distribution'] = strat.market_state_distribution
+
+    # Serialize the entire result to ensure all dates are strings
+    result = _serialize_result(result)
 
     return result
 

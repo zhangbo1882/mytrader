@@ -21,6 +21,7 @@ export interface BacktestRequest {
   stock: string;
   start_date: string;
   end_date?: string;
+  interval?: string;  // 时间周期：1d, 5m, 15m, 30m, 60m
   cash?: number;
   commission?: number;
   benchmark?: string;

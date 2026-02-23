@@ -2,7 +2,7 @@ import { TaskStatus } from './common.types';
 
 export interface Task {
   id: string;
-  type: 'update' | 'screen' | 'prediction';
+  type: 'update' | 'screen' | 'prediction' | 'backtest';
   status: TaskStatus;
   total: number;
   processed: number;
@@ -20,7 +20,7 @@ export interface TaskListResponse {
 }
 
 export interface CreateTaskParams {
-  type: 'update' | 'screen' | 'prediction';
+  type: 'update' | 'screen' | 'prediction' | 'backtest';
   params: Record<string, any>;
 }
 

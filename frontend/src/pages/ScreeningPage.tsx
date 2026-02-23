@@ -198,9 +198,10 @@ function ScreeningPage() {
   const handlePresetSubmit = async (strategy: PresetStrategy, config?: ScreeningConfig) => {
     // 预设策略作为模板：将配置加载到自定义构建器
     if (config) {
-      setPresetTemplateConfig(config);
+      console.log('handlePresetSubmit: Setting preset config', config);
       currentPresetStrategy = strategy;
       currentConfig = config;
+
       // 设置提示消息
       const strategyNames: Record<PresetStrategy, string> = {
         liquidity: '流动性策略',
@@ -215,11 +216,17 @@ function ScreeningPage() {
         exclude_financials: '排除金融策略'
       };
       const strategyName = strategyNames[strategy] || strategy;
-      setPresetLoadedMessage(`已加载 "${strategyName}" 的筛选条件作为模板，您可以在下方修改参数`);
-      // 切换到自定义筛选标签页
-      setActiveTab('custom');
-      // 清空之前的筛选结果
-      setResult(null);
+      const message = `已加载 "${strategyName}" 的筛选条件作为模板，您可以在下方修改参数`;
+
+      // Set all states
+      setPresetTemplateConfig(config);
+      setPresetLoadedMessage(message);
+
+      // Delay tab switch to ensure state is updated
+      setTimeout(() => {
+        setActiveTab('custom');
+        setResult(null);
+      }, 0);
     } else {
       // 如果没有配置，执行原来的直接筛选逻辑
       setLoading(true);
@@ -317,10 +324,16 @@ function ScreeningPage() {
               key: 'custom',
               label: '自定义筛选',
               children: (
-                <CustomCriteriaBuilder
-                  onSubmit={handleCustomSubmit}
-                  loading={loading}
-                />
+                <>
+                  {console.log('Rendering CustomCriteriaBuilder with presetTemplateConfig:', presetTemplateConfig, 'presetLoadedMessage:', presetLoadedMessage)}
+                  <CustomCriteriaBuilder
+                    key={presetTemplateConfig ? `preset-${Date.now()}` : 'default'}
+                    onSubmit={handleCustomSubmit}
+                    loading={loading}
+                    initialConfig={presetTemplateConfig}
+                    presetLoadedMessage={presetLoadedMessage}
+                  />
+                </>
               ),
             },
             {

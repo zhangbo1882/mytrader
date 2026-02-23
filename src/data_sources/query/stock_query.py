@@ -431,7 +431,7 @@ class StockQuery(BaseQuery):
                       volume_min: Optional[float] = None,
                       volume_max: Optional[float] = None) -> pd.DataFrame:
         """
-        股票筛选器 - 根据多维度条件筛选股票
+        股票筛选器 - 根据多维度条件筛选A股股票
 
         Args:
             days: 筛选天数（过去N个交易日）
@@ -443,26 +443,29 @@ class StockQuery(BaseQuery):
         Returns:
             筛选结果DataFrame
         """
-        # 获取实际的交易日日期（通过查询bars表获取交易日期）
+        from src.db.duckdb_manager import get_duckdb_manager
+
+        # 获取实际的交易日日期（通过查询DuckDB bars_a_1d表获取交易日期）
         end_date = datetime.now().strftime('%Y-%m-%d')
 
-        # 查询过去N个交易日的实际日期范围
-        trading_dates_sql = """
-        SELECT DISTINCT datetime
-        FROM bars
-        WHERE interval = '1d'
-          AND datetime <= :end_date
-        ORDER BY datetime DESC
-        LIMIT :days_limit
-        """
+        # A股专用表名
+        a_share_table = 'bars_a_1d'
 
-        with self.engine.connect() as conn:
+        # 使用DuckDB查询bars数据
+        duckdb_manager = get_duckdb_manager()
+        with duckdb_manager.get_connection() as duckdb_conn:
             # 先查询交易日历
-            trading_dates_df = pd.read_sql_query(
-                trading_dates_sql,
-                conn,
-                params={'end_date': end_date, 'days_limit': days}
-            )
+            trading_dates_query = f"""
+            SELECT DISTINCT datetime
+            FROM {a_share_table}
+            WHERE datetime <= ?::DATE
+            ORDER BY datetime DESC
+            LIMIT ?
+            """
+            trading_dates_df = duckdb_conn.execute(
+                trading_dates_query,
+                [end_date, days]
+            ).fetchdf()
 
             if trading_dates_df.empty:
                 # 如果没有数据，返回空DataFrame
@@ -473,25 +476,56 @@ class StockQuery(BaseQuery):
             end_date = trading_dates_df['datetime'].max()
 
             # 构建HAVING子句 - 只有设置了换手率范围才添加
-            having_clauses = [f"COUNT(*) >= :required_trading_days"]
+            having_clauses = ["COUNT(*) >= ?"]
 
-            # 换手率使用MIN()判断，确保每天换手率都满足条件
+            # 换手率使用turnover_rate_f列（DuckDB中的列名）
             if turnover_min is not None:
-                having_clauses.append(f"MIN(b.turnover) >= :turnover_min")
+                having_clauses.append("MIN(b.turnover_rate_f) >= ?")
             if turnover_max is not None:
-                having_clauses.append(f"MIN(b.turnover) <= :turnover_max")
+                having_clauses.append("MIN(b.turnover_rate_f) <= ?")
 
             having_clause = " AND ".join(having_clauses)
 
-            # 构建SQL查询
+            # 构建查询参数列表
+            params = [int(days * 0.8)]  # required_trading_days - 允许20%停牌
+            if turnover_min is not None:
+                params.append(turnover_min)
+            if turnover_max is not None:
+                params.append(turnover_max)
+
+            # 构建WHERE条件参数
+            where_params = []
+            where_conditions = []
+
+            if pct_chg_min is not None:
+                where_conditions.append("b.pct_chg >= ?")
+                where_params.append(pct_chg_min)
+            if pct_chg_max is not None:
+                where_conditions.append("b.pct_chg <= ?")
+                where_params.append(pct_chg_max)
+            if price_min is not None:
+                where_conditions.append("b.close >= ?")
+                where_params.append(price_min)
+            if price_max is not None:
+                where_conditions.append("b.close <= ?")
+                where_params.append(price_max)
+            if volume_min is not None:
+                where_conditions.append("b.volume >= ?")
+                where_params.append(volume_min)
+            if volume_max is not None:
+                where_conditions.append("b.volume <= ?")
+                where_params.append(volume_max)
+
+            where_clause = " AND " + " AND ".join(where_conditions) if where_conditions else ""
+
+            # 构建SQL查询 - 使用A股专用表
             query_sql = f"""
                 SELECT
-                    b.symbol,
-                    sn.name,
+                    b.stock_code as symbol,
                     COUNT(*) as trading_days,
-                    AVG(b.turnover) as avg_turnover,
-                    MIN(b.turnover) as min_turnover,
-                    MAX(b.turnover) as max_turnover,
+                    AVG(b.turnover_rate_f) as avg_turnover,
+                    MIN(b.turnover_rate_f) as min_turnover,
+                    MAX(b.turnover_rate_f) as max_turnover,
                     AVG(b.pct_chg) as avg_pct_chg,
                     MIN(b.pct_chg) as min_pct_chg,
                     MAX(b.pct_chg) as max_pct_chg,
@@ -500,22 +534,14 @@ class StockQuery(BaseQuery):
                     MAX(b.high) as max_high,
                     AVG(b.volume) as avg_volume,
                     MAX(b.datetime) as latest_date,
-                    (SELECT close FROM bars b2
-                     WHERE b2.symbol = b.symbol
-                     AND b2.interval = '1d'
+                    (SELECT close FROM {a_share_table} b2
+                     WHERE b2.stock_code = b.stock_code AND b2.exchange = b.exchange
                      ORDER BY b2.datetime DESC LIMIT 1) as latest_close
-                FROM bars b
-                JOIN stock_names sn ON b.symbol = sn.code
-                WHERE b.interval = '1d'
-                  AND b.datetime >= :start_date
-                  AND b.datetime <= :end_date
-                  AND (:pct_chg_min IS NULL OR b.pct_chg >= :pct_chg_min)
-                  AND (:pct_chg_max IS NULL OR b.pct_chg <= :pct_chg_max)
-                  AND (:price_min IS NULL OR b.close >= :price_min)
-                  AND (:price_max IS NULL OR b.close <= :price_max)
-                  AND (:volume_min IS NULL OR b.volume >= :volume_min)
-                  AND (:volume_max IS NULL OR b.volume <= :volume_max)
-                GROUP BY b.symbol, sn.name
+                FROM {a_share_table} b
+                WHERE b.datetime >= ?::DATE
+                  AND b.datetime <= ?::DATE
+                  {where_clause}
+                GROUP BY b.stock_code, b.exchange
                 HAVING
                     {having_clause}
                 ORDER BY avg_turnover DESC
@@ -523,73 +549,32 @@ class StockQuery(BaseQuery):
             """
 
             # 执行查询
-            df = pd.read_sql_query(
-                query_sql,
-                conn,
-                params={
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'turnover_min': turnover_min,
-                    'turnover_max': turnover_max,
-                    'pct_chg_min': pct_chg_min,
-                    'pct_chg_max': pct_chg_max,
-                    'price_min': price_min,
-                    'price_max': price_max,
-                    'volume_min': volume_min,
-                    'volume_max': volume_max,
-                    'required_trading_days': int(days * 0.8)  # 允许20%停牌
-                }
-            )
+            query_params = [start_date, end_date] + where_params + params
+            df = duckdb_conn.execute(query_sql, query_params).fetchdf()
 
-        # 添加板块信息
+        # 添加股票名称（从SQLite的stock_names表）
         if not df.empty:
+            with self.engine.connect() as conn:
+                # 获取所有股票代码的名称
+                symbols = df['symbol'].tolist()
+                placeholders = ','.join([f"'{s}'" for s in symbols])
+                names_query = f"SELECT code, name FROM stock_names WHERE code IN ({placeholders})"
+                names_df = pd.read_sql_query(names_query, conn)
+
+                # 合并名称
+                df = df.merge(names_df, left_on='symbol', right_on='code', how='left')
+                if 'name' not in df.columns:
+                    df['name'] = None
+
+            # 添加板块信息
             df['board'] = df['symbol'].apply(detect_board)
             # 调整列顺序，将板块放在代码和名称之后
             cols = list(df.columns)
-            cols.remove('board')
-            board_idx = cols.index('name') + 1
-            cols.insert(board_idx, 'board')
-            df = df[cols]
+            if 'board' in cols:
+                cols.remove('board')
+                if 'name' in cols:
+                    board_idx = cols.index('name') + 1
+                    cols.insert(board_idx, 'board')
+                df = df[cols]
 
         return df
-
-    def liquidity_screen(self, lookback_days: int = 20,
-                        min_avg_amount_20d: Optional[float] = None,
-                        min_avg_turnover_20d: Optional[float] = None,
-                        small_cap_threshold: Optional[float] = None,
-                        high_turnover_threshold: Optional[float] = None,
-                        max_amihud_illiquidity: Optional[float] = None,
-                        limit: Optional[int] = None) -> pd.DataFrame:
-        """
-        Liquidity screening - Three-tier liquidity filter
-
-        Args:
-            lookback_days: Lookback period for metrics calculation (default: 20)
-            min_avg_amount_20d: Minimum average daily amount in 万元 (default: 3000)
-            min_avg_turnover_20d: Minimum average turnover rate % (default: 0.3)
-            small_cap_threshold: Small cap threshold in 亿元 (default: 50)
-            high_turnover_threshold: High turnover threshold % (default: 8)
-            max_amihud_illiquidity: Maximum Amihud illiquidity (default: 0.8)
-            limit: Maximum number of results to return
-
-        Returns:
-            DataFrame with stocks that passed the liquidity filter
-        """
-        from .liquidity_query import LiquidityQuery
-
-        # Get database path from engine
-        db_path = self.engine.url.database
-
-        # Create LiquidityQuery instance
-        liquidity_query = LiquidityQuery(db_path)
-
-        # Perform liquidity screening
-        return liquidity_query.screen_by_liquidity(
-            lookback_days=lookback_days,
-            min_avg_amount_20d=min_avg_amount_20d,
-            min_avg_turnover_20d=min_avg_turnover_20d,
-            small_cap_threshold=small_cap_threshold,
-            high_turnover_threshold=high_turnover_threshold,
-            max_amihud_illiquidity=max_amihud_illiquidity,
-            limit=limit
-        )

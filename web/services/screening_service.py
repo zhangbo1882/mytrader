@@ -128,13 +128,30 @@ def apply_preset_strategy(strategy_name):
         # 转换结果
         results = []
         for _, row in df.iterrows():
+            # 使用ScreeningEngine已经计算好的total_mv_yi列
+            # 如果没有total_mv_yi列，则手动计算（兼容旧逻辑）
+            if 'total_mv_yi' in row and pd.notna(row.get('total_mv_yi')):
+                total_mv_yi = round(float(row['total_mv_yi']), 2)
+            else:
+                # 回退逻辑：手动计算
+                total_mv = row.get('total_mv')
+                total_mv_yi = None
+                if pd.notna(total_mv) and total_mv > 0:
+                    # A股：万元 -> 亿元（除以 10000）
+                    # 港股：元 -> 亿元（除以 100000000）
+                    # 检查data_source字段来判断
+                    if row.get('data_source') == '港股':
+                        total_mv_yi = round(float(total_mv) / 100000000, 2)
+                    else:
+                        total_mv_yi = round(float(total_mv) / 10000, 2)
+
             results.append({
                 'code': row.get('symbol', ''),
                 'name': row.get('stock_name', ''),
                 'latest_close': round(float(row.get('close', 0)), 2) if pd.notna(row.get('close')) else None,
                 'pe_ttm': round(float(row.get('pe_ttm', 0)), 2) if pd.notna(row.get('pe_ttm')) else None,
                 'pb': round(float(row.get('pb', 0)), 2) if pd.notna(row.get('pb')) else None,
-                'total_mv_yi': round(float(row.get('total_mv', 0)) / 10000, 2) if pd.notna(row.get('total_mv')) else None,
+                'total_mv_yi': total_mv_yi,
             })
 
         logger.info(f"[PresetStrategy] Returning {len(results)} results, strategy: {strategy_name}")
@@ -222,13 +239,30 @@ def apply_custom_strategy():
         # 转换结果
         results = []
         for _, row in df.iterrows():
+            # 使用ScreeningEngine已经计算好的total_mv_yi列
+            # 如果没有total_mv_yi列，则手动计算（兼容旧逻辑）
+            if 'total_mv_yi' in row and pd.notna(row.get('total_mv_yi')):
+                total_mv_yi = round(float(row['total_mv_yi']), 2)
+            else:
+                # 回退逻辑：手动计算
+                total_mv = row.get('total_mv')
+                total_mv_yi = None
+                if pd.notna(total_mv) and total_mv > 0:
+                    # A股：万元 -> 亿元（除以 10000）
+                    # 港股：元 -> 亿元（除以 100000000）
+                    # 检查data_source字段来判断
+                    if row.get('data_source') == '港股':
+                        total_mv_yi = round(float(total_mv) / 100000000, 2)
+                    else:
+                        total_mv_yi = round(float(total_mv) / 10000, 2)
+
             results.append({
                 'code': row.get('symbol', ''),
                 'name': row.get('stock_name', ''),
                 'latest_close': round(float(row.get('close', 0)), 2) if pd.notna(row.get('close')) else None,
                 'pe_ttm': round(float(row.get('pe_ttm', 0)), 2) if pd.notna(row.get('pe_ttm')) else None,
                 'pb': round(float(row.get('pb', 0)), 2) if pd.notna(row.get('pb')) else None,
-                'total_mv_yi': round(float(row.get('total_mv', 0)) / 10000, 2) if pd.notna(row.get('total_mv')) else None,
+                'total_mv_yi': total_mv_yi,
             })
 
         logger.info(f"[CustomStrategy] Returning {len(results)} results, total matched: {total_count}")
@@ -353,10 +387,15 @@ def _convert_config_units(config: dict) -> dict:
     """
     转换配置中的字段名和单位
 
-    将前端使用的字段名（单位：亿）转换为数据库字段名（单位：元）
-    - total_mv_yi -> total_mv (乘以 10000)
-    - circulation_mv_yi -> circ_mv (乘以 10000)
+    DuckDB 中的单位说明：
+    - total_mv (A股): 万元
+    - total_mv (港股): 元
 
+    前端使用的字段名（单位：亿）：
+    - total_mv_yi (已在 ScreeningEngine 中计算，直接使用，不转换)
+    - circulation_mv_yi (暂不支持)
+
+    注意：total_mv_yi 字段现在直接由 ScreeningEngine 计算，不需要转换
     递归处理嵌套条件（AND/OR/NOT）
     """
     # 递归处理嵌套条件
@@ -365,26 +404,7 @@ def _convert_config_units(config: dict) -> dict:
             # 递归处理子条件
             config['criteria'][i] = _convert_config_units(criteria)
 
-    # 转换当前层的字段名和单位（如果是条件节点）
-    if 'column' in config:
-        column = config['column']
-        if column == 'total_mv_yi':
-            config['column'] = 'total_mv'
-            # 转换阈值（亿 -> 元，乘以 10000）
-            if 'min_val' in config and config['min_val'] is not None:
-                config['min_val'] = config['min_val'] * 10000
-            if 'max_val' in config and config['max_val'] is not None:
-                config['max_val'] = config['max_val'] * 10000
-            if 'threshold' in config and config['threshold'] is not None:
-                config['threshold'] = config['threshold'] * 10000
-        elif column == 'circulation_mv_yi':
-            config['column'] = 'circ_mv'
-            # 转换阈值（亿 -> 元，乘以 10000）
-            if 'min_val' in config and config['min_val'] is not None:
-                config['min_val'] = config['min_val'] * 10000
-            if 'max_val' in config and config['max_val'] is not None:
-                config['max_val'] = config['max_val'] * 10000
-            if 'threshold' in config and config['threshold'] is not None:
-                config['threshold'] = config['threshold'] * 10000
+    # 不再转换 total_mv_yi，因为 ScreeningEngine 已经处理了单位转换
+    # 保留这个函数的结构以备将来使用
 
     return config

@@ -25,6 +25,18 @@ export function getDateRanges(): Record<string, { start: string; end: string }> 
       start: now.subtract(1, 'year').format('YYYY-MM-DD'),
       end: today,
     },
+    '2Y': {
+      start: now.subtract(2, 'year').format('YYYY-MM-DD'),
+      end: today,
+    },
+    '5Y': {
+      start: now.subtract(5, 'year').format('YYYY-MM-DD'),
+      end: today,
+    },
+    '10Y': {
+      start: now.subtract(10, 'year').format('YYYY-MM-DD'),
+      end: today,
+    },
     YTD: {
       start: now.startOf('year').format('YYYY-MM-DD'),
       end: today,

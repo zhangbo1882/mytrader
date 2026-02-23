@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card, Table, Tag, Space, Button, Typography, Progress, Popconfirm, message } from 'antd';
 import {
   DeleteOutlined,
@@ -22,6 +23,8 @@ interface ModelListProps {
 }
 
 export function ModelList({ models, loading, onDelete, onView, onPredict }: ModelListProps) {
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+
   const handleDelete = async (id: string) => {
     if (onDelete) {
       onDelete(id);
@@ -42,12 +45,12 @@ export function ModelList({ models, loading, onDelete, onView, onPredict }: Mode
   const getTargetLabel = (target: PredictionTarget) => {
     const targetMap: Record<PredictionTarget, string> = {
       '1d_return': '1日收益率',
-      '3d_return': '3日收益率',
-      '7d_return': '7日收益率',
-      trend: '价格趋势',
+      '5d_return': '5日收益率',
+      'trend': '1日趋势',
+      'trend_5d': '5日趋势',
       volatility: '波动率',
     };
-    return targetMap[target];
+    return targetMap[target] ?? target;
   };
 
   const getStatusTag = (status: string) => {
@@ -101,22 +104,55 @@ export function ModelList({ models, loading, onDelete, onView, onPredict }: Mode
       ),
     },
     {
-      title: '准确率',
-      dataIndex: 'accuracy',
-      key: 'accuracy',
-      width: 120,
-      render: (accuracy) =>
-        accuracy != null ? (
-          <div>
-            <Progress
-              percent={Math.round(accuracy * 100)}
-              size="small"
-              format={(percent) => `${percent}%`}
-            />
-          </div>
-        ) : (
-          <Text type="secondary">-</Text>
-        ),
+      title: '准确率/MAE',
+      key: 'metrics',
+      width: 160,
+      render: (_, record) => {
+        // Walk-forward模型显示CV指标
+        if (record.walkForward && record.cvScore != null) {
+          const isClassification = record.cvMetric === 'accuracy';
+          const scoreDisplay = isClassification
+            ? `${(record.cvScore * 100).toFixed(1)}%`
+            : record.cvScore.toFixed(4);
+          const stdDisplay = record.cvStd != null
+            ? (isClassification
+              ? `±${(record.cvStd * 100).toFixed(1)}%`
+              : `±${record.cvStd.toFixed(4)}`)
+            : '';
+          return (
+            <div>
+              <Tag color="cyan" style={{ fontSize: 10 }}>WF {record.nSplits}折</Tag>
+              <div>
+                <Text strong>{scoreDisplay}</Text>
+                {stdDisplay && <Text type="secondary" style={{ fontSize: 11 }}> {stdDisplay}</Text>}
+              </div>
+              <Text type="secondary" style={{ fontSize: 11 }}>CV {record.cvMetric}</Text>
+            </div>
+          );
+        }
+        // 优先显示准确率（分类指标）
+        if (record.accuracy != null) {
+          return (
+            <div>
+              <Progress
+                percent={Math.round(record.accuracy * 100)}
+                size="small"
+                format={(percent) => `${percent}%`}
+              />
+            </div>
+          );
+        }
+        // 否则显示MAE（回归指标）
+        else if (record.mae != null) {
+          return (
+            <div>
+              <Text strong>{record.mae.toFixed(4)}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}> (MAE)</Text>
+            </div>
+          );
+        }
+        return <Text type="secondary">-</Text>;
+      },
     },
     {
       title: '状态',
@@ -181,11 +217,17 @@ export function ModelList({ models, loading, onDelete, onView, onPredict }: Mode
         dataSource={models}
         rowKey="id"
         loading={loading}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1250 }}
         pagination={{
-          pageSize: 10,
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          pageSizeOptions: ['10', '20', '50', '100'],
           showSizeChanger: true,
           showTotal: (total) => `共 ${total} 个模型`,
+          hideOnSinglePage: false,
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize });
+          },
         }}
       />
     </Card>

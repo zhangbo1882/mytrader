@@ -42,4 +42,5 @@ Do not create extras document except the README.
 When you want to do any operations, use the existing API as much as possible via http://127.0.0.1:5001/api
 Refer to web/restx_api.py and web/restx_namespaces.py. 
 
-
+## database
+A股日行情数据都在bars_a_1d,港股在bars_1d.

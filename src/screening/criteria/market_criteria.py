@@ -3,7 +3,7 @@
 
 提供基于市场（交易所）的筛选：
 - MarketFilter: 市场白名单/黑名单
-支持：主板、创业板、科创板、北交所
+支持：主板、创业板、科创板、北交所、港股
 """
 import logging
 import pandas as pd
@@ -21,15 +21,19 @@ class MarketFilter(BaseCriteria):
     - 创业板：创业板
     - 科创板：科创板
     - 北交所：北京证券交易所
+    - 港股：香港交易所
     """
 
     # 所有支持的市场类型
-    ALL_MARKETS = ['主板', '创业板', '科创板', '北交所']
+    ALL_MARKETS = ['主板', '创业板', '科创板', '北交所', '港股']
+
+    # A股市场类型
+    A_STOCK_MARKETS = ['主板', '创业板', '科创板', '北交所']
 
     def __init__(self, markets: List[str], mode: str = 'whitelist'):
         """
         Args:
-            markets: 市场列表（可选值：主板、创业板、科创板、北交所）
+            markets: 市场列表（可选值：主板、创业板、科创板、北交所、港股）
             mode: 'whitelist' (白名单) 或 'blacklist' (黑名单)
         """
         # 验证市场类型
@@ -51,18 +55,67 @@ class MarketFilter(BaseCriteria):
             logger.warning(f"[MarketFilter] Input DataFrame is empty")
             return df
 
-        if 'market' not in df.columns:
-            logger.warning(f"[MarketFilter] 'market' column not found in DataFrame")
+        if 'market' not in df.columns and 'data_source' not in df.columns:
+            logger.warning(f"[MarketFilter] 'market' or 'data_source' column not found in DataFrame")
             return df
 
-        if self.mode == 'whitelist':
-            result = df[df['market'].isin(self.markets)].copy()
-            logger.info(f"[MarketFilter] Whitelist filter applied, markets: {len(self.markets)}, input: {len(df)}, output: {len(result)}")
-            return result.reset_index(drop=True)
+        # 处理港股筛选（通过 data_source 字段）
+        has_hk_filter = '港股' in self.markets
+
+        # 分离港股和A股数据
+        if 'data_source' in df.columns:
+            hk_df = df[df['data_source'] == '港股'].copy()
+            a_stock_df = df[df['data_source'] == 'A股'].copy()
         else:
-            result = df[~df['market'].isin(self.markets)].copy()
-            logger.info(f"[MarketFilter] Blacklist filter applied, markets: {len(self.markets)}, input: {len(df)}, output: {len(result)}")
-            return result.reset_index(drop=True)
+            # 没有 data_source 字段，假设都是A股
+            hk_df = pd.DataFrame()
+            a_stock_df = df.copy()
+
+        # 根据模式处理港股
+        if has_hk_filter:
+            if self.mode == 'whitelist':
+                # 白名单：保留港股
+                hk_result = hk_df
+            else:
+                # 黑名单：排除港股
+                hk_result = pd.DataFrame()
+        else:
+            # 没有选择港股
+            if self.mode == 'whitelist':
+                # 白名单且没有港股：排除港股
+                hk_result = pd.DataFrame()
+            else:
+                # 黑名单且没有港股：保留港股
+                hk_result = hk_df
+
+        # 处理A股市场筛选
+        a_markets = [m for m in self.markets if m in self.A_STOCK_MARKETS]
+        if a_markets:
+            if self.mode == 'whitelist':
+                # 白名单：只保留选中的A股市场
+                if 'market' in a_stock_df.columns:
+                    a_stock_result = a_stock_df[a_stock_df['market'].isin(a_markets)].copy()
+                else:
+                    a_stock_result = a_stock_df
+            else:
+                # 黑名单：排除选中的A股市场
+                if 'market' in a_stock_df.columns:
+                    a_stock_result = a_stock_df[~a_stock_df['market'].isin(a_markets)].copy()
+                else:
+                    a_stock_result = a_stock_df
+        else:
+            # 没有选择A股市场
+            if self.mode == 'whitelist':
+                # 白名单且没有选择A股市场：排除所有A股
+                a_stock_result = pd.DataFrame()
+            else:
+                # 黑名单且没有选择A股市场：保留所有A股
+                a_stock_result = a_stock_df
+
+        # 合并结果
+        result = pd.concat([hk_result, a_stock_result], ignore_index=True)
+        logger.info(f"[MarketFilter] Filter applied, mode: {self.mode}, markets: {self.markets}, input: {len(df)}, output: {len(result)}")
+        return result
 
     def to_config(self) -> Dict:
         return {

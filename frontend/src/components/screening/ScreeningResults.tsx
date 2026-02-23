@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card, Table, Typography, Statistic, Row, Col, Tag, Button, Space } from 'antd';
 import { CheckCircleOutlined, StockOutlined, SaveOutlined } from '@ant-design/icons';
 import type { ScreeningResult } from '@/types';
@@ -10,6 +11,8 @@ interface ScreeningResultsProps {
 }
 
 function ScreeningResults({ result, onSave }: ScreeningResultsProps) {
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 50 });
+
   const columns = [
     {
       title: '代码',
@@ -106,10 +109,15 @@ function ScreeningResults({ result, onSave }: ScreeningResultsProps) {
         dataSource={result.stocks}
         rowKey="code"
         pagination={{
-          pageSize: 50,
+          current: pagination.current,
+          pageSize: pagination.pageSize,
           showSizeChanger: true,
           pageSizeOptions: ['20', '50', '100', '200'],
-          showTotal: (total) => `共 ${total} 条结果`
+          showTotal: (total) => `共 ${total} 条结果`,
+          hideOnSinglePage: false,
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize });
+          },
         }}
         scroll={{ x: 600 }}
         size="small"

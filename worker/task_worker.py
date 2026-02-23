@@ -13,24 +13,26 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from web.tasks import TaskManager
+from web.tasks import init_task_manager
 
 
 class TaskWorker:
     """
-    Task execution worker that polls database for pending tasks.
+    Task execution worker that polls SQLite database for pending tasks.
 
-    The worker continuously polls the database for tasks with status='pending',
+    The worker continuously polls the SQLite database for tasks with status='pending',
     claims them by updating status to 'running', and dispatches them to
     appropriate handlers based on task_type.
+
+    Uses SQLite backend (separate from DuckDB business data) to avoid lock conflicts.
     """
 
-    def __init__(self, db_path, poll_interval=5, max_concurrent=1):
+    def __init__(self, db_path=None, poll_interval=5, max_concurrent=1):
         """
         Initialize TaskWorker.
 
         Args:
-            db_path: Path to tasks database
+            db_path: Path to SQLite tasks database (default: TASKS_DB_PATH from settings)
             poll_interval: Seconds between database polls (default: 5)
             max_concurrent: Maximum number of tasks to run simultaneously (default: 1)
         """
@@ -38,7 +40,18 @@ class TaskWorker:
         self.poll_interval = poll_interval
         self.max_concurrent = max_concurrent
         self.running_tasks = {}  # task_id -> thread
-        self.tm = TaskManager(db_path=db_path)
+        # Initialize TaskManager (now uses SQLite backend by default)
+        # Use init_db=False to avoid table creation conflicts with API service
+        self.tm = init_task_manager(db_path=db_path, init_db=False)
+        # Get the actual database path from TaskManager (for logging)
+        if hasattr(self.tm, '_get_reader'):
+            # DuckDB backend
+            self.actual_db_path = self.tm._get_reader().db_path
+        elif hasattr(self.tm, 'db_path'):
+            # SQLite backend
+            self.actual_db_path = self.tm.db_path
+        else:
+            self.actual_db_path = db_path or 'unknown'
         self._shutdown = False
 
     def start(self):
@@ -52,7 +65,7 @@ class TaskWorker:
         signal.signal(signal.SIGTERM, self._signal_handler)
 
         print(f"[Worker] Starting task worker...")
-        print(f"[Worker] Database: {self.db_path}")
+        print(f"[Worker] Database: {self.actual_db_path}")
         print(f"[Worker] Poll interval: {self.poll_interval}s")
         print(f"[Worker] Max concurrent tasks: {self.max_concurrent}")
         print(f"[Worker] Press Ctrl+C to stop")

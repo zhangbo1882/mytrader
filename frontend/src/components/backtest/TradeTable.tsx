@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Table } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { BacktestResult } from '@/types';
@@ -7,6 +8,8 @@ interface TradeTableProps {
 }
 
 export function TradeTable({ trades }: TradeTableProps) {
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
+
   const columns: ColumnsType<BacktestResult['trades'][number]> = [
     {
       title: '买入日期',
@@ -114,9 +117,15 @@ export function TradeTable({ trades }: TradeTableProps) {
       rowKey={(record, index) => `${record.buy_date}-${index}`}
       scroll={{ x: 1500 }}
       pagination={{
-        pageSize: 20,
+        current: pagination.current,
+        pageSize: pagination.pageSize,
+        pageSizeOptions: ['10', '20', '50', '100'],
         showSizeChanger: true,
         showTotal: (total) => `共 ${total} 笔交易`,
+        hideOnSinglePage: false,
+        onChange: (page, pageSize) => {
+          setPagination({ current: page, pageSize });
+        },
       }}
     />
   );

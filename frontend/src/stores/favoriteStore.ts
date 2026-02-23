@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import type { Stock } from '@/types';
-import { favoriteService, type FavoriteItem } from '@/services/favoriteService';
+import { favoriteService, type FavoriteItem, type BatchAddResponse, type UpdateFavoriteData } from '@/services/favoriteService';
 
 export interface FavoriteStock extends Stock {
   addedAt: string;
+  safetyRating: string | null;
+  fundamentalRating: string | null;
+  entryPrice: number | null;
 }
 
 interface FavoriteState {
@@ -13,10 +16,12 @@ interface FavoriteState {
 
   loadFavorites: () => Promise<void>;
   addFavorite: (code: string, name: string) => Promise<void>;
+  updateFavorite: (code: string, data: UpdateFavoriteData) => Promise<void>;
   removeFavorite: (code: string) => Promise<void>;
   isInFavorites: (code: string) => boolean;
   clearFavorites: () => Promise<void>;
   setFavorites: (favorites: FavoriteStock[]) => void;
+  batchAddFavorites: (stockCodes: string[]) => Promise<BatchAddResponse>;
 }
 
 // Helper function to convert API format to store format
@@ -24,6 +29,9 @@ const toFavoriteStock = (item: FavoriteItem): FavoriteStock => ({
   code: item.stock_code,
   name: item.stock_name,
   addedAt: item.added_at,
+  safetyRating: item.safety_rating,
+  fundamentalRating: item.fundamental_rating,
+  entryPrice: item.entry_price,
 });
 
 export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
@@ -45,7 +53,7 @@ export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
     }
   },
 
-  addFavorite: async (code, name) => {
+  addFavorite: async (code, _name) => {
     // Optimistic update
     const existing = get().favorites.some((f) => f.code === code);
     if (existing) {
@@ -63,6 +71,33 @@ export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
       set({
         loading: false,
         error: error instanceof Error ? error.message : '添加收藏失败'
+      });
+      throw error;
+    }
+  },
+
+  updateFavorite: async (code, data) => {
+    set({ loading: true, error: null });
+    try {
+      await favoriteService.update(code, data);
+      // Update local state
+      set((state) => ({
+        favorites: state.favorites.map((f) =>
+          f.code === code
+            ? {
+                ...f,
+                safetyRating: data.safety_rating ?? f.safetyRating,
+                fundamentalRating: data.fundamental_rating ?? f.fundamentalRating,
+                entryPrice: data.entry_price ?? f.entryPrice,
+              }
+            : f
+        ),
+        loading: false
+      }));
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : '更新收藏失败'
       });
       throw error;
     }
@@ -99,6 +134,27 @@ export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
       set({
         loading: false,
         error: error instanceof Error ? error.message : '清空收藏失败'
+      });
+      throw error;
+    }
+  },
+
+  batchAddFavorites: async (stockCodes) => {
+    if (stockCodes.length === 0) {
+      throw new Error('股票代码列表不能为空');
+    }
+
+    set({ loading: true, error: null });
+    try {
+      const response = await favoriteService.batchAdd(stockCodes);
+      const listResponse = await favoriteService.list();
+      const favorites = listResponse.favorites.map(toFavoriteStock);
+      set({ favorites, loading: false });
+      return response;
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : '批量添加收藏失败'
       });
       throw error;
     }

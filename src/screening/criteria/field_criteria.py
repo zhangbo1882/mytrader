@@ -21,7 +21,7 @@ class FieldFilterCriteria(BaseCriteria):
     - industry: 行业筛选
     - pe_ttm: 市盈率TTM
     - pb: 市净率
-    - total_mv_yi: 总市值（亿）
+    - circ_mv_yi: 流通市值（亿）
     - turnover_rate: 换手率
     - avg_amplitude: 平均振幅
     - positive_days: 正收益天数占比
@@ -63,7 +63,7 @@ class FieldFilterCriteria(BaseCriteria):
                     raise ValueError(f"行业字段值必须是列表，如：['银行', '非银金融']")
             elif operator not in ['in', 'eq']:
                 raise ValueError(f"行业字段只支持 'eq' 运算符")
-        elif field in ['pe_ttm', 'pb', 'total_mv_yi', 'turnover_rate', 'avg_amplitude', 'positive_days']:
+        elif field in ['pe_ttm', 'pb', 'circ_mv_yi', 'turnover_rate', 'avg_amplitude', 'positive_days']:
             if operator not in ['range', 'eq', 'gt', 'lt', 'gte', 'lte']:
                 raise ValueError(f"{field} 字段只支持 'range', 'eq', 'gt', 'lt', 'gte', 'lte' 运算符")
             # 数值字段需要范围或单个值
@@ -84,7 +84,7 @@ class FieldFilterCriteria(BaseCriteria):
         """返回计算成本"""
         if self.field in ['market', 'industry']:
             return 1  # 低成本，直接过滤
-        elif self.field in ['pe_ttm', 'pb', 'total_mv_yi']:
+        elif self.field in ['pe_ttm', 'pb', 'circ_mv_yi']:
             return 2  # 中等成本，数值比较
         elif self.field in ['turnover_rate', 'avg_amplitude', 'positive_days']:
             return 10  # 技术指标，需要计算
@@ -141,7 +141,7 @@ class FieldFilterCriteria(BaseCriteria):
                     # 暂不支持单行业筛选
                     logger.info(f"[FieldFilterCriteria] Industry filter not supported for operator '{self.operator}', returning all")
                     return df
-        elif self.field in ['pe_ttm', 'pb', 'total_mv_yi']:
+        elif self.field in ['pe_ttm', 'pb', 'circ_mv_yi']:
             # 数值字段筛选
             if self.operator == 'range':
                 if isinstance(self.value, (list, tuple)) and len(self.value) == 2:

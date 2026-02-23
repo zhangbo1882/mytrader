@@ -3,6 +3,8 @@
 
 Loads bars + industry classification data from the database
 and structures it into panel DataFrames (dates x symbols) for alpha computation.
+
+Bars data is loaded from DuckDB, industry classification from SQLite.
 """
 import logging
 import pandas as pd
@@ -41,7 +43,11 @@ class AlphaDataPanel:
 
 
 class AlphaDataAdapter:
-    """Load data from the database and build AlphaDataPanel."""
+    """Load data from the database and build AlphaDataPanel.
+
+    A-share bars data is loaded from DuckDB bars_a_1d table,
+    industry classification from SQLite.
+    """
 
     def __init__(self, db_path: str = None):
         self.db_path = db_path or str(TUSHARE_DB_PATH)
@@ -60,26 +66,55 @@ class AlphaDataAdapter:
         Returns:
             AlphaDataPanel with all fields populated
         """
+        from src.db.duckdb_manager import get_duckdb_manager
+
         logger.info(f"Loading panel data: {len(symbols)} symbols, {start_date} to {end_date}")
 
-        # Build SQL with symbol placeholders
-        placeholders = ','.join([f"'{s}'" for s in symbols])
-        query = f"""
-        SELECT symbol, datetime, open, high, low, close,
-               volume, amount, pct_chg, total_mv
-        FROM bars
-        WHERE symbol IN ({placeholders})
-          AND interval = '1d'
-          AND datetime >= :start_date
-          AND datetime <= :end_date
-        ORDER BY datetime, symbol
-        """
+        # A股专用表名
+        a_share_table = 'bars_a_1d'
 
-        df = pd.read_sql_query(query, self.engine,
-                               params={'start_date': start_date, 'end_date': end_date})
+        # Query from DuckDB bars_a_1d table
+        duckdb_manager = get_duckdb_manager()
+        with duckdb_manager.get_connection() as conn:
+            # Build symbol placeholders for DuckDB
+            # Handle symbols with or without exchange suffix
+            symbol_conditions = []
+            params = []
+
+            for symbol in symbols:
+                if '.' in symbol:
+                    # Symbol already has exchange suffix
+                    stock_code, exchange = symbol.split('.')
+                    symbol_conditions.append("(stock_code = ? AND exchange = ?)")
+                    params.extend([stock_code, exchange])
+                else:
+                    # Symbol without exchange - match any exchange
+                    symbol_conditions.append("stock_code = ?")
+                    params.append(symbol)
+
+            where_clause = "({})".format(" OR ".join(symbol_conditions))
+
+            # Determine which price columns to use
+            if price_type == 'qfq':
+                price_cols = "open_qfq, high_qfq, low_qfq, close_qfq"
+            else:
+                price_cols = "open, high, low, close"
+
+            query = f"""
+            SELECT stock_code as symbol, datetime, {price_cols},
+                   volume, amount, pct_chg, total_mv
+            FROM {a_share_table}
+            WHERE {where_clause}
+              AND datetime >= ?::DATE
+              AND datetime <= ?::DATE
+            ORDER BY datetime, stock_code
+            """
+            params.extend([start_date, end_date])
+
+            df = conn.execute(query, params).fetchdf()
 
         if df.empty:
-            logger.warning("No data returned from database")
+            logger.warning("No data returned from DuckDB")
             empty_df = pd.DataFrame()
             return AlphaDataPanel(
                 open=empty_df, high=empty_df, low=empty_df, close=empty_df,
@@ -92,6 +127,15 @@ class AlphaDataAdapter:
         # Pivot to wide format (dates x symbols)
         def pivot(col):
             return df.pivot(index='datetime', columns='symbol', values=col).sort_index()
+
+        # Rename price columns if using qfq
+        if price_type == 'qfq':
+            df = df.rename(columns={
+                'open_qfq': 'open',
+                'high_qfq': 'high',
+                'low_qfq': 'low',
+                'close_qfq': 'close'
+            })
 
         open_df = pivot('open')
         high_df = pivot('high')
@@ -167,26 +211,31 @@ class AlphaDataAdapter:
         return result
 
     def get_all_symbols(self, trade_date: str = None) -> List[str]:
-        """Get all available stock symbols from the bars table.
+        """Get all available stock symbols from the bars_a_1d table in DuckDB.
 
         Args:
             trade_date: If specified, only return symbols that have data on this date.
                         If None, return symbols from the latest available date.
         """
-        if trade_date is None:
-            query = """
-            SELECT DISTINCT symbol FROM bars
-            WHERE interval = '1d'
-              AND datetime = (SELECT MAX(datetime) FROM bars WHERE interval = '1d')
-            ORDER BY symbol
-            """
-            df = pd.read_sql_query(query, self.engine)
-        else:
-            query = """
-            SELECT DISTINCT symbol FROM bars
-            WHERE interval = '1d' AND datetime = :trade_date
-            ORDER BY symbol
-            """
-            df = pd.read_sql_query(query, self.engine, params={'trade_date': trade_date})
+        from src.db.duckdb_manager import get_duckdb_manager
+
+        a_share_table = 'bars_a_1d'
+
+        duckdb_manager = get_duckdb_manager()
+        with duckdb_manager.get_connection() as conn:
+            if trade_date is None:
+                query = f"""
+                SELECT DISTINCT stock_code as symbol FROM {a_share_table}
+                WHERE datetime = (SELECT MAX(datetime) FROM {a_share_table})
+                ORDER BY symbol
+                """
+                df = conn.execute(query).fetchdf()
+            else:
+                query = f"""
+                SELECT DISTINCT stock_code as symbol FROM {a_share_table}
+                WHERE datetime = ?::DATE
+                ORDER BY symbol
+                """
+                df = conn.execute(query, [trade_date]).fetchdf()
 
         return df['symbol'].tolist()

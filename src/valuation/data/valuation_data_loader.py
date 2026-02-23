@@ -215,31 +215,51 @@ class ValuationDataLoader:
             价格数据字典
         """
         try:
-            # 构建查询条件
-            if date:
-                # Keep hyphens in date for correct string comparison
-                query = f"""
-                SELECT datetime, close, pe_ttm, pb, ps_ttm, total_mv, circ_mv
-                FROM bars
-                WHERE symbol = :code
-                  AND interval = '1d'
-                  AND datetime <= :date
-                ORDER BY datetime DESC
-                LIMIT 1
-                """
-                params = {'code': code, 'date': date}
-            else:
-                query = f"""
-                SELECT datetime, close, pe_ttm, pb, ps_ttm, total_mv, circ_mv
-                FROM bars
-                WHERE symbol = :code
-                  AND interval = '1d'
-                ORDER BY datetime DESC
-                LIMIT 1
-                """
-                params = {'code': code}
+            from src.db.duckdb_manager import get_duckdb_manager
 
-            df = pd.read_sql_query(query, self.engine, params=params)
+            duckdb_manager = get_duckdb_manager()
+            with duckdb_manager.get_connection() as conn:
+                # 标准化股票代码
+                stock_code = code.split('.')[0]
+
+                # 判断是 A 股还是港股
+                if code.endswith('.HK') or code.replace('.', '').isdigit() and len(code.replace('.', '')) == 5:
+                    # 港股：使用 bars_1d 表
+                    exchange = 'HK'
+                    table_name = 'bars_1d'
+                    # 港股没有 PE/PB 数据，设为 None
+                    pe_ttm_col = 'NULL as pe_ttm'
+                    pb_col = 'NULL as pb'
+                    ps_ttm_col = 'NULL as ps_ttm'
+                else:
+                    # A股：使用 bars_a_1d 表
+                    exchange = 'SH' if code.endswith('.SH') else 'SZ' if code.endswith('.SZ') else None
+                    table_name = 'bars_a_1d'
+                    pe_ttm_col = 'pe_ttm'
+                    pb_col = 'pb'
+                    ps_ttm_col = 'ps_ttm'
+
+                # 构建查询条件
+                if date:
+                    where_clause = f"AND datetime <= '{date}'"
+                else:
+                    where_clause = ""
+
+                if exchange:
+                    exchange_clause = f"AND exchange = '{exchange}'"
+                else:
+                    exchange_clause = ""
+
+                query = f"""
+                SELECT datetime, close, {pe_ttm_col}, {pb_col}, {ps_ttm_col}, total_mv, circ_mv
+                FROM {table_name}
+                WHERE stock_code = '{stock_code}'
+                  {exchange_clause}
+                  {where_clause}
+                ORDER BY datetime DESC
+                LIMIT 1
+                """
+                df = conn.execute(query).fetchdf()
 
             if not df.empty:
                 return df.iloc[0].to_dict()
@@ -541,29 +561,44 @@ class ValuationDataLoader:
             市值信息字典
         """
         try:
-            if date:
-                query = """
-                SELECT total_mv, circ_mv
-                FROM bars
-                WHERE symbol = :code
-                  AND interval = '1d'
-                  AND datetime <= :date
-                ORDER BY datetime DESC
-                LIMIT 1
-                """
-                params = {'code': code, 'date': date}
-            else:
-                query = """
-                SELECT total_mv, circ_mv
-                FROM bars
-                WHERE symbol = :code
-                  AND interval = '1d'
-                ORDER BY datetime DESC
-                LIMIT 1
-                """
-                params = {'code': code}
+            from src.db.duckdb_manager import get_duckdb_manager
 
-            df = pd.read_sql_query(query, self.engine, params=params)
+            duckdb_manager = get_duckdb_manager()
+            with duckdb_manager.get_connection() as conn:
+                # 标准化股票代码
+                stock_code = code.split('.')[0]
+
+                # 判断是 A 股还是港股
+                if code.endswith('.HK') or code.replace('.', '').isdigit() and len(code.replace('.', '')) == 5:
+                    # 港股：使用 bars_1d 表
+                    exchange = 'HK'
+                    table_name = 'bars_1d'
+                else:
+                    # A股：使用 bars_a_1d 表
+                    exchange = 'SH' if code.endswith('.SH') else 'SZ' if code.endswith('.SZ') else None
+                    table_name = 'bars_a_1d'
+
+                # 构建查询条件
+                if date:
+                    where_clause = f"AND datetime <= '{date}'"
+                else:
+                    where_clause = ""
+
+                if exchange:
+                    exchange_clause = f"AND exchange = '{exchange}'"
+                else:
+                    exchange_clause = ""
+
+                query = f"""
+                SELECT total_mv, circ_mv
+                FROM {table_name}
+                WHERE stock_code = '{stock_code}'
+                  {exchange_clause}
+                  {where_clause}
+                ORDER BY datetime DESC
+                LIMIT 1
+                """
+                df = conn.execute(query).fetchdf()
 
             if not df.empty:
                 return df.iloc[0].to_dict()
@@ -892,28 +927,44 @@ class ValuationDataLoader:
             股本信息字典
         """
         try:
-            # 从 bars 表获取股本信息（daily_basic 数据已合并到 bars 表）
-            if date:
-                query = """
+            from src.db.duckdb_manager import get_duckdb_manager
+
+            duckdb_manager = get_duckdb_manager()
+            with duckdb_manager.get_connection() as conn:
+                # 标准化股票代码
+                stock_code = code.split('.')[0]
+
+                # 判断是 A 股还是港股
+                if code.endswith('.HK') or code.replace('.', '').isdigit() and len(code.replace('.', '')) == 5:
+                    # 港股：使用 bars_1d 表
+                    exchange = 'HK'
+                    table_name = 'bars_1d'
+                else:
+                    # A股：使用 bars_a_1d 表
+                    exchange = 'SH' if code.endswith('.SH') else 'SZ' if code.endswith('.SZ') else None
+                    table_name = 'bars_a_1d'
+
+                # 构建查询条件
+                if date:
+                    where_clause = f"AND datetime <= '{date}'"
+                else:
+                    where_clause = ""
+
+                if exchange:
+                    exchange_clause = f"AND exchange = '{exchange}'"
+                else:
+                    exchange_clause = ""
+
+                query = f"""
                 SELECT total_share, float_share, free_share
-                FROM bars
-                WHERE symbol = :code
-                  AND interval = '1d'
-                  AND datetime <= :date
+                FROM {table_name}
+                WHERE stock_code = '{stock_code}'
+                  {exchange_clause}
+                  {where_clause}
                 ORDER BY datetime DESC
                 LIMIT 1
                 """
-                df = pd.read_sql_query(query, self.engine, params={'code': code, 'date': date})
-            else:
-                query = """
-                SELECT total_share, float_share, free_share
-                FROM bars
-                WHERE symbol = :code
-                  AND interval = '1d'
-                ORDER BY datetime DESC
-                LIMIT 1
-                """
-                df = pd.read_sql_query(query, self.engine, params={'code': code})
+                df = conn.execute(query).fetchdf()
 
             if not df.empty:
                 return df.iloc[0].to_dict()

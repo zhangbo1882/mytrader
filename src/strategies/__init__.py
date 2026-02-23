@@ -5,16 +5,7 @@
 
 包含各种Backtrader策略实现、分析器和策略评估指标
 """
-from .sma_cross_strategy import SMACrossStrategy
-from .price_breakout_strategy import PriceBreakoutStrategy
-from .analyzers import PortfolioValueAnalyzer, TradeAnalyzer, calculate_strategy_metrics
-from .metrics import (
-    strategy_health_check,
-    log_strategy_health_report,
-    calculate_backtest_returns,
-    StrategyHealthAnalyzer
-)
-from .registry import (
+from src.strategies.base.registry import (
     STRATEGY_CLASSES,
     STRATEGY_PARAMS_SCHEMA,
     STRATEGY_DESCRIPTIONS,
@@ -25,6 +16,15 @@ from .registry import (
     validate_strategy_params,
     get_default_params
 )
+from src.strategies.base.analyzers import PortfolioValueAnalyzer, TradeAnalyzer, calculate_strategy_metrics
+from src.strategies.base.metrics import (
+    strategy_health_check,
+    log_strategy_health_report,
+    calculate_backtest_returns,
+    StrategyHealthAnalyzer
+)
+from src.strategies.sma_cross.strategy import SMACrossStrategy
+from src.strategies.price_breakout.strategy import PriceBreakoutStrategyV2 as PriceBreakoutStrategy
 
 __all__ = [
     'SMACrossStrategy',

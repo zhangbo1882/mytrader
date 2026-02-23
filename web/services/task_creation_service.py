@@ -29,6 +29,8 @@ def create_task(request_data):
     # Route to appropriate handler based on task_type
     if task_type == 'update_stock_prices':
         return handle_update_stock_prices(params)
+    elif task_type == 'update_hk_prices':
+        return handle_update_hk_prices(params)
     elif task_type == 'update_industry_classification':
         return handle_update_industry_classification(params)
     elif task_type == 'update_financial_reports':
@@ -57,44 +59,160 @@ def handle_update_stock_prices(params):
 
     Args:
         params: Dictionary with keys:
-            - stock_range: "all" | "favorites" | "custom" (default: "all")
+            - stock_range: "all" | "favorites" | "custom" | "market" (default: "all")
             - custom_stocks: List of stock codes (required when stock_range="custom")
+            - markets: List of market types ["main", "gem", "star", "bse"] (required when stock_range="market")
+            - exclude_st: Exclude ST stocks (default: True)
+            - mode: "incremental" | "full" (default: "incremental")
+            - start_date: Start date YYYY-MM-DD (optional, for full mode)
+            - end_date: End date YYYY-MM-DD (optional)
     """
     stock_range = params.get('stock_range', 'all')
     custom_stocks = params.get('custom_stocks', [])
+    markets = params.get('markets', [])
+    exclude_st = params.get('exclude_st', True)
+    mode = params.get('mode', 'incremental')
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
 
     # Validate parameters
-    if stock_range not in ['all', 'favorites', 'custom']:
-        return {'error': f'无效的 stock_range: {stock_range}，必须是 all/favorites/custom'}, 400
+    if stock_range not in ['all', 'favorites', 'custom', 'market']:
+        return {'error': f'无效的 stock_range: {stock_range}，必须是 all/favorites/custom/market'}, 400
+
+    if mode not in ['incremental', 'full']:
+        return {'error': f'无效的 mode: {mode}，必须是 incremental/full'}, 400
 
     if stock_range == 'custom':
         if not custom_stocks or not isinstance(custom_stocks, list):
             return {'error': '当 stock_range="custom" 时，custom_stocks 必须是非空列表'}, 400
 
-    # Build task parameters (always incremental mode now)
+    if stock_range == 'market':
+        if not markets or not isinstance(markets, list):
+            return {'error': '当 stock_range="market" 时，markets 必须是非空列表'}, 400
+        valid_markets = ['main', 'gem', 'star', 'bse']
+        for m in markets:
+            if m not in valid_markets:
+                return {'error': f'无效的市场类型: {m}，必须是 {"/".join(valid_markets)}'}, 400
+
+    tm = get_task_manager()
+    created_tasks = []
+
+    # If favorites, separate A-shares and HK stocks and create separate tasks
+    if stock_range == 'favorites':
+        # Get favorites list (混合了A股和港股)
+        all_favorites = custom_stocks if custom_stocks else ["600382", "600711", "000001", "00762.HK", "00941.HK"]
+
+        # 分离A股和港股
+        a_share_stocks = []
+        hk_stocks = []
+
+        for stock in all_favorites:
+            # 港股判断：包含.HK后缀 或者是4-5位数字且不在A股代码范围内
+            if '.HK' in stock.upper():
+                hk_stocks.append(stock)
+            elif '.' not in stock:
+                # 纯数字代码，判断是A股还是港股
+                if len(stock) in [4, 5]:
+                    # 检查是否是A股代码前缀
+                    if stock.startswith(('600', '601', '603', '604', '605', '688', '689',  # 上交所
+                                      '000', '001', '002', '003', '300', '301')):  # 深交所
+                        a_share_stocks.append(stock)
+                    else:
+                        # 默认为港股
+                        hk_stocks.append(stock)
+                else:
+                    # 6位是A股
+                    a_share_stocks.append(stock)
+
+        # 创建A股更新任务
+        if a_share_stocks:
+            a_task_params = {
+                'mode': mode,
+                'stock_range': 'custom',
+                'custom_stocks': a_share_stocks,
+                'start_date': start_date,
+                'end_date': end_date,
+                'exclude_st': exclude_st,
+            }
+            a_task_id = tm.create_task(
+                task_type='update_stock_prices',
+                params=a_task_params
+            )
+            task_msg = f'A股股价更新 ({len(a_share_stocks)}只股票)'
+            tm.update_task(a_task_id, message=task_msg)
+            created_tasks.append({
+                'task_id': a_task_id,
+                'market': 'A股',
+                'market_type': 'A-share',
+                'count': len(a_share_stocks),
+                'stocks': a_share_stocks[:10],  # 显示前10个
+                'message': task_msg
+            })
+
+        # 创建港股更新任务
+        if hk_stocks:
+            hk_task_params = {
+                'mode': mode,
+                'stock_range': 'custom',
+                'custom_stocks': hk_stocks,
+                'start_date': start_date,
+                'end_date': end_date,
+            }
+            hk_task_id = tm.create_task(
+                task_type='update_hk_prices',
+                params=hk_task_params
+            )
+            task_msg = f'港股股价更新 ({len(hk_stocks)}只股票)'
+            tm.update_task(hk_task_id, message=task_msg)
+            created_tasks.append({
+                'task_id': hk_task_id,
+                'market': '港股',
+                'market_type': 'HK',
+                'count': len(hk_stocks),
+                'stocks': hk_stocks[:10],  # 显示前10个
+                'message': task_msg
+            })
+
+        if not created_tasks:
+            return {'error': '收藏列表中没有有效的股票代码'}, 400
+
+        # 构建详细的消息
+        task_summary = ', '.join([f"{t['market']}{t['count']}只" for t in created_tasks])
+        return {
+            'success': True,
+            'tasks': created_tasks,
+            'message': f'已创建 {len(created_tasks)} 个更新任务: {task_summary}'
+        }, 201
+
+    # Build task parameters for non-favorites
     task_params = {
-        'mode': 'incremental',
+        'mode': mode,
         'stock_range': stock_range,
-        'custom_stocks': custom_stocks
+        'custom_stocks': custom_stocks,
+        'start_date': start_date,
+        'end_date': end_date,
+        'exclude_st': exclude_st,
     }
 
-    # If favorites, get favorites list from default config
-    if stock_range == 'favorites':
-        task_params['stocks'] = ["600382", "600711", "000001"]  # Default favorites
+    # Add markets parameter if stock_range is 'market'
+    if stock_range == 'market':
+        task_params['markets'] = markets
 
     # Create task with status='pending' - Worker will pick it up
-    tm = get_task_manager()
     task_id = tm.create_task(
         task_type='update_stock_prices',
         params=task_params
     )
-    tm.update_task(task_id, message='任务已创建，等待Worker执行...')
+
+    market_info = f', markets={",".join(markets)}' if stock_range == 'market' else ''
+    exclude_info = ', 排除ST' if exclude_st else ''
+    tm.update_task(task_id, message=f'任务已创建，等待Worker执行{market_info}{exclude_info}...')
 
     return {
         'success': True,
         'task_id': task_id,
         'status': 'pending',
-        'message': f'股票价格更新任务已创建，stock_range={stock_range}'
+        'message': f'A股数据更新任务已创建，stock_range={stock_range}{market_info}{exclude_info}'
     }, 201
 
 
@@ -343,7 +461,7 @@ def handle_backtest(params):
                 - strategy: 策略类型（必需）
                 - strategy_params: 策略特定参数（必需）
     """
-    from src.strategies.registry import (
+    from src.strategies.base.registry import (
         validate_strategy_params,
         get_strategy_class
     )
@@ -352,6 +470,7 @@ def handle_backtest(params):
     stock_code = params.get('stock')
     start_date = params.get('start_date')
     end_date = params.get('end_date')
+    interval = params.get('interval', '1d')  # 默认日线
     cash = params.get('cash', 1000000)
     commission = params.get('commission', 0.0002)
     benchmark = params.get('benchmark')
@@ -382,6 +501,7 @@ def handle_backtest(params):
         'stock': stock_code,
         'start_date': start_date,
         'end_date': end_date,
+        'interval': interval,  # 添加 interval 参数
         'cash': cash,
         'commission': commission,
         'benchmark': benchmark,
@@ -399,7 +519,8 @@ def handle_backtest(params):
 
     strategy_name = {
         'sma_cross': 'SMA交叉策略',
-        'price_breakout': '价格突破策略'
+        'price_breakout': '价格突破策略',
+        'price_breakout_v2': '价格突破策略V2'
     }.get(strategy_type, strategy_type)
 
     return {
@@ -533,4 +654,62 @@ def handle_update_dragon_list(params):
             'success': False,
             'error': str(e)
         }, 500
+
+
+def handle_update_hk_prices(params):
+    """
+    Handle HK stock price update task creation.
+
+    Args:
+        params: Dictionary with keys:
+            - stock_range: "all" | "favorites" | "custom" (default: "all")
+            - custom_stocks: List of stock codes (required when stock_range="custom")
+            - mode: "incremental" | "full" (default: "incremental")
+            - start_date: Start date YYYY-MM-DD (optional, for full mode)
+            - end_date: End date YYYY-MM-DD (optional)
+    """
+    stock_range = params.get('stock_range', 'all')
+    custom_stocks = params.get('custom_stocks', [])
+    mode = params.get('mode', 'incremental')
+    start_date = params.get('start_date')
+    end_date = params.get('end_date')
+
+    # Validate parameters
+    if stock_range not in ['all', 'favorites', 'custom']:
+        return {'error': f'无效的 stock_range: {stock_range}，必须是 all/favorites/custom'}, 400
+
+    if mode not in ['incremental', 'full']:
+        return {'error': f'无效的 mode: {mode}，必须是 incremental/full'}, 400
+
+    if stock_range == 'custom':
+        if not custom_stocks or not isinstance(custom_stocks, list):
+            return {'error': '当 stock_range="custom" 时，custom_stocks 必须是非空列表'}, 400
+
+    # Build task parameters
+    task_params = {
+        'mode': mode,
+        'stock_range': stock_range,
+        'custom_stocks': custom_stocks,
+        'start_date': start_date,
+        'end_date': end_date,
+    }
+
+    # Note: When stock_range='favorites', custom_stocks should contain the HK stocks from favorites.
+    # The frontend is responsible for extracting HK stocks from favorites and passing them in custom_stocks.
+    # The worker's get_hk_stock_list_for_task function will use these when stock_range='favorites' or 'custom'.
+
+    # Create task with status='pending' - Worker will pick it up
+    tm = get_task_manager()
+    task_id = tm.create_task(
+        task_type='update_hk_prices',
+        params=task_params
+    )
+    tm.update_task(task_id, message='港股数据更新任务已创建，等待Worker执行...')
+
+    return {
+        'success': True,
+        'task_id': task_id,
+        'status': 'pending',
+        'message': f'港股价格更新任务已创建，stock_range={stock_range}'
+    }, 201
 

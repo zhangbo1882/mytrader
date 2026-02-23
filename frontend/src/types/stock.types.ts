@@ -1,4 +1,4 @@
-import { DateRange, PriceType } from './common.types';
+import { DateRange, PriceType, IntervalType } from './common.types';
 
 export interface Stock {
   code: string;
@@ -8,6 +8,7 @@ export interface Stock {
 
 export interface StockData {
   date: string;
+  datetime?: string;
   open: number;
   high: number;
   low: number;
@@ -18,12 +19,15 @@ export interface StockData {
   pct_chg?: number;
   change?: number;
   changePercent?: number;
+  turnoverRate?: number;  // 换手率
+  turnover_rate_f?: number;  // 后端返回的换手率字段
 }
 
 export interface QueryParams {
   symbols: string[];
   startDate: string;
   endDate: string;
+  interval: IntervalType;
   priceType: PriceType;
 }
 

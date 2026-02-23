@@ -3,10 +3,17 @@ APScheduler based task scheduler for automated stock updates
 """
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.jobstores.base import BaseJobStore, JobLookupError, ConflictingIdError
+from apscheduler.job import Job
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime
 import logging
+import pickle
+from typing import List, Optional
+
+# Import settings to determine which backend to use
+from config.settings import USE_DUCKDB_FOR_TASKS
 
 # Setup logging
 logging.basicConfig()
@@ -16,12 +23,366 @@ logging.getLogger('apscheduler').setLevel(logging.WARNING)
 scheduler = None
 
 
+# ============================================================================
+# DuckDB Job Store for APScheduler
+# ============================================================================
+
+class DuckDBJobStore(BaseJobStore):
+    """
+    DuckDB-based job store for APScheduler
+
+    This replaces the default SQLAlchemy job store with a DuckDB implementation.
+    """
+
+    def __init__(self, db_path=None, table_name='apscheduler_jobs'):
+        """
+        Initialize the DuckDB job store
+
+        Args:
+            db_path: Path to DuckDB database (optional, uses default from config)
+            table_name: Name of the jobs table (default: apscheduler_jobs)
+        """
+        super().__init__()
+        self.table_name = table_name
+
+        # Get DuckDB manager
+        from src.db.duckdb_manager import get_duckdb_writer, get_duckdb_manager
+        self._get_writer = get_duckdb_writer
+        self._get_reader = get_duckdb_manager
+
+        # Ensure table exists
+        self._init_db()
+
+    def _init_db(self):
+        """Create the jobs table if it doesn't exist"""
+        try:
+            manager = self._get_writer()
+            try:
+                manager.create_tasks_tables()  # This creates all task-related tables including apscheduler_jobs
+            finally:
+                manager.close()
+        except Exception as e:
+            # If table creation fails due to connection conflict, check if table already exists
+            logging.warning(f"Could not create tables during init: {e}")
+            # Try to just verify the table exists
+            try:
+                manager = self._get_reader()
+                try:
+                    if not manager.table_exists(self.table_name):
+                        logging.error(f"Table {self.table_name} does not exist and could not be created")
+                        raise RuntimeError(f"Failed to create {self.table_name} table")
+                finally:
+                    manager.close()
+            except Exception as e2:
+                logging.error(f"Error checking table existence: {e2}")
+                # Don't fail initialization - the table might be created by another process
+                logging.warning("Proceeding with initialization assuming table exists")
+
+    def lookup_job(self, job_id: str) -> Optional[Job]:
+        """
+        Get a job by its ID
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            Job object or None if not found
+        """
+        manager = self._get_reader()
+
+        try:
+            df = manager.connect().execute(
+                f"SELECT job_state FROM {self.table_name} WHERE id = ?",
+                [job_id]
+            ).fetchdf()
+
+            if len(df) > 0:
+                job_state = df.iloc[0]['job_state']
+                # Convert bytearray to bytes if needed
+                if isinstance(job_state, bytearray):
+                    job_state = bytes(job_state)
+                elif isinstance(job_state, str):
+                    job_state = job_state.encode('latin1')
+
+                # Unpickle
+                state = pickle.loads(job_state)
+
+                # Handle both dict (from SQLAlchemy) and Job objects
+                if isinstance(state, dict):
+                    # Reconstruct Job from dict (APScheduler < 3.x format)
+                    job = Job.__new__(Job)
+                    job.__setstate__(state)
+                elif isinstance(state, Job):
+                    job = state
+                else:
+                    logging.warning(f"Unknown job state type: {type(state)}")
+                    return None
+
+                # Ensure _jobstore_alias attribute exists (required by ThreadPoolExecutor in APScheduler 3.x)
+                if not hasattr(job, '_jobstore_alias'):
+                    job._jobstore_alias = self._alias
+
+                return job
+
+            return None
+
+        except Exception as e:
+            logging.error(f"Error looking up job {job_id}: {e}")
+            return None
+
+    def get_all_jobs(self) -> List[Job]:
+        """
+        Get all jobs from the store
+
+        Returns:
+            List of Job objects
+        """
+        manager = self._get_reader()
+
+        try:
+            df = manager.connect().execute(f"SELECT job_state FROM {self.table_name}").fetchdf()
+
+            jobs = []
+            for _, row in df.iterrows():
+                job_state = row['job_state']
+                try:
+                    # Convert bytearray to bytes if needed
+                    if isinstance(job_state, bytearray):
+                        job_state = bytes(job_state)
+                    elif isinstance(job_state, str):
+                        job_state = job_state.encode('latin1')
+
+                    # Unpickle
+                    state = pickle.loads(job_state)
+
+                    # Handle both dict (from SQLAlchemy) and Job objects
+                    if isinstance(state, dict):
+                        # Reconstruct Job from dict (APScheduler < 3.x format)
+                        job = Job.__new__(Job)
+                        job.__setstate__(state)
+                    elif isinstance(state, Job):
+                        job = state
+                    else:
+                        logging.warning(f"Unknown job state type: {type(state)}")
+                        continue
+
+                    # Ensure _jobstore_alias attribute exists (required by ThreadPoolExecutor in APScheduler 3.x)
+                    if not hasattr(job, '_jobstore_alias'):
+                        job._jobstore_alias = self._alias
+
+                    jobs.append(job)
+
+                except Exception as e:
+                    logging.error(f"Error unpickling job: {e}")
+
+            return jobs
+
+        except Exception as e:
+            logging.error(f"Error getting all jobs: {e}")
+            return []
+
+    def add_job(self, job: Job) -> None:
+        """
+        Add a job to the store
+
+        Args:
+            job: Job object to add
+
+        Raises:
+            ConflictingIdError: If a job with the same ID already exists
+        """
+        # Check if job already exists
+        if self.lookup_job(job.id):
+            raise ConflictingIdError(job.id)
+
+        manager = self._get_writer()
+
+        try:
+            # Pickle the job object
+            job_state = pickle.dumps(job, protocol=pickle.HIGHEST_PROTOCOL)
+
+            # Insert into database
+            manager.connect().execute(f'''
+                INSERT INTO {self.table_name} (id, next_run_time, job_state)
+                VALUES (?, ?, ?)
+            ''', [job.id, job.next_run_time.timestamp(), job_state])
+
+        except Exception as e:
+            logging.error(f"Error adding job {job.id}: {e}")
+            raise
+        finally:
+            manager.close()
+
+    def update_job(self, job: Job) -> None:
+        """
+        Update an existing job in the store
+
+        Args:
+            job: Job object to update
+
+        Raises:
+            JobLookupError: If the job doesn't exist
+        """
+        if not self.lookup_job(job.id):
+            raise JobLookupError(job.id)
+
+        manager = self._get_writer()
+
+        try:
+            # Pickle the job object
+            job_state = pickle.dumps(job, protocol=pickle.HIGHEST_PROTOCOL)
+
+            # Update in database
+            manager.connect().execute(f'''
+                UPDATE {self.table_name}
+                SET next_run_time = ?, job_state = ?
+                WHERE id = ?
+            ''', [job.next_run_time.timestamp(), job_state, job.id])
+
+        except Exception as e:
+            logging.error(f"Error updating job {job.id}: {e}")
+            raise
+        finally:
+            manager.close()
+
+    def remove_job(self, job_id: str) -> None:
+        """
+        Remove a job from the store
+
+        Args:
+            job_id: Job identifier
+
+        Raises:
+            JobLookupError: If the job doesn't exist
+        """
+        if not self.lookup_job(job_id):
+            raise JobLookupError(job_id)
+
+        manager = self._get_writer()
+
+        try:
+            manager.connect().execute(f"DELETE FROM {self.table_name} WHERE id = ?", [job_id])
+
+        except Exception as e:
+            logging.error(f"Error removing job {job_id}: {e}")
+            raise
+        finally:
+            manager.close()
+
+    def remove_all_jobs(self) -> None:
+        """Remove all jobs from the store"""
+        manager = self._get_writer()
+
+        try:
+            manager.connect().execute(f"DELETE FROM {self.table_name}")
+        except Exception as e:
+            logging.error(f"Error removing all jobs: {e}")
+            raise
+        finally:
+            manager.close()
+
+    def get_due_jobs(self, timestamp) -> List[Job]:
+        """
+        Get jobs that are due to run at or before the given timestamp
+
+        Args:
+            timestamp: Unix timestamp (float) or datetime object
+
+        Returns:
+            List of due Job objects
+        """
+        manager = self._get_reader()
+
+        try:
+            # Convert datetime to Unix timestamp if needed
+            if hasattr(timestamp, 'timestamp'):
+                ts_value = timestamp.timestamp()
+            else:
+                ts_value = float(timestamp)
+
+            # Use f-string with timestamp value to avoid parameter binding type issues
+            query = f"SELECT job_state FROM {self.table_name} WHERE CAST(next_run_time AS DOUBLE) <= {ts_value}"
+            df = manager.connect().execute(query).fetchdf()
+
+            jobs = []
+            for _, row in df.iterrows():
+                job_state = row['job_state']
+                try:
+                    # Convert bytearray to bytes if needed
+                    if isinstance(job_state, bytearray):
+                        job_state = bytes(job_state)
+                    elif isinstance(job_state, str):
+                        job_state = job_state.encode('latin1')
+
+                    # Unpickle
+                    state = pickle.loads(job_state)
+
+                    # Handle both dict (from SQLAlchemy) and Job objects
+                    if isinstance(state, dict):
+                        # Reconstruct Job from dict (APScheduler < 3.x format)
+                        job = Job.__new__(Job)
+                        job.__setstate__(state)
+                    elif isinstance(state, Job):
+                        job = state
+                    else:
+                        logging.warning(f"Unknown job state type: {type(state)}")
+                        continue
+
+                    # Ensure _jobstore_alias attribute exists (required by ThreadPoolExecutor in APScheduler 3.x)
+                    if not hasattr(job, '_jobstore_alias'):
+                        job._jobstore_alias = self._alias
+
+                    jobs.append(job)
+
+                except Exception as e:
+                    logging.error(f"Error unpickling job: {e}")
+
+            return jobs
+
+        except Exception as e:
+            logging.error(f"Error getting due jobs: {e}")
+            return []
+
+    def get_next_run_time(self) -> Optional[datetime]:
+        """
+        Get the next run time of the earliest scheduled job
+
+        Returns:
+            datetime object of next run time, or None if no jobs scheduled
+        """
+        manager = self._get_reader()
+
+        try:
+            result = manager.connect().execute(
+                f"SELECT MIN(next_run_time) as next_run FROM {self.table_name}"
+            ).fetchone()
+
+            if result and result[0] is not None:
+                # Convert Unix timestamp to datetime
+                timestamp = float(result[0])
+                return datetime.fromtimestamp(timestamp)
+
+            return None
+
+        except Exception as e:
+            logging.error(f"Error getting next run time: {e}")
+            return None
+
+    def __repr__(self) -> str:
+        return f'<DuckDBJobStore (table={self.table_name})>'
+
+
+# ============================================================================
+# Scheduler Functions
+# ============================================================================
+
+
 def init_scheduler(db_path, timezone='Asia/Shanghai'):
     """
     Initialize and start the scheduler
 
     Args:
-        db_path: Path to SQLite database for job persistence
+        db_path: Path to database for job persistence (SQLite or DuckDB)
         timezone: Timezone for scheduled jobs
 
     Returns:
@@ -33,9 +394,14 @@ def init_scheduler(db_path, timezone='Asia/Shanghai'):
         return scheduler
 
     # Configure jobstores (persistent storage)
-    jobstores = {
-        'default': SQLAlchemyJobStore(url=f'sqlite:///{db_path}')
-    }
+    if USE_DUCKDB_FOR_TASKS:
+        jobstores = {
+            'default': DuckDBJobStore()
+        }
+    else:
+        jobstores = {
+            'default': SQLAlchemyJobStore(url=f'sqlite:///{db_path}')
+        }
 
     # Configure executors
     executors = {
@@ -247,7 +613,10 @@ def get_scheduled_jobs():
     """
     global scheduler
 
+    logging.info(f"[get_scheduled_jobs] scheduler = {scheduler}, running = {scheduler.running if scheduler else 'N/A'}")
+
     if scheduler is None:
+        logging.warning("[get_scheduled_jobs] scheduler is None!")
         return []
 
     jobs = []
@@ -271,6 +640,7 @@ def get_scheduled_jobs():
         }
         jobs.append(job_info)
 
+    logging.info(f"[get_scheduled_jobs] Found {len(jobs)} jobs")
     return jobs
 
 
