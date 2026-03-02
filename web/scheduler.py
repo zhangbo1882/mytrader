@@ -532,6 +532,91 @@ def add_scheduled_job(job_id, func, cron_expression, func_args=None, func_kwargs
         return False
 
 
+def update_scheduled_job(job_id, func=None, cron_expression=None, func_args=None, func_kwargs=None, name=None):
+    """
+    Update an existing scheduled job
+
+    Args:
+        job_id: Unique identifier for the job to update
+        func: New function to execute (optional, keeps existing if not provided)
+        cron_expression: New cron expression (optional, keeps existing if not provided)
+        func_args: New positional arguments for the function (optional)
+        func_kwargs: New keyword arguments for the function (optional)
+        name: New human-readable name for the job (optional)
+
+    Returns:
+        job_id if job was updated successfully, False otherwise
+    """
+    global scheduler
+
+    if scheduler is None:
+        logging.error("[Scheduler] Error: Scheduler not initialized")
+        return False
+
+    try:
+        # Get existing job
+        existing_job = scheduler.get_job(job_id)
+        if not existing_job:
+            logging.error(f"[Scheduler] Job not found: {job_id}")
+            return False
+
+        # Keep existing values if not provided
+        if func is None:
+            func = existing_job.func
+        if name is None:
+            name = existing_job.name
+        if func_args is None:
+            func_args = existing_job.args
+        if func_kwargs is None:
+            func_kwargs = existing_job.kwargs
+
+        # Parse new cron expression or keep existing trigger
+        if cron_expression:
+            parts = cron_expression.strip().split()
+            if len(parts) != 5:
+                raise ValueError(f"Invalid cron expression: {cron_expression}")
+            minute, hour, day, month, day_of_week = parts
+            new_trigger = CronTrigger(
+                minute=minute,
+                hour=hour,
+                day=day,
+                month=month,
+                day_of_week=day_of_week,
+                timezone=scheduler.timezone
+            )
+        else:
+            new_trigger = existing_job.trigger
+
+        # Remove old job and add new one with updated values
+        scheduler.remove_job(job_id)
+
+        # Handle string reference to function
+        if isinstance(func, str):
+            func_ref = func
+        else:
+            func_ref = func
+
+        # Add updated job
+        scheduler.add_job(
+            func_ref,
+            trigger=new_trigger,
+            id=job_id,
+            name=name,
+            args=func_args or [],
+            kwargs=func_kwargs or {},
+            replace_existing=True
+        )
+
+        logging.info(f"[Scheduler] Updated job: {job_id}")
+        return job_id
+
+    except Exception as e:
+        logging.error(f"[Scheduler] Error updating job {job_id}: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return False
+
+
 def remove_scheduled_job(job_id):
     """
     Remove a scheduled job
@@ -630,13 +715,23 @@ def get_scheduled_jobs():
             last_underscore_idx = job_id.rfind('_')
             task_type = job_id[:last_underscore_idx] if last_underscore_idx > 0 else None
 
+        # Extract params from job.kwargs
+        job_kwargs = job.kwargs or {}
+        params = job_kwargs.get('params', {})
+
         job_info = {
             'id': job.id,
             'name': job.name,
             'next_run_time': job.next_run_time.isoformat() if job.next_run_time else None,
             'trigger': str(job.trigger),
             'enabled': not job.next_run_time == None,
-            'task_type': task_type  # Extract task_type from job_id
+            'task_type': task_type,  # Extract task_type from job_id
+            # Include task params for editing
+            'stock_range': params.get('stock_range'),
+            'markets': params.get('markets'),
+            'mode': params.get('mode'),
+            'content_type': params.get('content_type'),
+            'exclude_st': params.get('exclude_st'),
         }
         jobs.append(job_info)
 

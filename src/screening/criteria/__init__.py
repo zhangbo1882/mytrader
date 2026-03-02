@@ -17,6 +17,7 @@ from .positive_days_criteria import PositiveDaysCriteria
 from .turnover_criteria import AverageTurnoverCriteria
 from .market_criteria import MarketFilter
 from .field_criteria import FieldFilterCriteria
+from .bear_to_bull_criteria import BearToBullTransitionCriteria
 
 __all__ = [
     # Basic criteria
@@ -35,4 +36,6 @@ __all__ = [
     'AverageTurnoverCriteria',
     # Market criteria
     'MarketFilter',
+    # Bear-to-Bull criteria
+    'BearToBullTransitionCriteria',
 ]

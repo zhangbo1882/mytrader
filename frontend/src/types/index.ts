@@ -8,3 +8,4 @@ export * from './ml.types';
 export * from './backtest.types';
 export * from './valuation.types';
 export * from './screening.types';
+export * from './risk.types';

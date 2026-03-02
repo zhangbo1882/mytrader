@@ -43,4 +43,8 @@ When you want to do any operations, use the existing API as much as possible via
 Refer to web/restx_api.py and web/restx_namespaces.py. 
 
 ## database
-A股日行情数据都在bars_a_1d,港股在bars_1d.
+A股日行情数据都在bars_a_1d,港股在bars_1d
+获取行情数据要从duckdb，其他数据通过sqlite
+
+## language
+使用中文对话和输出

@@ -554,7 +554,11 @@ def handle_update_moneyflow(params):
         return {'error': f'无效的 mode: {mode}，必须是 incremental/full'}, 400
 
     # 验证 stock_range 参数
-    if stock_range not in ['all', 'favorites', 'custom']:
+    # 注意：资金流向不支持 market，自动转换为 all
+    valid_stock_ranges = ['all', 'favorites', 'custom']
+    if stock_range == 'market':
+        stock_range = 'all'  # 自动转换
+    elif stock_range not in valid_stock_ranges:
         return {'error': f'无效的 stock_range: {stock_range}，必须是 all/favorites/custom'}, 400
 
     if stock_range == 'custom':

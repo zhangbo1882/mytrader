@@ -18,6 +18,7 @@ const FIELD_OPTIONS = [
   { value: 'turnover_rate', label: '换手率(%)' },
   { value: 'avg_amplitude', label: '平均振幅(%)' },
   { value: 'positive_days', label: '正收益天数占比' },
+  { value: 'bear_to_bull', label: '熊牛交替信号' },
 ];
 
 // Field descriptions for tooltips
@@ -29,7 +30,8 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   total_mv_yi: '总市值（亿元）：公司的市场总价值',
   turnover_rate: '换手率：一定时期内股票转手买卖的频率',
   avg_amplitude: '平均振幅：股票价格每日波动幅度的平均值',
-  positive_days: '正收益天数占比：一定时期内股价上涨的天数比例'
+  positive_days: '正收益天数占比：一定时期内股价上涨的天数比例',
+  bear_to_bull: '当日为牛市，且之前N个交易日持续为熊市或震荡市'
 };
 
 // Industry level options
@@ -63,7 +65,8 @@ const CRITERIA_TYPE_DESCRIPTIONS: Record<CriteriaType, string> = {
   GreaterThan: '筛选大于指定阈值的数值',
   LessThan: '筛选小于指定阈值的数值',
   Percentile: '基于历史百分位筛选（0-100%）',
-  IndustryRelative: '相对于行业平均水平的百分位筛选'
+  IndustryRelative: '相对于行业平均水平的百分位筛选',
+  BearToBull: '当日为牛市，且之前N个交易日持续为熊市或震荡市'
 };
 
 // Industry option structure
@@ -96,6 +99,9 @@ interface ConditionData {
 
     // Technical indicator params (period is always needed)
     period?: number;
+
+    // Bear-to-bull params
+    cycle?: string;
 
     // Industry relative params
     industryField?: string;
@@ -130,6 +136,9 @@ const getAvailableTypesForField = (field: string): CriteriaType[] => {
   }
   if (['turnover_rate', 'avg_amplitude', 'positive_days'].includes(field)) {
     return ['Range', 'GreaterThan', 'LessThan'];
+  }
+  if (field === 'bear_to_bull') {
+    return ['BearToBull'];
   }
   return ['Range', 'GreaterThan', 'LessThan'];
 };
@@ -212,7 +221,7 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
       let newParams: any = { period: 20 };
 
       if (newField === 'market') {
-        newParams = { markets: ['主板', '创业板'], marketMode: 'include' };
+        newParams = { markets: ['主板', '港股'], marketMode: 'include' };
       } else if (newField === 'industry') {
         newParams = { industries: [], industryLevel: 1, industryMode: 'include' };
       } else if (['pe_ttm', 'pb', 'total_mv_yi'].includes(newField)) {
@@ -221,6 +230,9 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
         newParams = { minVal: 0, maxVal: 10, period: 20 };
       } else if (newField === 'positive_days') {
         newParams = { threshold: 0.5, period: 20 };
+      } else if (newField === 'bear_to_bull') {
+        newParams = { period: 10, cycle: 'medium' };
+        return { ...c, field: newField, type: 'BearToBull' as CriteriaType, params: newParams };
       }
 
       return { ...c, field: newField, params: newParams };
@@ -621,6 +633,47 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
       );
     }
 
+    // === Bear-to-Bull Signal Field ===
+    if (field === 'bear_to_bull') {
+      return (
+        <div style={{ width: '100%' }}>
+          <div style={{ marginBottom: 16 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              之前天数
+            </Text>
+            <InputNumber
+              placeholder="天数"
+              value={params.period}
+              onChange={(val) => updateConditionParams(condition.id, { period: val || 10 })}
+              style={{ width: '100%' }}
+              size="middle"
+              min={1}
+              max={120}
+              addonAfter="天"
+            />
+          </div>
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              判断周期
+            </Text>
+            <Select
+              value={params.cycle || 'medium'}
+              onChange={(value) => updateConditionParams(condition.id, { cycle: value })}
+              style={{ width: '100%' }}
+              size="middle"
+            >
+              <Select.Option value="short">短周期（MA 3/5/10）</Select.Option>
+              <Select.Option value="medium">中周期（MA 5/10/20）</Select.Option>
+              <Select.Option value="long">长周期（MA 10/20/40）</Select.Option>
+            </Select>
+          </div>
+        </div>
+      );
+    }
+
     return <Text type="secondary">请选择字段</Text>;
   };
 
@@ -759,6 +812,9 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
       if (c.params.threshold === undefined) {
         return false;
       }
+    }
+    if (c.field === 'bear_to_bull') {
+      return !!(c.params.period && c.params.period > 0);
     }
     return true;
   };
@@ -950,6 +1006,15 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
             ...timeRangeConfig,
             threshold: c.params.threshold,
             min_positive_ratio: c.params.min_positive_ratio || 0.5
+          };
+        }
+
+        // Bear-to-Bull transition signal
+        if (c.field === 'bear_to_bull') {
+          return {
+            type: 'BearToBull',
+            period: c.params.period || 10,
+            cycle: c.params.cycle || 'medium'
           };
         }
 

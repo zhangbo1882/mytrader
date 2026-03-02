@@ -34,6 +34,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ReloadOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { TaskCard } from '@/components/tasks/TaskCard';
 import { useTaskStore } from '@/stores';
@@ -129,6 +130,7 @@ function UpdatePage() {
 
   const [taskModalVisible, setTaskModalVisible] = useState(false);
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
+  const [editingJob, setEditingJob] = useState<ScheduledJob | null>(null);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [jobsLoading, setJobsLoading] = useState(true);
@@ -502,6 +504,97 @@ function UpdatePage() {
     }
   };
 
+  // 编辑定时任务
+  const handleEditScheduledJob = (job: ScheduledJob) => {
+    setEditingJob(job);
+
+    // 解析 cron 表达式
+    let cronExpression = '';
+    const triggerMatch = job.trigger?.match(/cron\[(.*)\]/);
+    if (triggerMatch) {
+      // 从 trigger 字符串解析 cron 表达式
+      const parts: Record<string, string> = {};
+      const matches = triggerMatch[1].matchAll(/(\w+)='([^']*)'/g);
+      for (const match of matches) {
+        parts[match[1]] = match[2];
+      }
+      if (parts.minute !== undefined && parts.hour !== undefined) {
+        cronExpression = `${parts.minute} ${parts.hour} ${parts.day || '*'} ${parts.month || '*'} ${parts.day_of_week || '*'}`;
+      }
+    }
+
+    // 从 job 中读取 content_type
+    const contentType = job.task_type === 'update_hk_prices' ? 'hk' :
+                        job.task_type === 'update_moneyflow' ? 'moneyflow' :
+                        job.task_type === 'update_index_data' ? 'index' :
+                        job.task_type === 'update_industry_statistics' ? 'statistics' :
+                        job.task_type === 'update_dragon_list' ? 'dragon_list' : 'stock';
+
+    // 设置表单初始值，从 job 中读取实际参数
+    scheduleForm.setFieldsValue({
+      name: job.name,
+      cron_expression: cronExpression,
+      content_type: contentType,
+      mode: job.mode || 'incremental',
+      stock_range: job.stock_range || 'all',
+      schedule_markets: job.markets || ['main'],
+      schedule_exclude_st: job.exclude_st !== false,
+    });
+
+    setScheduleModalVisible(true);
+  };
+
+  // 更新定时任务
+  const handleUpdateScheduledJob = async () => {
+    if (!editingJob) return;
+
+    try {
+      const values = await scheduleForm.validateFields();
+      setLoading(true);
+
+      const params: any = {
+        name: values.name,
+        trigger: {
+          cron_expression: values.cron_expression,
+        },
+        content_type: values.content_type || 'stock',
+        mode: values.mode || 'incremental',
+      };
+
+      // 根据任务类型设置不同参数
+      if (values.content_type === 'stock' || values.content_type === 'moneyflow') {
+        params.stock_range = values.stock_range || 'all';
+        if (values.stock_range === 'market') {
+          params.markets = values.schedule_markets || ['main'];
+        }
+        params.exclude_st = values.schedule_exclude_st !== false;
+      } else if (values.content_type === 'index') {
+        params.markets = values.markets || ['SSE', 'SZSE'];
+      }
+
+      await scheduleService.update(editingJob.id, params);
+      message.success({
+        content: '定时任务已更新',
+        icon: <CheckCircleOutlined />,
+        duration: 3,
+      });
+      setScheduleModalVisible(false);
+      setEditingJob(null);
+      scheduleForm.resetFields();
+      loadScheduledJobs();
+    } catch (error) {
+      if (error instanceof Error) {
+        message.error({
+          content: `更新失败：${error.message}`,
+          icon: <CloseCircleOutlined />,
+          duration: 5,
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // 暂停任务
   const handlePauseTask = async (taskId: string) => {
     try {
@@ -719,8 +812,20 @@ function UpdatePage() {
                 renderItem={(job) => (
                   <List.Item
                     actions={[
+                      <Tooltip key="edit" title="编辑任务">
+                        <Button
+                          type="text"
+                          size="large"
+                          icon={<EditOutlined aria-hidden="true" />}
+                          onClick={() => handleEditScheduledJob(job)}
+                          aria-label="编辑定时任务"
+                          style={{ height: 44, minWidth: 44 }}
+                        >
+                          编辑
+                        </Button>
+                      </Tooltip>,
                       job.enabled ? (
-                        <Tooltip title="暂停任务">
+                        <Tooltip key="pause" title="暂停任务">
                           <Button
                             type="text"
                             size="large"
@@ -733,7 +838,7 @@ function UpdatePage() {
                           </Button>
                         </Tooltip>
                       ) : (
-                        <Tooltip title="恢复任务">
+                        <Tooltip key="resume" title="恢复任务">
                           <Button
                             type="text"
                             size="large"
@@ -747,6 +852,7 @@ function UpdatePage() {
                         </Tooltip>
                       ),
                       <Popconfirm
+                        key="delete"
                         title="确定要删除这个定时任务吗？"
                         onConfirm={() => handleDeleteScheduledJob(job.id)}
                         okText="确定"
@@ -1107,11 +1213,12 @@ function UpdatePage() {
         </Form>
       </Modal>
       <Modal
-        title="创建定时任务"
+        title={editingJob ? '编辑定时任务' : '创建定时任务'}
         open={scheduleModalVisible}
-        onOk={handleCreateScheduledJob}
+        onOk={editingJob ? handleUpdateScheduledJob : handleCreateScheduledJob}
         onCancel={() => {
           setScheduleModalVisible(false);
+          setEditingJob(null);
           scheduleForm.resetFields();
         }}
         confirmLoading={loading}

@@ -7,6 +7,7 @@ export interface FavoriteStock extends Stock {
   safetyRating: string | null;
   fundamentalRating: string | null;
   entryPrice: number | null;
+  urgency: number | null;
 }
 
 interface FavoriteState {
@@ -32,6 +33,7 @@ const toFavoriteStock = (item: FavoriteItem): FavoriteStock => ({
   safetyRating: item.safety_rating,
   fundamentalRating: item.fundamental_rating,
   entryPrice: item.entry_price,
+  urgency: item.urgency,
 });
 
 export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
@@ -89,6 +91,7 @@ export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
                 safetyRating: data.safety_rating ?? f.safetyRating,
                 fundamentalRating: data.fundamental_rating ?? f.fundamentalRating,
                 entryPrice: data.entry_price ?? f.entryPrice,
+                urgency: data.urgency ?? f.urgency,
               }
             : f
         ),

@@ -11,7 +11,8 @@ export type CriteriaType =
   | 'AmplitudeColumn' // Amplitude column {period, min_val/max_val/threshold}
   | 'TurnoverColumn'  // Turnover column {period, min_val/max_val/threshold}
   | 'PositiveDays'     // Positive days {period, threshold, min_positive_ratio}
-  | 'MarketFilter';   // Market filter {markets[], mode}
+  | 'MarketFilter'     // Market filter {markets[], mode}
+  | 'BearToBull';     // Bear-to-bull transition {period, cycle}
 
 export interface Criteria {
   type: CriteriaType;

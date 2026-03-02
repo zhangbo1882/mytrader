@@ -12,6 +12,11 @@ export const scheduleService = {
     return api.post<{ success: boolean; job_id: string; message?: string }>('/schedule/jobs', params);
   },
 
+  // Update an existing scheduled job
+  update: (id: string, params: Partial<CreateScheduledJobParams>) => {
+    return api.put<{ success: boolean; job_id: string; message?: string }>(`/schedule/jobs/${id}`, params);
+  },
+
   // Delete a scheduled job
   delete: (id: string) => {
     return api.delete<{ success: boolean }>(`/schedule/jobs/${id}`);

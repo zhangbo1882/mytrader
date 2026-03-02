@@ -19,19 +19,103 @@ logger = logging.getLogger(__name__)
 # Global lock for thread-safe parameter access
 _param_lock = threading.Lock()
 
-# Default configuration constants (immutable reference)
-_DEFAULT_MARKET_STATE_CONFIG = {
-    'lookback_days': 250,          # Lookback period (trading days)
-    'ma_short': 20,                # Short-term MA
-    'ma_medium': 60,               # Medium-term MA
-    'ma_long': 120,                # Long-term MA
-    'roc_period': 20,              # ROC period
-    'roc_dynamic_multiplier': 1.5, # ROC dynamic threshold multiplier
-    'bull_threshold': 70,          # Bull market total score threshold
-    'bear_threshold': 40,          # Bear market total score threshold
-    'volatility_percentile_low': 40,   # Low volatility percentile
-    'volatility_percentile_high': 80,  # High volatility percentile
+# 多周期配置预设
+# 短周期: MA 3, 5, 10 (适合短线交易)
+# 中周期: MA 5, 10, 20 (现有默认)
+# 长周期: MA 10, 20, 40 (适合中长线投资)
+CYCLE_CONFIGS = {
+    'short': {
+        'name': '短周期',
+        'description': 'EMA 3/5/10 + SMA20锚, 适合短线交易',
+        'lookback_days': 30,
+        'ma_short': 3,
+        'ma_medium': 5,
+        'ma_long': 10,
+        'ma_anchor': 20,              # SMA方向锚（>ma_long）
+        'roc_period': 5,              # 加速度计算窗口（单期ROC天数）
+        'roc_dynamic_multiplier': 1.5,
+        'bull_threshold': 70,
+        'bear_threshold': 40,
+        'volatility_percentile_low': 40,
+        'volatility_percentile_high': 80,
+        'volume_lookback': 10,        # 涨跌日量比计算周期（原3→10）
+        'atr_period': 3,
+        'turnover_lookback_short': 3, # 换手率近期均值窗口
+        'turnover_lookback_long': 20, # 换手率历史基准窗口
+    },
+    'medium': {
+        'name': '中周期',
+        'description': 'EMA 5/10/20 + SMA60锚, 适合波段交易',
+        'lookback_days': 60,
+        'ma_short': 5,
+        'ma_medium': 10,
+        'ma_long': 20,
+        'ma_anchor': 60,              # SMA60季线方向锚
+        'roc_period': 10,             # 加速度计算窗口（单期ROC天数）
+        'roc_dynamic_multiplier': 1.5,
+        'bull_threshold': 70,
+        'bear_threshold': 40,
+        'volatility_percentile_low': 40,
+        'volatility_percentile_high': 80,
+        'volume_lookback': 20,        # 涨跌日量比计算周期（原5→20）
+        'atr_period': 5,
+        'turnover_lookback_short': 5, # 换手率近期均值窗口
+        'turnover_lookback_long': 60, # 换手率历史基准窗口
+    },
+    'long': {
+        'name': '长周期',
+        'description': 'EMA 10/20/40 + SMA120锚, 适合中长线投资',
+        'lookback_days': 120,
+        'ma_short': 10,
+        'ma_medium': 20,
+        'ma_long': 40,
+        'ma_anchor': 120,             # SMA120半年线方向锚
+        'roc_period': 20,             # 加速度计算窗口（单期ROC天数）
+        'roc_dynamic_multiplier': 1.5,
+        'bull_threshold': 70,
+        'bear_threshold': 40,
+        'volatility_percentile_low': 40,
+        'volatility_percentile_high': 80,
+        'volume_lookback': 40,        # 涨跌日量比计算周期（原10→40）
+        'atr_period': 10,
+        'turnover_lookback_short': 10, # 换手率近期均值窗口
+        'turnover_lookback_long': 90,  # 换手率历史基准窗口
+    },
 }
+
+
+def get_cycle_config(cycle: str = 'medium') -> dict:
+    """
+    获取指定周期的配置
+
+    Args:
+        cycle: 周期类型 ('short', 'medium', 'long')
+
+    Returns:
+        周期配置字典
+    """
+    if cycle not in CYCLE_CONFIGS:
+        logger.warning(f"未知的周期类型 '{cycle}'，使用默认 'medium'")
+        cycle = 'medium'
+    return copy.deepcopy(CYCLE_CONFIGS[cycle])
+
+
+def get_all_cycle_configs() -> dict:
+    """
+    获取所有周期的配置
+
+    Returns:
+        所有周期配置的字典
+    """
+    return copy.deepcopy(CYCLE_CONFIGS)
+
+
+# Default configuration constants (immutable reference)
+# 中周期版本：默认配置
+_DEFAULT_MARKET_STATE_CONFIG = CYCLE_CONFIGS['medium'].copy()
+# 移除非配置字段
+_DEFAULT_MARKET_STATE_CONFIG.pop('name', None)
+_DEFAULT_MARKET_STATE_CONFIG.pop('description', None)
 
 # Default regime params (immutable reference)
 # These values match the database default_strategy_params for price_breakout_v2_default
@@ -58,15 +142,6 @@ _current_market_config = copy.deepcopy(_DEFAULT_MARKET_STATE_CONFIG)
 _current_regime_params = copy.deepcopy(_DEFAULT_REGIME_PARAMS)
 
 
-# Auto-load default parameters from database on module import
-# This ensures the strategy uses the latest defaults from database
-try:
-    load_regime_params_from_db()
-except Exception as e:
-    # If loading fails, use code defaults (already set above)
-    pass
-
-
 class MarketRegime(Enum):
     """Market regime enumeration"""
     BULL = "bull"       # Strong upward trend
@@ -80,6 +155,14 @@ class MarketState:
 
     Contains the detected market regime along with confidence scores
     and individual component scores.
+
+    Scoring dimensions (v2.1):
+    - ma_trend: trend score ±30 (EMA short/medium/long + SMA anchor)
+    - momentum: four-quadrant acceleration score ±25 (direction × acceleration)
+    - volume_confirm: volume-price structure score 0~20
+    - turnover_score: turnover sentiment score 0~15
+    - volatility: volatility score ±10 (direction-linked)
+    - position_ratio: deprecated, always 0 (kept for backwards compatibility)
     """
 
     def __init__(
@@ -90,15 +173,17 @@ class MarketState:
         momentum: float,
         position_ratio: float,
         volume_confirm: float,
-        volatility: float
+        volatility: float,
+        turnover_score: float = 0
     ):
         self.regime = regime
         self.confidence = confidence
         self.ma_trend = ma_trend
         self.momentum = momentum
-        self.position_ratio = position_ratio
+        self.position_ratio = position_ratio  # deprecated, kept for compatibility
         self.volume_confirm = volume_confirm
         self.volatility = volatility
+        self.turnover_score = turnover_score
 
     def __repr__(self):
         return (
@@ -106,8 +191,8 @@ class MarketState:
             f"confidence={self.confidence:.2f}, "
             f"ma_trend={self.ma_trend}, "
             f"momentum={self.momentum}, "
-            f"position_ratio={self.position_ratio:.2f}, "
             f"volume_confirm={self.volume_confirm}, "
+            f"turnover={self.turnover_score}, "
             f"volatility={self.volatility})"
         )
 
@@ -118,9 +203,10 @@ class MarketState:
             "confidence": self.confidence,
             "ma_trend": self.ma_trend,
             "momentum": self.momentum,
-            "position_ratio": self.position_ratio,
             "volume_confirm": self.volume_confirm,
-            "volatility": self.volatility
+            "turnover_score": self.turnover_score,
+            "volatility": self.volatility,
+            "position_ratio": self.position_ratio,  # deprecated, always 0
         }
 
 
@@ -262,6 +348,15 @@ def load_regime_params_from_db(strategy_name: str = 'price_breakout_v2_default',
     except Exception as e:
         logger.error(f"Error loading regime params from database: {e}")
         return False
+
+
+# Auto-load default parameters from database on module import
+# This ensures the strategy uses the latest defaults from database
+try:
+    load_regime_params_from_db()
+except Exception as e:
+    # If loading fails, use code defaults (already set above)
+    pass
 
 
 # Order execution configuration

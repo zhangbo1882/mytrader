@@ -37,7 +37,8 @@ def init_favorites_table(db):
             columns = [
                 'safety_rating TEXT',
                 'fundamental_rating TEXT',
-                'entry_price REAL'
+                'entry_price REAL',
+                'urgency INTEGER'
             ]
             for col_def in columns:
                 col_name = col_def.split()[0]
@@ -68,7 +69,7 @@ def list_favorites():
         with db.engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT id, stock_code, stock_name, added_at, notes,
-                       safety_rating, fundamental_rating, entry_price
+                       safety_rating, fundamental_rating, entry_price, urgency
                 FROM favorites
                 WHERE user_id = :user_id
                 ORDER BY added_at DESC
@@ -84,7 +85,8 @@ def list_favorites():
                     'notes': row[4],
                     'safety_rating': row[5],
                     'fundamental_rating': row[6],
-                    'entry_price': row[7]
+                    'entry_price': row[7],
+                    'urgency': row[8]
                 })
 
             return {
@@ -106,6 +108,7 @@ def add_favorite():
         safety_rating: 安全性评级（可选）
         fundamental_rating: 基本面评级（可选）
         entry_price: 进场价格（可选）
+        urgency: 紧急程度1-5（可选）
     """
     db = get_db()
     if not db:
@@ -130,6 +133,7 @@ def add_favorite():
         safety_rating = data.get('safety_rating')
         fundamental_rating = data.get('fundamental_rating')
         entry_price = data.get('entry_price')
+        urgency = data.get('urgency')
 
         from datetime import datetime
         added_at = datetime.now().isoformat()
@@ -138,9 +142,9 @@ def add_favorite():
             with db.engine.connect() as conn:
                 result = conn.execute(text("""
                     INSERT INTO favorites (user_id, stock_code, stock_name, added_at, notes,
-                                           safety_rating, fundamental_rating, entry_price)
+                                           safety_rating, fundamental_rating, entry_price, urgency)
                     VALUES (:user_id, :stock_code, :stock_name, :added_at, :notes,
-                            :safety_rating, :fundamental_rating, :entry_price)
+                            :safety_rating, :fundamental_rating, :entry_price, :urgency)
                 """), {
                     "user_id": user_id,
                     "stock_code": stock_code,
@@ -149,7 +153,8 @@ def add_favorite():
                     "notes": notes,
                     "safety_rating": safety_rating,
                     "fundamental_rating": fundamental_rating,
-                    "entry_price": entry_price
+                    "entry_price": entry_price,
+                    "urgency": urgency
                 })
                 conn.commit()
 
@@ -161,7 +166,8 @@ def add_favorite():
                     'notes': notes,
                     'safety_rating': safety_rating,
                     'fundamental_rating': fundamental_rating,
-                    'entry_price': entry_price
+                    'entry_price': entry_price,
+                    'urgency': urgency
                 }, 201
 
         except sqlite3.IntegrityError:
@@ -221,7 +227,7 @@ def check_favorite(stock_code):
         with db.engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT id, stock_code, stock_name, added_at, notes,
-                       safety_rating, fundamental_rating, entry_price
+                       safety_rating, fundamental_rating, entry_price, urgency
                 FROM favorites
                 WHERE user_id = :user_id AND stock_code = :stock_code
             """), {
@@ -241,7 +247,8 @@ def check_favorite(stock_code):
                         'notes': row[4],
                         'safety_rating': row[5],
                         'fundamental_rating': row[6],
-                        'entry_price': row[7]
+                        'entry_price': row[7],
+                        'urgency': row[8]
                     }
                 }, 200
             else:
@@ -291,7 +298,7 @@ def batch_add_favorites():
     Body (JSON):
         stock_codes: 股票代码列表（兼容旧格式）
         stocks_data: 股票数据列表（新格式，包含额外字段）
-            [{code, safety_rating, fundamental_rating, entry_price}, ...]
+            [{code, safety_rating, fundamental_rating, entry_price, urgency}, ...]
         notes: 备注（可选）
     """
     db = get_db()
@@ -339,6 +346,7 @@ def batch_add_favorites():
                 safety_rating = None
                 fundamental_rating = None
                 entry_price = None
+                urgency = None
             else:
                 stock_code = stock_item.get('code', '').strip()
                 if not stock_code:
@@ -346,6 +354,7 @@ def batch_add_favorites():
                 safety_rating = stock_item.get('safety_rating')
                 fundamental_rating = stock_item.get('fundamental_rating')
                 entry_price = stock_item.get('entry_price')
+                urgency = stock_item.get('urgency')
 
             if not stock_code:
                 failed += 1
@@ -376,14 +385,16 @@ def batch_add_favorites():
                             UPDATE favorites
                             SET safety_rating = :safety_rating,
                                 fundamental_rating = :fundamental_rating,
-                                entry_price = :entry_price
+                                entry_price = :entry_price,
+                                urgency = :urgency
                             WHERE user_id = :user_id AND stock_code = :stock_code
                         """), {
                             "user_id": user_id,
                             "stock_code": stock_code,
                             "safety_rating": safety_rating,
                             "fundamental_rating": fundamental_rating,
-                            "entry_price": entry_price
+                            "entry_price": entry_price,
+                            "urgency": urgency
                         })
                         conn.commit()
 
@@ -398,9 +409,9 @@ def batch_add_favorites():
                         # 不存在，插入新记录
                         conn.execute(text("""
                             INSERT INTO favorites (user_id, stock_code, stock_name, added_at, notes,
-                                                   safety_rating, fundamental_rating, entry_price)
+                                                   safety_rating, fundamental_rating, entry_price, urgency)
                             VALUES (:user_id, :stock_code, :stock_name, :added_at, :notes,
-                                    :safety_rating, :fundamental_rating, :entry_price)
+                                    :safety_rating, :fundamental_rating, :entry_price, :urgency)
                         """), {
                             "user_id": user_id,
                             "stock_code": stock_code,
@@ -409,7 +420,8 @@ def batch_add_favorites():
                             "notes": notes,
                             "safety_rating": safety_rating,
                             "fundamental_rating": fundamental_rating,
-                            "entry_price": entry_price
+                            "entry_price": entry_price,
+                            "urgency": urgency
                         })
                         conn.commit()
 
@@ -428,14 +440,16 @@ def batch_add_favorites():
                         UPDATE favorites
                         SET safety_rating = :safety_rating,
                             fundamental_rating = :fundamental_rating,
-                            entry_price = :entry_price
+                            entry_price = :entry_price,
+                            urgency = :urgency
                         WHERE user_id = :user_id AND stock_code = :stock_code
                     """), {
                         "user_id": user_id,
                         "stock_code": stock_code,
                         "safety_rating": safety_rating,
                         "fundamental_rating": fundamental_rating,
-                        "entry_price": entry_price
+                        "entry_price": entry_price,
+                        "urgency": urgency
                     })
                     conn.commit()
 
@@ -470,6 +484,7 @@ def update_favorite(stock_code):
         safety_rating: 安全性评级（可选）
         fundamental_rating: 基本面评级（可选）
         entry_price: 进场价格（可选）
+        urgency: 紧急程度1-5（可选）
         notes: 备注（可选）
     """
     db = get_db()
@@ -499,6 +514,10 @@ def update_favorite(stock_code):
             update_fields.append("entry_price = :entry_price")
             params['entry_price'] = data['entry_price']
 
+        if 'urgency' in data:
+            update_fields.append("urgency = :urgency")
+            params['urgency'] = data['urgency']
+
         if 'notes' in data:
             update_fields.append("notes = :notes")
             params['notes'] = data['notes']
@@ -520,7 +539,7 @@ def update_favorite(stock_code):
             # 返回更新后的数据
             select_result = conn.execute(text("""
                 SELECT id, stock_code, stock_name, added_at, notes,
-                       safety_rating, fundamental_rating, entry_price
+                       safety_rating, fundamental_rating, entry_price, urgency
                 FROM favorites
                 WHERE user_id = :user_id AND stock_code = :stock_code
             """), {"user_id": user_id, "stock_code": stock_code})
@@ -534,7 +553,8 @@ def update_favorite(stock_code):
                 'notes': row[4],
                 'safety_rating': row[5],
                 'fundamental_rating': row[6],
-                'entry_price': row[7]
+                'entry_price': row[7],
+                'urgency': row[8]
             }, 200
 
     except Exception as e:

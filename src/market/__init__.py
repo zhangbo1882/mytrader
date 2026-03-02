@@ -14,7 +14,10 @@ from .market_regime import (
     MARKET_STATE_CONFIG,
     REGIME_PARAMS,
     ORDER_EXECUTION_CONFIG,
-    FUNDAMENTAL_FILTER_CONFIG
+    FUNDAMENTAL_FILTER_CONFIG,
+    CYCLE_CONFIGS,
+    get_cycle_config,
+    get_all_cycle_configs
 )
 from .stock_state_detector import StockStateDetector
 from .fundamental_filter import FundamentalFilter
@@ -28,4 +31,7 @@ __all__ = [
     'REGIME_PARAMS',
     'ORDER_EXECUTION_CONFIG',
     'FUNDAMENTAL_FILTER_CONFIG',
+    'CYCLE_CONFIGS',
+    'get_cycle_config',
+    'get_all_cycle_configs',
 ]

@@ -9,6 +9,7 @@ export interface FavoriteItem {
   safety_rating: string | null;
   fundamental_rating: string | null;
   entry_price: number | null;
+  urgency: number | null;
 }
 
 export interface FavoriteListResponse {
@@ -41,6 +42,7 @@ export interface UpdateFavoriteData {
   safety_rating?: string;
   fundamental_rating?: string;
   entry_price?: number;
+  urgency?: number;
   notes?: string;
 }
 
@@ -49,6 +51,7 @@ export interface StockImportData {
   safety_rating?: string;
   fundamental_rating?: string;
   entry_price?: number;
+  urgency?: number;
 }
 
 export const favoriteService = {

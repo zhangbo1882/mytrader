@@ -27,14 +27,14 @@ class TaskWorker:
     Uses SQLite backend (separate from DuckDB business data) to avoid lock conflicts.
     """
 
-    def __init__(self, db_path=None, poll_interval=5, max_concurrent=1):
+    def __init__(self, db_path=None, poll_interval=5, max_concurrent=3):
         """
         Initialize TaskWorker.
 
         Args:
             db_path: Path to SQLite tasks database (default: TASKS_DB_PATH from settings)
             poll_interval: Seconds between database polls (default: 5)
-            max_concurrent: Maximum number of tasks to run simultaneously (default: 1)
+            max_concurrent: Maximum number of tasks to run simultaneously (default: 3)
         """
         self.db_path = db_path
         self.poll_interval = poll_interval

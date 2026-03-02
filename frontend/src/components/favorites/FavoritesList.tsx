@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Table, Button, Space, Popconfirm, Input, message, Tag, Typography, Modal, Form, Select, InputNumber, Tooltip } from 'antd';
+import { Table, Button, Space, Popconfirm, Input, message, Tag, Typography, Modal, Form, Select, InputNumber, Tooltip, Rate } from 'antd';
 import { DeleteOutlined, SearchOutlined, StarOutlined, EditOutlined, FilterOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { FavoriteStock } from '@/stores/favoriteStore';
@@ -56,6 +56,7 @@ export function FavoritesList({
   // 过滤条件
   const [safetyFilter, setSafetyFilter] = useState<string[]>([]);
   const [fundamentalFilter, setFundamentalFilter] = useState<string[]>([]);
+  const [urgencyFilter, setUrgencyFilter] = useState<number[]>([]);
 
   // 获取最新价格
   const loadLatestPrices = async () => {
@@ -138,21 +139,27 @@ export function FavoritesList({
         return false;
       }
 
+      // 紧急程度过滤（多选）
+      if (urgencyFilter.length > 0 && !urgencyFilter.includes(f.urgency || 0)) {
+        return false;
+      }
+
       return true;
     });
 
     return result;
-  }, [favorites, searchText, safetyFilter, fundamentalFilter]);
+  }, [favorites, searchText, safetyFilter, fundamentalFilter, urgencyFilter]);
 
   // 清除所有过滤条件
   const clearFilters = () => {
     setSearchText('');
     setSafetyFilter([]);
     setFundamentalFilter([]);
+    setUrgencyFilter([]);
   };
 
   // 是否有活动的过滤条件
-  const hasActiveFilters = searchText || safetyFilter.length > 0 || fundamentalFilter.length > 0;
+  const hasActiveFilters = searchText || safetyFilter.length > 0 || fundamentalFilter.length > 0 || urgencyFilter.length > 0;
 
   // 删除收藏
   const handleRemove = (code: string, name: string) => {
@@ -182,6 +189,7 @@ export function FavoritesList({
       safety_rating: stock.safetyRating || undefined,
       fundamental_rating: stock.fundamentalRating || undefined,
       entry_price: stock.entryPrice || undefined,
+      urgency: stock.urgency || undefined,
     });
     setEditModalVisible(true);
   };
@@ -196,6 +204,7 @@ export function FavoritesList({
         safety_rating: values.safety_rating || null,
         fundamental_rating: values.fundamental_rating || null,
         entry_price: values.entry_price || null,
+        urgency: values.urgency || null,
       });
       message.success('更新成功');
       setEditModalVisible(false);
@@ -247,6 +256,17 @@ export function FavoritesList({
         <Tag color={rating === 'A' ? 'green' : rating === 'B' ? 'blue' : rating === 'C' ? 'orange' : 'red'}>
           {rating}
         </Tag>
+      ) : '-',
+    },
+    {
+      title: '紧急度',
+      dataIndex: 'urgency',
+      key: 'urgency',
+      width: 130,
+      align: 'center',
+      sorter: (a, b) => (a.urgency || 0) - (b.urgency || 0),
+      render: (urgency) => urgency ? (
+        <Rate disabled value={urgency} count={5} style={{ fontSize: 14 }} />
       ) : '-',
     },
     {
@@ -380,6 +400,22 @@ export function FavoritesList({
             options={RATING_OPTIONS}
           />
 
+          <Select
+            mode="multiple"
+            placeholder="紧急程度"
+            style={{ width: 150 }}
+            value={urgencyFilter}
+            onChange={setUrgencyFilter}
+            allowClear
+            maxTagCount="responsive"
+          >
+            <Select.Option value={5}>5星</Select.Option>
+            <Select.Option value={4}>4星</Select.Option>
+            <Select.Option value={3}>3星</Select.Option>
+            <Select.Option value={2}>2星</Select.Option>
+            <Select.Option value={1}>1星</Select.Option>
+          </Select>
+
           {hasActiveFilters && (
             <Button onClick={clearFilters}>
               清除筛选
@@ -432,7 +468,7 @@ export function FavoritesList({
           },
         }}
         size="small"
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1200 }}
       />
 
       {/* 空状态提示 */}
@@ -480,6 +516,9 @@ export function FavoritesList({
               precision={2}
               style={{ width: '100%' }}
             />
+          </Form.Item>
+          <Form.Item name="urgency" label="紧急程度">
+            <Rate count={5} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
       </Modal>

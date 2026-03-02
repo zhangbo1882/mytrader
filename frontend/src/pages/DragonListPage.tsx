@@ -18,8 +18,7 @@ import {
   TrophyOutlined,
   RiseOutlined,
   FallOutlined,
-  ReloadOutlined,
-  ThunderboltOutlined
+  ReloadOutlined
 } from '@ant-design/icons';
 import { dragonlistService } from '@/services';
 import type { DragonList, DragonListStats, DragonListSortBy } from '@/types/dragonlist.types';
@@ -92,19 +91,6 @@ function DragonListPage() {
       fetchDailyData(selectedDate);
     } else if (activeTab === 'top') {
       fetchTopData();
-    }
-  };
-
-  // 创建更新任务
-  const handleUpdate = async () => {
-    try {
-      const response = await dragonlistService.update('incremental');
-
-      if (response.success) {
-        message.success(`更新任务已创建: ${response.task_id}`);
-      }
-    } catch (error) {
-      message.error('创建任务失败');
     }
   };
 
@@ -208,9 +194,6 @@ function DragonListPage() {
           />
           <Button type="primary" icon={<ReloadOutlined />} onClick={handleRefresh}>
             刷新
-          </Button>
-          <Button icon={<ThunderboltOutlined />} onClick={handleUpdate}>
-            更新数据
           </Button>
         </Space>
 

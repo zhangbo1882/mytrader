@@ -16,6 +16,7 @@ from src.screening.criteria.positive_days_criteria import PositiveDaysCriteria
 from src.screening.criteria.turnover_criteria import AverageTurnoverCriteria
 from src.screening.criteria.market_criteria import MarketFilter
 from src.screening.criteria.field_criteria import FieldFilterCriteria
+from src.screening.criteria.bear_to_bull_criteria import BearToBullTransitionCriteria
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class RuleEngine:
         'PositiveDays': PositiveDaysCriteria,
         'MarketFilter': MarketFilter,
         'FieldFilter': FieldFilterCriteria,
+        'BearToBull': BearToBullTransitionCriteria,
     }
 
     @classmethod

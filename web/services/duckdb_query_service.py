@@ -84,7 +84,7 @@ class DuckDBQueryService:
                             existing_columns = [col['column_name'] for col in table_info]
                             # 基础列 + 可选列（换手率、股本、市值等）
                             # 包含pre_close以便在pct_chg为NULL时计算涨跌幅
-                            optional_columns = ['volume', 'amount', 'pct_chg', 'pre_close', 'turnover_rate_f',
+                            optional_columns = ['volume', 'amount', 'pct_chg', 'pre_close', 'turnover', 'turnover_rate_f',
                                               'total_share', 'free_share', 'total_mv', 'circ_mv']
                             columns = ['datetime'] + price_columns + optional_columns
                             columns = [col for col in columns if col in existing_columns]
@@ -178,15 +178,20 @@ class DuckDBQueryService:
                             else:
                                 df['datetime'] = pd.to_datetime(df['datetime']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
-                        # 单位转换：Tushare 原始单位是"手"和"千元"
-                        # 成交量：手 -> 股（乘以100）
-                        if 'volume' in df.columns:
-                            df['volume'] = df['volume'] * 100
-                        # 成交额：千元 -> 元（乘以1000）
-                        if 'amount' in df.columns:
-                            df['amount'] = df['amount'] * 1000
-                        if 'turnover' in df.columns:
-                            df['turnover'] = df['turnover'] * 1000
+                        # 单位转换：根据股票类型不同处理
+                        # A股：Tushare 原始单位是"手"和"千元"，保存时未转换
+                        # 港股：Tushare 原始单位是"股"和"千元"，保存时未转换
+                        is_hk = exchange == 'HK' or (exchange is None and len(stock_code) == 5 and stock_code.startswith('0'))
+
+                        if not is_hk:
+                            # A股：volume是"手"需要转"股"（乘以100）
+                            if 'volume' in df.columns:
+                                df['volume'] = df['volume'] * 100
+                            # A股：amount是"千元"需要转"元"（乘以1000）
+                            if 'amount' in df.columns:
+                                df['amount'] = df['amount'] * 1000
+                        # 港股：volume和amount在数据库中已经是正确单位，不需要转换
+                        # 注意：turnover 字段现在存储的是换手率（百分比），不需要单位转换
 
                         # 处理NaN值 - 将所有NaN转为None（JSON null）
                         # 必须在 to_dict 之前处理，否则 NaN 会被序列化为无效的 JSON
