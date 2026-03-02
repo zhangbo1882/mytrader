@@ -17,6 +17,7 @@ import {
   TransactionOutlined,
   TrophyOutlined,
   ImportOutlined,
+  SafetyOutlined,
 } from '@ant-design/icons';
 import { Layout, Menu, theme } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -46,6 +47,7 @@ const ScreeningPage = lazy(() => import('./pages/ScreeningPage'));
 const MoneyFlowPage = lazy(() => import('./pages/MoneyFlowPage'));
 const DragonListPage = lazy(() => import('./pages/DragonListPage'));
 const DataImportPage = lazy(() => import('./pages/DataImportPage'));
+const RiskManagementPage = lazy(() => import('./pages/RiskManagementPage'));
 
 type MenuItem = {
   key: string;
@@ -86,6 +88,7 @@ function AppLayout() {
     { key: '/screening', icon: <FilterOutlined aria-hidden="true" />, label: '股票筛选' },
     { key: '/moneyflow', icon: <TransactionOutlined aria-hidden="true" />, label: '资金流向' },
     { key: '/dragon-list', icon: <TrophyOutlined aria-hidden="true" />, label: '龙虎榜' },
+    { key: '/risk', icon: <SafetyOutlined aria-hidden="true" />, label: '风险管理' },
   ];
 
   return (
@@ -160,6 +163,7 @@ function App() {
             <Route path="screening" element={<ScreeningPage />} />
             <Route path="moneyflow" element={<MoneyFlowPage />} />
             <Route path="dragon-list" element={<DragonListPage />} />
+            <Route path="risk" element={<RiskManagementPage />} />
           </Route>
         </Routes>
       </Suspense>

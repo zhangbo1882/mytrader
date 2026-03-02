@@ -51,6 +51,9 @@ dragon_list_ns = Namespace('dragon-list', description='龙虎榜接口')
 # Alpha Namespace
 alpha_ns = Namespace('alphas', description='101 Formulaic Alphas 因子库接口')
 
+# Risk Management Namespace
+risk_ns = Namespace('risk', description='风险管理接口')
+
 # ============================================================================
 # Models (DTOs) - must be defined AFTER namespaces
 # ============================================================================
@@ -243,6 +246,135 @@ class StockQueryResource(Resource):
         """股票查询"""
         from web.services.stock_service import stock_query
         return stock_query()
+
+
+# 牛熊市判断请求模型
+market_regime_model = stock_ns.model('MarketRegimeQuery', {
+    'symbol': fields.String(required=True, description='股票代码', example='600382'),
+    'start_date': fields.String(required=False, description='开始日期 (YYYY-MM-DD)', example='2025-01-01'),
+    'end_date': fields.String(required=False, description='结束日期 (YYYY-MM-DD)', example='2025-02-25'),
+    'cycle': fields.String(required=False, description='单周期查询: short(短周期), medium(中周期), long(长周期)', example='medium', enum=['short', 'medium', 'long']),
+    'cycles': fields.List(fields.String, required=False, description='多周期查询: 传入多个周期如 ["short", "medium", "long"]'),
+})
+
+
+@stock_ns.route('/regime')
+class MarketRegimeResource(Resource):
+    """牛熊市判断"""
+    @stock_ns.doc('get_market_regime',
+        description='''计算股票的牛熊市状态历史。
+
+**支持多周期查询：**
+- **短周期 (short)**: EMA 3/5/10 + SMA20锚, 回看30天, 适合短线/题材股
+- **中周期 (medium)**: EMA 5/10/20 + SMA60锚, 回看60天, 适合波段/成长股 (默认)
+- **长周期 (long)**: EMA 10/20/40 + SMA120锚, 回看120天, 适合长线/蓝筹股
+
+**评分维度（总分100分，v2.1）：**
+- 趋势分 (±30分): EMA多空头排列 + SMA方向锚（区分真趋势与熊市反弹）
+- 动能分 (±25分): 四象限加速度评分（当期涨跌方向 × 加速/减速）
+- 量价分 (0~20分): 20日涨跌日量比 + 量价背离检测
+- 换手率分 (0~15分): 近期换手率/历史均值，捕捉散户参与热度（仅正分）
+- 波动分 (±10分): ATR百分位与趋势方向联动
+
+**判断标准：**
+- 总分 ≥ 70: 牛市 (bull)
+- 总分 ≤ 40: 熊市 (bear)
+- 其他: 震荡 (neutral)
+
+**请求体参数：**
+- **symbol**: 股票代码（单只股票）
+- **start_date**: 开始日期（可选，默认最近3个月）
+- **end_date**: 结束日期（可选，默认今天）
+- **cycle**: 单周期查询 (short/medium/long)
+- **cycles**: 多周期查询，传入数组如 ["short", "medium", "long"]
+
+**返回数据：**
+- 单周期: { symbol, data: [...] }
+- 多周期: { symbol, cycles: { short: [...], medium: [...], long: [...] } }
+''')
+    @stock_ns.expect(market_regime_model)
+    def post(self):
+        """计算牛熊市状态历史"""
+        from flask import request
+        from web.services.duckdb_query_service import get_duckdb_query_service
+        from web.services.market_regime_service import MarketRegimeService, CYCLE_CONFIGS
+
+        data = request.get_json()
+        symbol = data.get('symbol')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        cycle = data.get('cycle')
+        cycles = data.get('cycles')
+
+        if not symbol:
+            return {'error': 'symbol is required'}, 400
+
+        # 确定需要获取的最大回看天数
+        if cycles:
+            max_lookback = max(CYCLE_CONFIGS[c]['lookback_days'] for c in cycles if c in CYCLE_CONFIGS)
+        elif cycle and cycle in CYCLE_CONFIGS:
+            max_lookback = CYCLE_CONFIGS[cycle]['lookback_days']
+        else:
+            max_lookback = 120  # 默认使用长周期的回看天数
+
+        # 默认查询最近3个月
+        from datetime import datetime, timedelta
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+
+        try:
+            # 牛熊市计算需要回看窗口，扩展开始日期
+            extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=max_lookback + 30)).strftime('%Y-%m-%d')
+
+            # 获取K线数据（使用扩展的日期范围）
+            query_service = get_duckdb_query_service()
+            results = query_service.query_bars(
+                symbols=[symbol],
+                start_date=extended_start,
+                end_date=end_date,
+                interval='1d',
+                price_type='bfq'
+            )
+
+            if not results or symbol not in results or not results[symbol]:
+                return {'error': f'No data found for {symbol}', 'data': []}
+
+            # 多周期查询
+            if cycles:
+                regime_service = MarketRegimeService()
+                multi_results = regime_service.calculate_multi_cycle_regimes(results[symbol], cycles)
+                return {'symbol': symbol, 'cycles': multi_results}
+
+            # 单周期查询
+            cycle_type = cycle or 'medium'
+            regime_service = MarketRegimeService(cycle=cycle_type)
+            regime_history = regime_service.calculate_regime_history(results[symbol])
+
+            return {'symbol': symbol, 'cycle': cycle_type, 'data': regime_history}
+
+        except Exception as e:
+            import logging
+            logging.error(f"计算牛熊市状态失败: {e}")
+            return {'error': str(e)}, 500
+
+
+@stock_ns.route('/regime/cycles')
+class MarketRegimeCyclesResource(Resource):
+    """获取可用周期配置"""
+    @stock_ns.doc('get_regime_cycles',
+        description='''获取可用的牛熊市判断周期配置。
+
+**返回数据：**
+- short: 短周期 (EMA 3/5/10 + SMA20锚, 回看30天, 适合短线/题材股)
+- medium: 中周期 (EMA 5/10/20 + SMA60锚, 回看60天, 适合波段/成长股)
+- long: 长周期 (EMA 10/20/40 + SMA120锚, 回看120天, 适合长线/蓝筹股)
+''')
+    def get(self):
+        """获取可用的周期配置"""
+        from web.services.market_regime_service import get_all_cycle_configs
+        return {'cycles': get_all_cycle_configs()}
 
 
 @stock_ns.route('/name/<code>')
@@ -812,6 +944,41 @@ class ScheduleJobListResource(Resource):
 @schedule_ns.route('/jobs/<job_id>')
 class ScheduleJobResource(Resource):
     """定时任务操作"""
+    @schedule_ns.doc('update_job',
+        description='''更新定时任务。
+
+**路径参数：**
+- **job_id**: 任务ID
+
+**请求体参数（所有字段可选）：**
+- name: 新的任务名称
+- task_type: 新的任务类型
+- trigger: 新的触发器配置
+  - cron_expression: 新的cron表达式
+- content_type: 内容类型 (stock/moneyflow/index/industry/financial)
+- stock_range: 股票范围 (all/favorites/custom/market)
+- mode: 更新模式 (incremental/full)
+- markets: 市场列表 (当content_type=index时)
+- exclude_st: 是否排除ST股票
+
+**示例：**
+```json
+{
+  "name": "A股每日更新（修改后）",
+  "trigger": {
+    "cron_expression": "0 16 * * 1-5"
+  },
+  "stock_range": "all",
+  "mode": "incremental"
+}
+```
+''')
+    def put(self, job_id):
+        """更新定时任务"""
+        from web.services.schedule_service import update_job
+        data, status_code = update_job(job_id)
+        return data, status_code
+
     @schedule_ns.doc('delete_job',
         description='''删除定时任务。
 
@@ -1318,7 +1485,8 @@ favorite_item_model = favorites_ns.model('FavoriteItem', {
     'notes': fields.String(description='备注', example=''),
     'safety_rating': fields.String(description='安全性评级 (A/B/C/D/E)', example='A'),
     'fundamental_rating': fields.String(description='基本面评级 (A/B/C/D/E)', example='B+'),
-    'entry_price': fields.Float(description='进场价格', example=7.5)
+    'entry_price': fields.Float(description='进场价格', example=7.5),
+    'urgency': fields.Integer(description='紧急程度 (1-5)', example=3)
 })
 
 add_favorite_model = favorites_ns.model('AddFavoriteRequest', {
@@ -1326,13 +1494,14 @@ add_favorite_model = favorites_ns.model('AddFavoriteRequest', {
     'notes': fields.String(description='备注', example=''),
     'safety_rating': fields.String(description='安全性评级 (A/B/C/D/E)', example='A'),
     'fundamental_rating': fields.String(description='基本面评级 (A/B/C/D/E)', example='B+'),
-    'entry_price': fields.Float(description='进场价格', example=7.5)
+    'entry_price': fields.Float(description='进场价格', example=7.5),
+    'urgency': fields.Integer(description='紧急程度 (1-5)', example=3)
 })
 
 batch_add_model = favorites_ns.model('BatchAddRequest', {
     'stock_codes': fields.List(fields.String, description='股票代码列表（兼容旧格式）', example=['600382', '000001']),
     'stocks_data': fields.List(fields.Raw, description='股票数据列表（新格式，包含额外字段）', example=[
-        {'code': '600382', 'safety_rating': 'A', 'fundamental_rating': 'B+', 'entry_price': 7.5}
+        {'code': '600382', 'safety_rating': 'A', 'fundamental_rating': 'B+', 'entry_price': 7.5, 'urgency': 3}
     ]),
     'notes': fields.String(description='备注', example='')
 })
@@ -1341,6 +1510,7 @@ update_favorite_model = favorites_ns.model('UpdateFavoriteRequest', {
     'safety_rating': fields.String(description='安全性评级 (A/B/C/D/E)', example='A'),
     'fundamental_rating': fields.String(description='基本面评级 (A/B/C/D/E)', example='B+'),
     'entry_price': fields.Float(description='进场价格', example=7.5),
+    'urgency': fields.Integer(description='紧急程度 (1-5)', example=3),
     'notes': fields.String(description='备注', example='')
 })
 
@@ -2955,4 +3125,678 @@ class AlphaSnapshot(Resource):
         from web.services.alpha_service import get_alpha_snapshot
         return get_alpha_snapshot()
 
+
+# ============================================================================
+# Risk Management Endpoints
+# ============================================================================
+
+# Risk Management Models
+risk_position_input_model = risk_ns.model('RiskPositionInput', {
+    'symbol': fields.String(description='股票代码', required=True, example='600382'),
+    'shares': fields.Integer(description='持股数量', required=True, example=10000),
+    'cost_price': fields.Float(description='成本价', required=True, example=42.0),
+    'current_price': fields.Float(description='当前价格', required=True, example=45.0),
+    'stop_loss_base': fields.Float(description='止损基数', required=True, example=45.0),
+    'stop_loss_percent': fields.Float(description='止损比例%', required=True, example=3.0)
+})
+
+risk_portfolio_input_model = risk_ns.model('RiskPortfolioInput', {
+    'total_capital': fields.Float(description='总资金', required=True, example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
+    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表')
+})
+
+risk_calculate_model = risk_ns.model('RiskCalculateRequest', {
+    'total_capital': fields.Float(description='总资金', required=True, example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
+    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表'),
+    'buy_price': fields.Float(description='买入价格', required=True, example=50.0),
+    'stop_loss_percent': fields.Float(description='止损比例%', required=True, example=5.0)
+})
+
+risk_sell_model = risk_ns.model('RiskSellRequest', {
+    'total_capital': fields.Float(description='总资金', required=True, example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
+    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表'),
+    'symbol': fields.String(description='卖出股票代码', required=True, example='600382'),
+    'sell_shares': fields.Integer(description='卖出数量', required=True, example=5000),
+    'sell_price': fields.Float(description='卖出价格', required=True, example=45.0)
+})
+
+risk_adjust_stop_loss_model = risk_ns.model('RiskAdjustStopLossRequest', {
+    'position': fields.Nested(risk_position_input_model, description='持仓信息', required=True),
+    'new_stop_loss_base': fields.Float(description='新止损基数', required=True, example=45.0),
+    'new_stop_loss_percent': fields.Float(description='新止损比例%', required=True, example=3.0)
+})
+
+risk_add_position_model = risk_ns.model('RiskAddPositionRequest', {
+    'total_capital': fields.Float(description='总资金', required=True, example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
+    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表'),
+    'symbol': fields.String(description='股票代码', required=True, example='600382'),
+    'shares': fields.Integer(description='股数', required=True, example=4000),
+    'cost_price': fields.Float(description='成本价', required=True, example=50.0),
+    'current_price': fields.Float(description='当前价', required=True, example=50.0),
+    'stop_loss_percent': fields.Float(description='止损比例%', required=True, example=5.0)
+})
+
+
+@risk_ns.route('/calculate')
+class RiskCalculateResource(Resource):
+    """计算新股可买股数"""
+    @risk_ns.doc('calculate_new_position',
+        description='''计算新股可买股数。
+
+核心规则：
+- 单笔交易风险不超过总资金的2%
+- 所有持仓的总风险不超过总资金的6%
+
+可买股数 = min(总风险限制, 单笔风险限制, 剩余资金限制)
+
+**请求示例：**
+```json
+{
+  "total_capital": 650000,
+  "positions": [
+    {
+      "symbol": "600382",
+      "shares": 10000,
+      "cost_price": 42,
+      "current_price": 45,
+      "stop_loss_base": 45,
+      "stop_loss_percent": 3
+    }
+  ],
+  "buy_price": 50,
+  "stop_loss_percent": 5
+}
+```
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "portfolio": {...},
+  "new_position": {
+    "max_shares": 4000,
+    "required_capital": 200000,
+    "max_loss": 10000,
+    "limiting_factors": ["cash"]
+  }
+}
+```
+''')
+    @risk_ns.expect(risk_calculate_model)
+    def post(self):
+        """计算新股可买股数"""
+        from web.services.risk_management_service import calculate_new_position
+        data = request.get_json()
+        return calculate_new_position(
+            portfolio_data=data,
+            buy_price=data.get('buy_price'),
+            stop_loss_percent=data.get('stop_loss_percent')
+        )
+
+
+@risk_ns.route('/sell')
+class RiskSellResource(Resource):
+    """卖出股票"""
+    @risk_ns.doc('sell_position',
+        description='''卖出股票，重新计算风险占用。
+
+**请求示例：**
+```json
+{
+  "total_capital": 650000,
+  "positions": [
+    {
+      "symbol": "600382",
+      "shares": 10000,
+      "cost_price": 42,
+      "current_price": 45,
+      "stop_loss_base": 45,
+      "stop_loss_percent": 3
+    }
+  ],
+  "symbol": "600382",
+  "sell_shares": 5000,
+  "sell_price": 45
+}
+```
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "sell_info": {
+    "symbol": "600382",
+    "sell_shares": 5000,
+    "sell_price": 45,
+    "sell_value": 225000,
+    "realized_profit": 15000,
+    "released_risk": 6750
+  },
+  "remaining_shares": 5000,
+  "portfolio": {...}
+}
+```
+''')
+    @risk_ns.expect(risk_sell_model)
+    def post(self):
+        """卖出股票"""
+        from web.services.risk_management_service import sell_position
+        data = request.get_json()
+        return sell_position(
+            portfolio_data=data,
+            symbol=data.get('symbol'),
+            sell_shares=data.get('sell_shares'),
+            sell_price=data.get('sell_price')
+        )
+
+
+@risk_ns.route('/adjust-stop-loss')
+class RiskAdjustStopLossResource(Resource):
+    """调整止损参数"""
+    @risk_ns.doc('adjust_stop_loss',
+        description='''调整止损参数，释放或增加风险占用。
+
+**请求示例：**
+```json
+{
+  "position": {
+    "symbol": "600382",
+    "shares": 10000,
+    "cost_price": 42,
+    "current_price": 45,
+    "stop_loss_base": 42,
+    "stop_loss_percent": 5
+  },
+  "new_stop_loss_base": 45,
+  "new_stop_loss_percent": 3
+}
+```
+
+**返回数据：**
+```json
+{
+  "success": true,
+  "adjustment": {
+    "old_risk": 21000,
+    "new_risk": 13500,
+    "released_risk": 7500,
+    "old_stop_loss_price": 39.9,
+    "new_stop_loss_price": 43.65,
+    "locked_profit": 1.65
+  },
+  "position": {...}
+}
+```
+''')
+    @risk_ns.expect(risk_adjust_stop_loss_model)
+    def post(self):
+        """调整止损参数"""
+        from web.services.risk_management_service import adjust_stop_loss
+        data = request.get_json()
+        return adjust_stop_loss(
+            position_data=data.get('position'),
+            new_stop_loss_base=data.get('new_stop_loss_base'),
+            new_stop_loss_percent=data.get('new_stop_loss_percent')
+        )
+
+
+@risk_ns.route('/portfolio')
+class RiskPortfolioResource(Resource):
+    """获取投资组合状态"""
+    @risk_ns.doc('get_portfolio_state',
+        description='''获取投资组合状态，包括风险占用、剩余资金等。
+
+**请求示例：**
+```json
+{
+  "total_capital": 650000,
+  "positions": [
+    {
+      "symbol": "600382",
+      "shares": 10000,
+      "cost_price": 42,
+      "current_price": 45,
+      "stop_loss_base": 45,
+      "stop_loss_percent": 3
+    }
+  ]
+}
+```
+
+**返回数据：**
+```json
+{
+  "total_capital": 650000,
+  "total_risk_budget": 39000,
+  "single_risk_budget": 13000,
+  "used_risk": 13500,
+  "available_risk": 25500,
+  "positions_value": 450000,
+  "remaining_cash": 200000,
+  "risk_usage_percent": 34.62,
+  "positions": [...]
+}
+```
+''')
+    @risk_ns.expect(risk_portfolio_input_model)
+    def post(self):
+        """获取投资组合状态"""
+        from web.services.risk_management_service import create_portfolio_from_dict, get_portfolio_state
+        data = request.get_json()
+        portfolio = create_portfolio_from_dict(data)
+        return get_portfolio_state(portfolio)
+
+
+@risk_ns.route('/add-position')
+class RiskAddPositionResource(Resource):
+    """添加新持仓"""
+    @risk_ns.doc('add_position',
+        description='''添加新持仓到投资组合。
+
+**请求示例：**
+```json
+{
+  "total_capital": 650000,
+  "positions": [],
+  "symbol": "600382",
+  "shares": 4000,
+  "cost_price": 50,
+  "current_price": 50,
+  "stop_loss_percent": 5
+}
+```
+''')
+    @risk_ns.expect(risk_add_position_model)
+    def post(self):
+        """添加新持仓"""
+        from web.services.risk_management_service import add_position
+        data = request.get_json()
+        return add_position(
+            portfolio_data=data,
+            symbol=data.get('symbol'),
+            shares=data.get('shares'),
+            cost_price=data.get('cost_price'),
+            current_price=data.get('current_price'),
+            stop_loss_percent=data.get('stop_loss_percent')
+        )
+
+
+# ============================================================================
+# Risk Management Database Persistence Endpoints
+# ============================================================================
+
+# Database Models
+risk_portfolio_settings_model = risk_ns.model('RiskPortfolioSettings', {
+    'total_capital': fields.Float(description='总资金', example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', example=2.0),
+    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:00:00')
+})
+
+risk_portfolio_settings_input_model = risk_ns.model('RiskPortfolioSettingsInput', {
+    'total_capital': fields.Float(description='总资金', required=True, example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', example=2.0)
+})
+
+risk_stored_position_model = risk_ns.model('RiskStoredPosition', {
+    'symbol': fields.String(description='股票代码', required=True, example='600382'),
+    'shares': fields.Integer(description='持股数量', required=True, example=10000),
+    'cost_price': fields.Float(description='成本价', required=True, example=42.0),
+    'stop_loss_base': fields.Float(description='止损基数', required=True, example=45.0),
+    'stop_loss_percent': fields.Float(description='止损比例%', example=8.0)
+})
+
+risk_position_output_model = risk_ns.model('RiskPositionOutput', {
+    'symbol': fields.String(description='股票代码', example='600382'),
+    'name': fields.String(description='股票名称', example='广东明珠'),
+    'shares': fields.Integer(description='持股数量', example=10000),
+    'cost_price': fields.Float(description='成本价', example=42.0),
+    'current_price': fields.Float(description='当前价格（从行情表获取）', example=45.0),
+    'stop_loss_base': fields.Float(description='止损基数', example=45.0),
+    'stop_loss_percent': fields.Float(description='止损比例%', example=3.0),
+    'created_at': fields.String(description='创建时间', example='2024-01-01 10:00:00'),
+    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:00:00')
+})
+
+risk_full_portfolio_model = risk_ns.model('RiskFullPortfolio', {
+    'total_capital': fields.Float(description='总资金', example=650000),
+    'max_total_risk_percent': fields.Float(description='总风险比例%', example=6.0),
+    'max_single_risk_percent': fields.Float(description='单笔风险比例%', example=2.0),
+    'positions': fields.List(fields.Nested(risk_position_output_model), description='持仓列表'),
+    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:00:00')
+})
+
+risk_positions_list_model = risk_ns.model('RiskPositionsList', {
+    'positions': fields.List(fields.Nested(risk_position_output_model), description='持仓列表')
+})
+
+risk_position_update_model = risk_ns.model('RiskPositionUpdate', {
+    'shares': fields.Integer(description='持股数量', example=10000),
+    'cost_price': fields.Float(description='成本价', example=42.0),
+    'stop_loss_base': fields.Float(description='止损基数', example=45.0),
+    'stop_loss_percent': fields.Float(description='止损比例%', example=3.0)
+})
+
+
+@risk_ns.route('/portfolio/settings')
+class RiskPortfolioSettingsResource(Resource):
+    """投资组合设置（持久化）"""
+    @risk_ns.doc('load_portfolio_settings',
+        description='''从数据库加载投资组合设置。
+
+**返回数据：**
+- total_capital: 总资金
+- max_total_risk_percent: 总风险比例
+- max_single_risk_percent: 单笔风险比例
+- updated_at: 更新时间
+''')
+    def get(self):
+        """加载投资组合设置"""
+        from web.services.risk_management_service import load_portfolio_settings
+        return load_portfolio_settings()
+
+    @risk_ns.doc('save_portfolio_settings',
+        description='''保存投资组合设置到数据库。
+
+**请求示例：**
+```json
+{
+  "total_capital": 800000,
+  "max_total_risk_percent": 8,
+  "max_single_risk_percent": 2.5
+}
+```
+''')
+    @risk_ns.expect(risk_portfolio_settings_input_model)
+    def put(self):
+        """保存投资组合设置"""
+        from web.services.risk_management_service import save_portfolio_settings
+        data = request.get_json()
+        return save_portfolio_settings(data)
+
+
+@risk_ns.route('/portfolio/full')
+class RiskFullPortfolioResource(Resource):
+    """完整投资组合（持久化+实时价格）"""
+    @risk_ns.doc('load_full_portfolio',
+        description='''从数据库加载完整投资组合，包含：
+- 投资组合设置（总资金、风险比例）
+- 所有持仓（从数据库加载）
+- 当前价格（从行情表实时获取）
+- 股票名称（从 stock_names 表获取）
+
+**返回数据：**
+```json
+{
+  "total_capital": 650000,
+  "max_total_risk_percent": 6.0,
+  "max_single_risk_percent": 2.0,
+  "positions": [
+    {
+      "symbol": "600382",
+      "name": "广东明珠",
+      "shares": 10000,
+      "cost_price": 42.0,
+      "current_price": 45.0,
+      "stop_loss_base": 45.0,
+      "stop_loss_percent": 3.0,
+      "created_at": "2024-01-01 10:00:00",
+      "updated_at": "2024-01-01 10:00:00"
+    }
+  ],
+  "updated_at": "2024-01-01 10:00:00"
+}
+```
+''')
+    def get(self):
+        """加载完整投资组合"""
+        from web.services.risk_management_service import load_full_portfolio
+        return load_full_portfolio()
+
+
+@risk_ns.route('/positions')
+class RiskPositionsResource(Resource):
+    """持仓管理（持久化）"""
+    @risk_ns.doc('load_positions',
+        description='''从数据库加载所有持仓，包含：
+- 当前价格（从行情表实时获取）
+- 股票名称（从 stock_names 表获取）
+
+**返回数据：**
+```json
+{
+  "positions": [
+    {
+      "symbol": "600382",
+      "name": "广东明珠",
+      "shares": 10000,
+      "cost_price": 42.0,
+      "current_price": 45.0,
+      "stop_loss_base": 45.0,
+      "stop_loss_percent": 3.0
+    }
+  ]
+}
+```
+''')
+    def get(self):
+        """加载所有持仓"""
+        from web.services.risk_management_service import load_positions
+        return {'positions': load_positions()}
+
+    @risk_ns.doc('add_position_to_db',
+        description='''添加持仓到数据库。
+
+**注意：** 不需要传 current_price，后端会从行情表自动获取。
+
+**请求示例：**
+```json
+{
+  "symbol": "600382",
+  "shares": 10000,
+  "cost_price": 42,
+  "stop_loss_base": 42,
+  "stop_loss_percent": 5
+}
+```
+''')
+    @risk_ns.expect(risk_stored_position_model)
+    def post(self):
+        """添加持仓"""
+        from web.services.risk_management_service import add_position_to_db
+        data = request.get_json()
+        return add_position_to_db(data)
+
+
+@risk_ns.route('/positions/<string:symbol>')
+class RiskPositionDetailResource(Resource):
+    """单个持仓管理（持久化）"""
+    @risk_ns.doc('update_position_in_db',
+        description='''更新持仓信息。
+
+**请求示例：**
+```json
+{
+  "stop_loss_base": 45,
+  "stop_loss_percent": 3
+}
+```
+''')
+    @risk_ns.expect(risk_position_update_model)
+    def put(self, symbol):
+        """更新持仓"""
+        from web.services.risk_management_service import update_position_in_db
+        data = request.get_json()
+        return update_position_in_db(symbol, data)
+
+    @risk_ns.doc('delete_position_from_db',
+        description='''从数据库删除持仓。''')
+    def delete(self, symbol):
+        """删除持仓"""
+        from web.services.risk_management_service import delete_position_from_db
+        return delete_position_from_db(symbol)
+
+
+# ============================================================================
+# 资金管理 API
+# ============================================================================
+
+risk_adjust_capital_model = risk_ns.model('AdjustCapitalRequest', {
+    'initial_capital': fields.Float(required=True, description='新的初始资金'),
+    'reason': fields.String(description='变动原因'),
+})
+
+risk_capital_state_model = risk_ns.model('CapitalState', {
+    'initial_capital': fields.Float(description='初始总资金'),
+    'cumulative_pnl': fields.Float(description='累计盈亏'),
+    'current_capital': fields.Float(description='当前实际总资金'),
+    'positions_value': fields.Float(description='持仓市值'),
+    'cash': fields.Float(description='剩余现金'),
+    'floating_pnl': fields.Float(description='浮动盈亏'),
+})
+
+
+@risk_ns.route('/capital/state')
+class RiskCapitalStateResource(Resource):
+    """资金状态"""
+    @risk_ns.doc('get_capital_state',
+        description='''获取当前资金状态，包括初始资金、累计盈亏、当前实际资金等。''')
+    @risk_ns.marshal_with(risk_capital_state_model)
+    def get(self):
+        """获取资金状态"""
+        from web.services.risk_management_service import get_capital_state
+        return get_capital_state()
+
+
+@risk_ns.route('/capital/initial')
+class RiskCapitalInitialResource(Resource):
+    """初始资金管理"""
+    @risk_ns.doc('adjust_initial_capital',
+        description='''调整初始资金（追加投资或取出资金）。''')
+    @risk_ns.expect(risk_adjust_capital_model)
+    def put(self):
+        """调整初始资金"""
+        from web.services.risk_management_service import adjust_initial_capital
+        data = request.get_json()
+        return adjust_initial_capital(
+            data.get('initial_capital', 0),
+            data.get('reason', '')
+        )
+
+
+@risk_ns.route('/capital/cash')
+class RiskCapitalCashResource(Resource):
+    """剩余现金管理"""
+    @risk_ns.doc('update_cash',
+        description='''更新剩余现金（手动校准资金池）。''')
+    @risk_ns.expect(risk_ns.model('UpdateCashRequest', {
+        'cash': fields.Float(required=True, description='新的剩余现金'),
+    }))
+    def put(self):
+        """更新剩余现金"""
+        from web.services.risk_management_service import update_cash
+        data = request.get_json()
+        return update_cash(data.get('cash', 0))
+
+
+# ============================================================================
+# 月度快照 API
+# ============================================================================
+
+risk_monthly_snapshot_model = risk_ns.model('MonthlySnapshot', {
+    'id': fields.Integer(description='ID'),
+    'year_month': fields.String(description='月份'),
+    'month_start_capital': fields.Float(description='月初初始资金'),
+    'month_start_positions_value': fields.Float(description='月初持仓市值'),
+    'month_end_capital': fields.Float(description='月末实际资金'),
+    'month_end_positions_value': fields.Float(description='月末持仓市值'),
+    'month_end_cash': fields.Float(description='月末剩余现金'),
+    'month_pnl': fields.Float(description='本月盈亏金额'),
+    'month_pnl_percent': fields.Float(description='本月盈亏比例'),
+    'capital_change': fields.Float(description='资金变动'),
+    'capital_change_reason': fields.String(description='资金变动原因'),
+    'created_at': fields.String(description='创建时间'),
+    'updated_at': fields.String(description='更新时间'),
+})
+
+risk_monthly_capital_change_model = risk_ns.model('MonthlyCapitalChangeRequest', {
+    'year_month': fields.String(required=True, description='月份'),
+    'amount': fields.Float(required=True, description='变动金额'),
+    'reason': fields.String(description='变动原因'),
+})
+
+
+@risk_ns.route('/monthly/snapshots')
+class RiskMonthlySnapshotsResource(Resource):
+    """月度快照管理"""
+    @risk_ns.doc('get_monthly_snapshots',
+        description='''获取月度快照列表。''')
+    @risk_ns.param('start_month', '起始月份')
+    @risk_ns.param('end_month', '结束月份')
+    @risk_ns.param('limit', '最大返回数量', type=int, default=12)
+    @risk_ns.marshal_list_with(risk_monthly_snapshot_model)
+    def get(self):
+        """获取月度快照列表"""
+        from web.services.risk_management_service import get_monthly_snapshots
+        start_month = request.args.get('start_month')
+        end_month = request.args.get('end_month')
+        limit = int(request.args.get('limit', 12))
+        return get_monthly_snapshots(start_month, end_month, limit)
+
+    @risk_ns.doc('create_monthly_snapshot',
+        description='''创建当月快照。如果快照已存在则更新。''')
+    @risk_ns.param('year_month', '月份，默认为当前月')
+    @risk_ns.marshal_with(risk_monthly_snapshot_model)
+    def post(self):
+        """创建月度快照"""
+        from web.services.risk_management_service import create_monthly_snapshot
+        year_month = request.args.get('year_month')
+        return create_monthly_snapshot(year_month)
+
+
+@risk_ns.route('/monthly/capital-change')
+class RiskMonthlyCapitalChangeResource(Resource):
+    """月度资金变动"""
+    @risk_ns.doc('update_monthly_capital_change',
+        description='''更新某月的资金追加/取出记录。''')
+    @risk_ns.expect(risk_monthly_capital_change_model)
+    def put(self):
+        """更新月度资金变动"""
+        from web.services.risk_management_service import update_monthly_capital_change
+        data = request.get_json()
+        return update_monthly_capital_change(
+            data.get('year_month', ''),
+            data.get('amount', 0),
+            data.get('reason', '')
+        )
+
+
+@risk_ns.route('/capital/realized-pnl')
+class RiskRealizedPnlResource(Resource):
+    """已实现盈亏"""
+    @risk_ns.doc('add_realized_pnl',
+        description='''添加已实现盈亏到累计盈亏，并更新现金（卖出股票后调用）。''')
+    @risk_ns.expect(risk_ns.model('RealizedPnlRequest', {
+        'realized_profit': fields.Float(required=True, description='已实现盈亏金额'),
+        'sell_value': fields.Float(required=True, description='卖出金额（卖出价格 × 卖出股数）'),
+        'symbol': fields.String(description='股票代码'),
+    }))
+    def post(self):
+        """添加已实现盈亏"""
+        from web.services.risk_management_service import add_realized_pnl
+        data = request.get_json()
+        return add_realized_pnl(
+            data.get('realized_profit', 0),
+            data.get('sell_value', 0),
+            data.get('symbol', '')
+        )
 

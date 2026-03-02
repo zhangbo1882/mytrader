@@ -452,18 +452,24 @@ class ScreeningEngine:
         df = df[[c for c in cols if c in df.columns]]
 
         # 添加市值单位转换
-        if 'circ_mv' in df.columns:
-            # 流通市值转换：A股（万元 -> 亿元）、港股（元 -> 亿元）
-            if 'data_source' in df.columns:
-                # A股转换：万元 -> 亿元（除以10000）
-                a_mask = df['data_source'] == 'A股'
-                df.loc[a_mask, 'circ_mv_yi'] = df.loc[a_mask, 'circ_mv'] / 10000
+        if 'data_source' in df.columns:
+            a_mask = df['data_source'] == 'A股'
+            hk_mask = df['data_source'] == '港股'
 
-                # 港股转换：元 -> 亿元（除以100000000）
-                hk_mask = df['data_source'] == '港股'
+            # 总市值转换：A股（万元 -> 亿元）、港股（元 -> 亿元）
+            if 'total_mv' in df.columns:
+                df.loc[a_mask, 'total_mv_yi'] = df.loc[a_mask, 'total_mv'] / 10000
+                df.loc[hk_mask, 'total_mv_yi'] = df.loc[hk_mask, 'total_mv'] / 100000000
+
+            # 流通市值转换：A股（万元 -> 亿元）、港股（元 -> 亿元）
+            if 'circ_mv' in df.columns:
+                df.loc[a_mask, 'circ_mv_yi'] = df.loc[a_mask, 'circ_mv'] / 10000
                 df.loc[hk_mask, 'circ_mv_yi'] = df.loc[hk_mask, 'circ_mv'] / 100000000
-            else:
-                # 没有 data_source 字段，假设是A股（万元）
+        else:
+            # 没有 data_source 字段，假设是A股（万元）
+            if 'total_mv' in df.columns:
+                df['total_mv_yi'] = df['total_mv'] / 10000
+            if 'circ_mv' in df.columns:
                 df['circ_mv_yi'] = df['circ_mv'] / 10000
 
         return df
