@@ -139,7 +139,6 @@ def apply_preset_strategy(strategy_name):
                 if pd.notna(total_mv) and total_mv > 0:
                     # A股：万元 -> 亿元（除以 10000）
                     # 港股：元 -> 亿元（除以 100000000）
-                    # 检查data_source字段来判断
                     if row.get('data_source') == '港股':
                         total_mv_yi = round(float(total_mv) / 100000000, 2)
                     else:
@@ -250,7 +249,6 @@ def apply_custom_strategy():
                 if pd.notna(total_mv) and total_mv > 0:
                     # A股：万元 -> 亿元（除以 10000）
                     # 港股：元 -> 亿元（除以 100000000）
-                    # 检查data_source字段来判断
                     if row.get('data_source') == '港股':
                         total_mv_yi = round(float(total_mv) / 100000000, 2)
                     else:

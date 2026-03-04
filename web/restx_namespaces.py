@@ -104,6 +104,8 @@ create_task_model = task_ns.model('CreateTaskRequest', {
         example='update_stock_prices',
         enum=[
             'update_stock_prices',
+            'update_a_share_batch',
+            'update_hk_batch',
             'update_hk_prices',
             'update_financial_reports',
             'update_industry_classification',
@@ -2874,7 +2876,7 @@ class TopIndustriesResource(Resource):
 ''')
     @moneyflow_ns.param('level', '行业级别', type='string', enum=['L1', 'L2', 'L3'], default='L1')
     @moneyflow_ns.param('trade_date', '交易日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('top_n', '返回数量', type='integer', default=10)
+    @moneyflow_ns.param('top_n', '返回数量（不传则返回全部）', type='integer')
     @moneyflow_ns.param('accumulate_days', '累计交易日数', type='integer', default=1)
     def get(self):
         """获取净流入排名前N的行业"""
@@ -2883,7 +2885,7 @@ class TopIndustriesResource(Resource):
 
         level = request.args.get('level', 'L1')
         trade_date = request.args.get('trade_date')
-        top_n = request.args.get('top_n', 10, type=int)
+        top_n = request.args.get('top_n', type=int)
         accumulate_days = request.args.get('accumulate_days', 1, type=int)
 
         return get_top_industries_by_netflow(level, trade_date, top_n, accumulate_days)

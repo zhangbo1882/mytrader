@@ -57,20 +57,52 @@ class DuckDBManager:
             self._conn = None
 
     @contextmanager
-    def get_connection(self):
+    def get_connection(self, max_retries: int = 3, retry_delay: float = 2.0):
         """
-        上下文管理器，自动管理连接
+        上下文管理器，支持锁冲突时自动重试
+
+        Args:
+            max_retries: 最大重试次数（默认 3）
+            retry_delay: 重试间隔秒数（默认 2.0）
 
         Example:
             with db_manager.get_connection() as conn:
                 conn.execute("SELECT * FROM bars_1d")
         """
-        conn = self.connect()
-        try:
-            yield conn
-        finally:
-            # 关闭实际创建的连接以释放锁
-            conn.close()
+        import time
+        last_error = None
+        total_wait_time = 0.0
+        start_time = time.time()
+
+        for attempt in range(max_retries):
+            conn = None
+            try:
+                connect_start = time.time()
+                conn = self.connect()
+                connect_time = time.time() - connect_start
+                if connect_time > 0.5:
+                    logger.warning(f"[DuckDB] 连接耗时: {connect_time:.2f}s")
+                yield conn
+                total_elapsed = time.time() - start_time
+                if total_elapsed > 1.0 or total_wait_time > 0:
+                    logger.info(f"[DuckDB] get_connection总耗时: {total_elapsed:.2f}s (等待锁: {total_wait_time:.2f}s)")
+                return
+            except Exception as e:
+                last_error = e
+                # 检查是否是锁冲突错误
+                error_str = str(e).lower()
+                if 'lock' in error_str and attempt < max_retries - 1:
+                    logger.warning(f"DuckDB locked, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    total_wait_time += retry_delay
+                    continue
+                raise
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except:
+                        pass
 
     def table_exists(self, table_name: str) -> bool:
         """

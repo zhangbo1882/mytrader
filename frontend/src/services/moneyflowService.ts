@@ -21,7 +21,7 @@ export const moneyflowService = {
     }),
 
   // 获取行业排名
-  getTopIndustries: (level: IndustryLevel = 'L1', tradeDate?: string, topN = 10, accumulateDays = 1) =>
+  getTopIndustries: (level: IndustryLevel = 'L1', tradeDate?: string, topN?: number, accumulateDays = 1) =>
     api.get<{ success: boolean; data: IndustryMoneyflow[]; count: number; trade_date: string }>(
       '/moneyflow/industry/top',
       {

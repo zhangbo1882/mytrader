@@ -83,6 +83,7 @@ const industryColumns = [
     ),
     width: 140,
     align: 'right' as const,
+    sorter: (a: IndustryMoneyflow, b: IndustryMoneyflow) => (a.net_elg_amount || 0) - (b.net_elg_amount || 0),
   },
   {
     title: '大单净流入(万元)',
@@ -95,6 +96,7 @@ const industryColumns = [
     ),
     width: 120,
     align: 'right' as const,
+    sorter: (a: IndustryMoneyflow, b: IndustryMoneyflow) => (a.net_lg_amount || 0) - (b.net_lg_amount || 0),
   },
   {
     title: '日期',
@@ -116,6 +118,8 @@ const stockColumns = [
     dataIndex: 'trade_date',
     key: 'trade_date',
     width: 100,
+    sorter: (a: StockMoneyflow, b: StockMoneyflow) => a.trade_date.localeCompare(b.trade_date),
+    defaultSortOrder: 'descend' as const,
   },
   {
     title: '净流入(万元)',
@@ -129,7 +133,6 @@ const stockColumns = [
     width: 120,
     align: 'right' as const,
     sorter: (a: StockMoneyflow, b: StockMoneyflow) => (a.net_mf_amount || 0) - (b.net_mf_amount || 0),
-    defaultSortOrder: 'descend' as const,
   },
   {
     title: '特大单净流入(万元)',
@@ -193,7 +196,6 @@ function MoneyFlowPage() {
   const [stockLimit, setStockLimit] = useState(50);
   const [level, setLevel] = useState<IndustryLevel>('L1');
   const [tradeDate, setTradeDate] = useState<string | undefined>(undefined);
-  const [topN, setTopN] = useState(30);
   const [accumulateDays, setAccumulateDays] = useState(1);
 
   // 展开行数据
@@ -231,7 +233,7 @@ function MoneyFlowPage() {
     setLoading(true);
     setError('');
     try {
-      const response = await moneyflowService.getTopIndustries(level, tradeDate, topN, accumulateDays);
+      const response = await moneyflowService.getTopIndustries(level, tradeDate, undefined, accumulateDays);
       if (response.success) {
         setIndustryData(response.data);
         setTradeDate(response.trade_date);
@@ -362,17 +364,6 @@ function MoneyFlowPage() {
                   placeholder="选择日期（默认最新）"
                   style={{ width: 150 }}
                 />
-
-                <Select
-                  value={topN}
-                  onChange={setTopN}
-                  style={{ width: 100 }}
-                >
-                  <Option value={10}>前10名</Option>
-                  <Option value={20}>前20名</Option>
-                  <Option value={30}>前30名</Option>
-                  <Option value={50}>前50名</Option>
-                </Select>
 
                 <Select
                   value={accumulateDays}

@@ -311,13 +311,19 @@ def re_run_screening(history_id: int):
         # 转换结果
         results = []
         for _, row in df.iterrows():
+            # 优先使用ScreeningEngine已经计算好的total_mv_yi列
+            if 'total_mv_yi' in row and pd.notna(row.get('total_mv_yi')):
+                total_mv_yi = round(float(row['total_mv_yi']), 2)
+            else:
+                total_mv_yi = round(float(row.get('total_mv', 0)) / 10000, 2) if pd.notna(row.get('total_mv')) else None
+
             results.append({
                 'code': row.get('symbol', ''),
                 'name': row.get('stock_name', ''),
                 'latest_close': round(float(row.get('close', 0)), 2) if pd.notna(row.get('close')) else None,
                 'pe_ttm': round(float(row.get('pe_ttm', 0)), 2) if pd.notna(row.get('pe_ttm')) else None,
                 'pb': round(float(row.get('pb', 0)), 2) if pd.notna(row.get('pb')) else None,
-                'total_mv_yi': round(float(row.get('total_mv', 0)) / 10000, 2) if pd.notna(row.get('total_mv')) else None,
+                'total_mv_yi': total_mv_yi,
             })
 
         return {

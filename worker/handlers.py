@@ -1369,10 +1369,222 @@ def execute_update_hk_prices(tm, task_id, params):
     )
 
 
+def execute_update_a_share_batch(tm, task_id, params):
+    """
+    批量更新A股日线数据（高效模式）
+
+    按日期批量获取所有A股数据，比逐股票获取快1000倍以上。
+    适用于每日增量更新场景。
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters (trade_date, days_back)
+            - trade_date: 指定日期 YYYYMMDD（默认今天）
+            - days_back: 往前回溯天数（默认1，只更新当天）
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    # Get parameters
+    trade_date = params.get('trade_date')
+    days_back = params.get('days_back', 1)
+
+    tm.update_task(task_id,
+        status='running',
+        progress=0,
+        message=f'开始批量更新A股数据...'
+    )
+
+    stats = {
+        'total_dates': 0,
+        'success_dates': 0,
+        'total_rows': 0,
+        'api_time': 0,
+        'db_time': 0
+    }
+
+    try:
+        from datetime import datetime, timedelta
+
+        # 确定要更新的日期列表
+        if trade_date:
+            dates = [trade_date]
+        else:
+            # 往前回溯days_back天
+            dates = []
+            for i in range(days_back):
+                d = datetime.now() - timedelta(days=i)
+                dates.append(d.strftime('%Y%m%d'))
+
+        stats['total_dates'] = len(dates)
+
+        for i, date in enumerate(dates):
+            # Check for stop request
+            stop_flag_path = tm.checkpoint_dir / f".stop_{task_id}"
+            if stop_flag_path.exists():
+                stop_flag_path.unlink(missing_ok=True)
+                tm.update_task(task_id, status='stopped', message='任务已停止')
+                return
+
+            progress = int(((i + 1) / len(dates)) * 100)
+            tm.update_task(task_id,
+                progress=progress,
+                message=f'正在更新 {date} ({i+1}/{len(dates)})...'
+            )
+
+            logger.info(f"[A-Share-Batch-{task_id[:8]}] Updating date {date}...")
+
+            result = db.save_all_a_daily_by_date(date)
+
+            if result and result.get('rows_saved', 0) > 0:
+                stats['success_dates'] += 1
+                stats['total_rows'] += result['rows_saved']
+                stats['api_time'] += result.get('api_time', 0)
+                stats['db_time'] += result.get('db_time', 0)
+                logger.info(f"[A-Share-Batch-{task_id[:8]}] {date}: saved {result['rows_saved']} rows")
+            else:
+                logger.warning(f"[A-Share-Batch-{task_id[:8]}] {date}: no data (possibly non-trading day)")
+
+        # Complete task
+        final_message = f'更新完成: {stats["success_dates"]}/{stats["total_dates"]}个交易日, 共{stats["total_rows"]}条记录'
+        logger.info(f"[A-Share-Batch-{task_id[:8]}] {final_message}")
+
+        tm.update_task(task_id,
+            status='completed',
+            progress=100,
+            message=final_message,
+            result={
+                'success_dates': stats['success_dates'],
+                'total_rows': stats['total_rows'],
+                'api_time': round(stats['api_time'], 2),
+                'db_time': round(stats['db_time'], 2)
+            },
+            stats=stats
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        tm.update_task(task_id,
+            status='failed',
+            message=f'更新失败: {str(e)}',
+            error=str(e)
+        )
+
+
+def execute_update_hk_batch(tm, task_id, params):
+    """
+    批量更新港股日线数据（高效模式）
+
+    按日期批量获取所有港股数据。
+
+    Args:
+        tm: TaskManager instance
+        task_id: Task identifier
+        params: Task parameters (trade_date, days_back)
+            - trade_date: 指定日期 YYYYMMDD（默认今天）
+            - days_back: 往前回溯天数（默认1，只更新当天）
+    """
+    from src.data_sources.tushare import TushareDB
+    from config.settings import TUSHARE_TOKEN, TUSHARE_DB_PATH
+
+    db = TushareDB(token=TUSHARE_TOKEN, db_path=str(TUSHARE_DB_PATH))
+
+    # Get parameters
+    trade_date = params.get('trade_date')
+    days_back = params.get('days_back', 1)
+
+    tm.update_task(task_id,
+        status='running',
+        progress=0,
+        message=f'开始批量更新港股数据...'
+    )
+
+    stats = {
+        'total_dates': 0,
+        'success_dates': 0,
+        'total_rows': 0,
+        'api_time': 0,
+        'db_time': 0
+    }
+
+    try:
+        from datetime import datetime, timedelta
+
+        # 确定要更新的日期列表
+        if trade_date:
+            dates = [trade_date]
+        else:
+            dates = []
+            for i in range(days_back):
+                d = datetime.now() - timedelta(days=i)
+                dates.append(d.strftime('%Y%m%d'))
+
+        stats['total_dates'] = len(dates)
+
+        for i, date in enumerate(dates):
+            # Check for stop request
+            stop_flag_path = tm.checkpoint_dir / f".stop_{task_id}"
+            if stop_flag_path.exists():
+                stop_flag_path.unlink(missing_ok=True)
+                tm.update_task(task_id, status='stopped', message='任务已停止')
+                return
+
+            progress = int(((i + 1) / len(dates)) * 100)
+            tm.update_task(task_id,
+                progress=progress,
+                message=f'正在更新 {date} ({i+1}/{len(dates)})...'
+            )
+
+            logger.info(f"[HK-Batch-{task_id[:8]}] Updating date {date}...")
+
+            result = db.save_all_hk_daily_by_date(date)
+
+            if result and result.get('rows_saved', 0) > 0:
+                stats['success_dates'] += 1
+                stats['total_rows'] += result['rows_saved']
+                stats['api_time'] += result.get('api_time', 0)
+                stats['db_time'] += result.get('db_time', 0)
+                logger.info(f"[HK-Batch-{task_id[:8]}] {date}: saved {result['rows_saved']} rows")
+            else:
+                logger.warning(f"[HK-Batch-{task_id[:8]}] {date}: no data (possibly non-trading day)")
+
+        # Complete task
+        final_message = f'更新完成: {stats["success_dates"]}/{stats["total_dates"]}个交易日, 共{stats["total_rows"]}条记录'
+        logger.info(f"[HK-Batch-{task_id[:8]}] {final_message}")
+
+        tm.update_task(task_id,
+            status='completed',
+            progress=100,
+            message=final_message,
+            result={
+                'success_dates': stats['success_dates'],
+                'total_rows': stats['total_rows'],
+                'api_time': round(stats['api_time'], 2),
+                'db_time': round(stats['db_time'], 2)
+            },
+            stats=stats
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        tm.update_task(task_id,
+            status='failed',
+            message=f'更新失败: {str(e)}',
+            error=str(e)
+        )
+
+
 # Task type to handler mapping
 TASK_HANDLERS = {
     'update_stock_prices': execute_update_stock_prices,
-    'update_hk_prices': execute_update_hk_prices,  # 港股数据更新
+    'update_a_share_batch': execute_update_a_share_batch,  # A股批量更新（高效）
+    'update_hk_batch': execute_update_hk_batch,  # 港股批量更新（高效）
+    'update_hk_prices': execute_update_hk_prices,  # 港股数据更新（逐股票）
     'update_industry_classification': execute_update_industry_classification,
     'update_financial_reports': execute_update_financial_reports,
     'update_index_data': execute_update_index_data,

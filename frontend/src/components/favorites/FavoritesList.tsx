@@ -186,6 +186,7 @@ export function FavoritesList({
   const handleEdit = (stock: FavoriteStock) => {
     setEditingStock(stock);
     editForm.setFieldsValue({
+      notes: stock.notes || undefined,
       safety_rating: stock.safetyRating || undefined,
       fundamental_rating: stock.fundamentalRating || undefined,
       entry_price: stock.entryPrice || undefined,
@@ -200,12 +201,21 @@ export function FavoritesList({
 
     try {
       const values = await editForm.validateFields();
-      await updateFavorite(editingStock.code, {
-        safety_rating: values.safety_rating || null,
-        fundamental_rating: values.fundamental_rating || null,
-        entry_price: values.entry_price || null,
-        urgency: values.urgency || null,
-      });
+      // 构建更新数据，确保数值类型正确传递
+      const updateData: Record<string, any> = {
+        notes: values.notes || '',
+        safety_rating: values.safety_rating || '',
+        fundamental_rating: values.fundamental_rating || '',
+      };
+      // 数值字段：如果有值则发送，否则不发送（避免 null 验证问题）
+      if (values.entry_price !== undefined && values.entry_price !== null) {
+        updateData.entry_price = values.entry_price;
+      }
+      if (values.urgency !== undefined && values.urgency !== null) {
+        updateData.urgency = values.urgency;
+      }
+
+      await updateFavorite(editingStock.code, updateData);
       message.success('更新成功');
       setEditModalVisible(false);
       setEditingStock(null);
@@ -315,6 +325,20 @@ export function FavoritesList({
           </Text>
         );
       },
+    },
+    {
+      title: '备注',
+      dataIndex: 'notes',
+      key: 'notes',
+      width: 150,
+      ellipsis: true,
+      render: (notes) => notes ? (
+        <Tooltip title={notes}>
+          <Text style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>
+            {notes}
+          </Text>
+        </Tooltip>
+      ) : <Text type="secondary">-</Text>,
     },
     {
       title: '添加时间',
@@ -495,6 +519,14 @@ export function FavoritesList({
         cancelText="取消"
       >
         <Form form={editForm} layout="vertical">
+          <Form.Item name="notes" label="备注">
+            <Input.TextArea
+              placeholder="输入备注信息"
+              rows={3}
+              maxLength={500}
+              showCount
+            />
+          </Form.Item>
           <Form.Item name="safety_rating" label="安全性评级">
             <Select placeholder="选择安全性评级" allowClear>
               {RATING_OPTIONS.map(opt => (

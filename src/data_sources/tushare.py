@@ -3436,6 +3436,9 @@ class TushareDB(BaseStockDB):
         Returns:
             Dictionary with statistics (rows_saved, start_date, end_date)
         """
+        import time
+        func_start_time = time.time()
+
         from src.db.duckdb_manager import get_duckdb_writer
         from config.settings import A_SHARE_TABLE_MAP
 
@@ -3613,6 +3616,9 @@ class TushareDB(BaseStockDB):
         except Exception as e:
             logger.warning(f"  [A股] 获取每日指标失败（可能需要更高权限）: {e}")
 
+        # 记录API获取耗时
+        api_time = time.time() - func_start_time
+
         # 7. Prepare DataFrame for DuckDB
         df_to_save = pd.DataFrame({
             'stock_code': stock_code,
@@ -3656,6 +3662,7 @@ class TushareDB(BaseStockDB):
             logger.info(f"  [A股] 过滤掉 {before_count - after_count} 条无效日期的记录")
 
         # 8. Write directly to DuckDB bars_a_1d table
+        db_write_start = time.time()
         try:
             with db_writer.get_connection() as conn:
                 # Register as temp table and insert
@@ -3676,13 +3683,15 @@ class TushareDB(BaseStockDB):
                 """)
                 conn.unregister('temp_a_import')
 
+                db_write_time = time.time() - db_write_start
+                total_time = time.time() - func_start_time
                 rows_saved = len(df_to_save)
                 if df_to_save['datetime'].min() != df_to_save['datetime'].max():
                     date_range = f"{df_to_save['datetime'].min().date()} ~ {df_to_save['datetime'].max().date()}"
                 else:
                     date_range = f"{df_to_save['datetime'].min().date()}"
 
-                logger.info(f"  [A股] ✓ {ts_code} 成功保存 {rows_saved} 条记录 ({date_range})")
+                logger.info(f"  [A股] ✓ {ts_code} 成功保存 {rows_saved} 条记录 ({date_range}) | 耗时: API={api_time:.2f}s, DB={db_write_time:.2f}s, 总计={total_time:.2f}s")
 
                 return {
                     'rows_saved': rows_saved,
@@ -3695,6 +3704,272 @@ class TushareDB(BaseStockDB):
             import traceback
             traceback.print_exc()
             return {'rows_saved': 0, 'start_date': start_date, 'end_date': end_date}
+
+        finally:
+            db_writer.close()
+
+    def save_all_a_daily_by_date(self, trade_date: str = None):
+        """
+        按日期批量保存A股日线数据到DuckDB（高效方式）
+
+        一次API调用获取当天所有A股数据，比逐股票获取快1000倍以上。
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD 格式（None = 今天）
+
+        Returns:
+            Dictionary with statistics
+        """
+        import time
+        from src.db.duckdb_manager import get_duckdb_writer
+        from config.settings import A_SHARE_TABLE_MAP
+        from datetime import datetime
+
+        func_start_time = time.time()
+
+        # 1. 确定交易日期
+        if trade_date is None:
+            trade_date = datetime.today().strftime('%Y%m%d')
+
+        logger.info(f"[A股批量] 开始获取 {trade_date} 所有A股数据...")
+
+        a_share_table = A_SHARE_TABLE_MAP.get('1d', 'bars_a_1d')
+        db_writer = get_duckdb_writer()
+
+        try:
+            # 2. 批量获取日线数据（一次调用获取所有股票）
+            api_start = time.time()
+            logger.info(f"  [A股批量] 正在获取日线数据...")
+            df = self._retry_api_call(
+                self.pro.daily,
+                trade_date=trade_date
+            )
+            if df is None or df.empty:
+                logger.warning(f"  [A股批量] {trade_date} 无日线数据（可能非交易日）")
+                return {'rows_saved': 0, 'trade_date': trade_date}
+            logger.info(f"  [A股批量] 获取到 {len(df)} 条日线数据，耗时: {time.time()-api_start:.2f}s")
+
+            # 3. 批量获取复权因子
+            adj_start = time.time()
+            logger.info(f"  [A股批量] 正在获取复权因子...")
+            adj_df = self._retry_api_call(
+                self.pro.adj_factor,
+                trade_date=trade_date
+            )
+            if adj_df is not None and not adj_df.empty:
+                logger.info(f"  [A股批量] 获取到 {len(adj_df)} 条复权因子，耗时: {time.time()-adj_start:.2f}s")
+                df = df.merge(
+                    adj_df[['ts_code', 'trade_date', 'adj_factor']],
+                    on=['ts_code', 'trade_date'],
+                    how='left'
+                )
+                # 计算前复权价格
+                df['open_qfq'] = df['open'] * df['adj_factor']
+                df['high_qfq'] = df['high'] * df['adj_factor']
+                df['low_qfq'] = df['low'] * df['adj_factor']
+                df['close_qfq'] = df['close'] * df['adj_factor']
+            else:
+                logger.warning(f"  [A股批量] 无复权因子数据")
+                df['adj_factor'] = None
+                df['open_qfq'] = df['open']
+                df['high_qfq'] = df['high']
+                df['low_qfq'] = df['low']
+                df['close_qfq'] = df['close']
+
+            # 4. 批量获取估值数据
+            basic_start = time.time()
+            logger.info(f"  [A股批量] 正在获取估值数据...")
+            basic_df = self._retry_api_call(
+                self.pro.daily_basic,
+                trade_date=trade_date
+            )
+            if basic_df is not None and not basic_df.empty:
+                logger.info(f"  [A股批量] 获取到 {len(basic_df)} 条估值数据，耗时: {time.time()-basic_start:.2f}s")
+                basic_cols = ['ts_code', 'trade_date', 'pe', 'pe_ttm', 'pb', 'ps', 'ps_ttm',
+                             'total_mv', 'circ_mv', 'total_share', 'float_share', 'free_share',
+                             'turnover_rate_f', 'volume_ratio', 'dv_ratio', 'dv_ttm']
+                basic_cols_to_merge = [col for col in basic_cols if col in basic_df.columns]
+                df = df.merge(basic_df[basic_cols_to_merge], on=['ts_code', 'trade_date'], how='left')
+            else:
+                logger.warning(f"  [A股批量] 无估值数据")
+
+            api_total_time = time.time() - api_start
+
+            # 5. 准备保存数据
+            df['stock_code'] = df['ts_code'].str.split('.').str[0]
+            df['exchange'] = df['ts_code'].str.split('.').str[1]
+            df['datetime'] = pd.to_datetime(df['trade_date'], format='%Y%m%d', errors='coerce')
+            df['turnover'] = df.get('amount')  # 成交额
+            df['pct_chg'] = df.get('pct_chg')
+
+            df_to_save = df[~df['datetime'].isna()].copy()
+
+            # 6. 写入DuckDB
+            db_start = time.time()
+            with db_writer.get_connection() as conn:
+                # 确保表存在
+                if not db_writer.table_exists(a_share_table):
+                    conn.execute(f"""
+                        CREATE TABLE {a_share_table} (
+                            stock_code VARCHAR NOT NULL,
+                            exchange VARCHAR,
+                            datetime DATE NOT NULL,
+                            open FLOAT, high FLOAT, low FLOAT, close FLOAT,
+                            open_qfq FLOAT, high_qfq FLOAT, low_qfq FLOAT, close_qfq FLOAT,
+                            pre_close FLOAT, change FLOAT, pct_chg FLOAT,
+                            volume DOUBLE, turnover FLOAT, amount DOUBLE,
+                            pe FLOAT, pe_ttm FLOAT, pb FLOAT, ps FLOAT, ps_ttm FLOAT,
+                            total_mv FLOAT, circ_mv FLOAT,
+                            total_share FLOAT, float_share FLOAT, free_share FLOAT,
+                            volume_ratio FLOAT, turnover_rate_f FLOAT,
+                            dv_ratio FLOAT, dv_ttm FLOAT,
+                            PRIMARY KEY (stock_code, datetime)
+                        )
+                    """)
+
+                # 获取表的列
+                table_columns = conn.execute(
+                    f"SELECT column_name FROM information_schema.columns WHERE table_name = '{a_share_table}'"
+                ).fetchdf()['column_name'].tolist()
+
+                # 只保留表中存在的列
+                available_columns = [col for col in df_to_save.columns if col in table_columns]
+                df_save = df_to_save[available_columns].copy()
+
+                conn.register('temp_batch_import', df_save)
+                columns_str = ', '.join(available_columns)
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO {a_share_table} ({columns_str})
+                    SELECT {columns_str} FROM temp_batch_import
+                """)
+                conn.unregister('temp_batch_import')
+
+            db_time = time.time() - db_start
+            total_time = time.time() - func_start_time
+            rows_saved = len(df_to_save)
+
+            logger.info(f"  [A股批量] ✓ 成功保存 {rows_saved} 条记录 | 耗时: API={api_total_time:.2f}s, DB={db_time:.2f}s, 总计={total_time:.2f}s")
+
+            return {
+                'rows_saved': rows_saved,
+                'trade_date': trade_date,
+                'api_time': round(api_total_time, 2),
+                'db_time': round(db_time, 2),
+                'total_time': round(total_time, 2)
+            }
+
+        except Exception as e:
+            logger.error(f"  [A股批量] ✗ 保存失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'rows_saved': 0, 'trade_date': trade_date}
+
+        finally:
+            db_writer.close()
+
+    def save_all_hk_daily_by_date(self, trade_date: str = None):
+        """
+        按日期批量保存港股日线数据到DuckDB（高效方式）
+
+        一次API调用获取当天所有港股数据。
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD 格式（None = 今天）
+
+        Returns:
+            Dictionary with statistics
+        """
+        import time
+        from src.db.duckdb_manager import get_duckdb_writer
+        from datetime import datetime
+
+        func_start_time = time.time()
+
+        # 1. 确定交易日期
+        if trade_date is None:
+            trade_date = datetime.today().strftime('%Y%m%d')
+
+        logger.info(f"[港股批量] 开始获取 {trade_date} 所有港股数据...")
+
+        hk_table = 'bars_1d'
+        db_writer = get_duckdb_writer()
+
+        try:
+            # 2. 批量获取港股日线数据
+            api_start = time.time()
+            logger.info(f"  [港股批量] 正在获取日线数据...")
+            df = self._retry_api_call(
+                self.pro.hk_daily,
+                trade_date=trade_date
+            )
+            if df is None or df.empty:
+                logger.warning(f"  [港股批量] {trade_date} 无日线数据（可能非交易日）")
+                return {'rows_saved': 0, 'trade_date': trade_date}
+            logger.info(f"  [港股批量] 获取到 {len(df)} 条日线数据，耗时: {time.time()-api_start:.2f}s")
+
+            # 3. 准备保存数据
+            df['stock_code'] = df['ts_code'].str.split('.').str[0]
+            df['exchange'] = 'HK'
+            df['datetime'] = pd.to_datetime(df['trade_date'], format='%Y%m%d', errors='coerce')
+            df['turnover'] = df.get('amount')
+
+            df_to_save = df[~df['datetime'].isna()].copy()
+
+            # 4. 写入DuckDB
+            db_start = time.time()
+            with db_writer.get_connection() as conn:
+                # 确保表存在
+                if not db_writer.table_exists(hk_table):
+                    conn.execute(f"""
+                        CREATE TABLE {hk_table} (
+                            stock_code VARCHAR NOT NULL,
+                            exchange VARCHAR,
+                            datetime DATE NOT NULL,
+                            open FLOAT, high FLOAT, low FLOAT, close FLOAT,
+                            pre_close FLOAT, change FLOAT, pct_chg FLOAT,
+                            volume DOUBLE, turnover FLOAT, amount DOUBLE,
+                            total_mv FLOAT,
+                            PRIMARY KEY (stock_code, datetime)
+                        )
+                    """)
+
+                # 获取表的列
+                table_columns = conn.execute(
+                    f"SELECT column_name FROM information_schema.columns WHERE table_name = '{hk_table}'"
+                ).fetchdf()['column_name'].tolist()
+
+                # 只保留表中存在的列
+                available_columns = [col for col in df_to_save.columns if col in table_columns]
+                df_save = df_to_save[available_columns].copy()
+
+                conn.register('temp_hk_batch_import', df_save)
+                columns_str = ', '.join(available_columns)
+                conn.execute(f"""
+                    INSERT OR REPLACE INTO {hk_table} ({columns_str})
+                    SELECT {columns_str} FROM temp_hk_batch_import
+                """)
+                conn.unregister('temp_hk_batch_import')
+
+            api_total_time = time.time() - api_start
+            db_time = time.time() - db_start
+            total_time = time.time() - func_start_time
+            rows_saved = len(df_to_save)
+
+            logger.info(f"  [港股批量] ✓ 成功保存 {rows_saved} 条记录 | 耗时: API={api_total_time:.2f}s, DB={db_time:.2f}s, 总计={total_time:.2f}s")
+
+            return {
+                'rows_saved': rows_saved,
+                'trade_date': trade_date,
+                'api_time': round(api_total_time, 2),
+                'db_time': round(db_time, 2),
+                'total_time': round(total_time, 2)
+            }
+
+        except Exception as e:
+            logger.error(f"  [港股批量] ✗ 保存失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'rows_saved': 0, 'trade_date': trade_date}
 
         finally:
             db_writer.close()

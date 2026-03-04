@@ -208,14 +208,14 @@ def get_industry_moneyflow(level: str = 'L1', industry_name: str = None,
         }, 500
 
 
-def get_top_industries_by_netflow(level: str = 'L1', trade_date: str = None, top_n: int = 10, accumulate_days: int = 1):
+def get_top_industries_by_netflow(level: str = 'L1', trade_date: str = None, top_n: int = None, accumulate_days: int = 1):
     """
     Get top N industries by net money flow.
 
     Args:
         level: Industry level (L1/L2/L3)
         trade_date: Trade date YYYY-MM-DD (default: latest)
-        top_n: Number of top industries to return
+        top_n: Number of top industries to return (None = return all)
         accumulate_days: Number of trading days to accumulate (default: 1)
                           - 1 = single day (default)
                           - >1 = accumulate over multiple trading days
@@ -242,19 +242,21 @@ def get_top_industries_by_netflow(level: str = 'L1', trade_date: str = None, top
 
         if accumulate_days == 1:
             # Single day query (original behavior)
-            query = f"""
+            query = """
             SELECT * FROM industry_moneyflow
             WHERE level = :level AND trade_date = :trade_date
             ORDER BY net_mf_amount DESC
-            LIMIT :top_n
             """
+            params = {
+                'level': level,
+                'trade_date': trade_date.replace('-', '') if '-' in trade_date else trade_date
+            }
+            if top_n:
+                query += " LIMIT :top_n"
+                params['top_n'] = top_n
 
             with engine.connect() as conn:
-                df = pd.read_sql_query(query, conn, params={
-                    'level': level,
-                    'trade_date': trade_date.replace('-', '') if '-' in trade_date else trade_date,
-                    'top_n': top_n
-                })
+                df = pd.read_sql_query(query, conn, params=params)
         else:
             # Multiple days accumulation
             # First, get the last N trading dates
@@ -312,14 +314,14 @@ def get_top_industries_by_netflow(level: str = 'L1', trade_date: str = None, top
               AND trade_date IN ('{date_list}')
             GROUP BY level, index_code
             ORDER BY net_mf_amount DESC
-            LIMIT :top_n
             """
+            params = {'level': level}
+            if top_n:
+                query += " LIMIT :top_n"
+                params['top_n'] = top_n
 
             with engine.connect() as conn:
-                df = pd.read_sql_query(query, conn, params={
-                    'level': level,
-                    'top_n': top_n
-                })
+                df = pd.read_sql_query(query, conn, params=params)
 
         if df.empty:
             return {

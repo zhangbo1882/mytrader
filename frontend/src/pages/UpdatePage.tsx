@@ -110,6 +110,8 @@ const getCronDescription = (cronExpr: string): string => {
 const getTaskTypeName = (taskType: string): string => {
   const taskTypeMap: Record<string, string> = {
     'update_stock_prices': '股价更新',
+    'update_a_share_batch': 'A股批量更新',
+    'update_hk_batch': '港股批量更新',
     'update_hk_prices': '港股数据更新',
     'update_financial_reports': '财务报表',
     'update_industry_classification': '行业分类',
@@ -341,25 +343,36 @@ function UpdatePage() {
         const mode = values.mode || 'incremental';
         const startDate = mode === 'full' ? computeStartDate(values.date_range, values.start_date) : undefined;
 
-        // A股数据更新参数
-        const params: any = {
-          content_type: 'stock',
-          mode,
-          stock_range: scope,
-          custom_stocks: stockList,
-          start_date: startDate,
-          exclude_st: values.exclude_st !== false, // 默认排除ST
-        };
+        // 增量更新且全市场/按市场选择时，使用高效的批量获取方式
+        if (mode === 'incremental' && (scope === 'all' || scope === 'market')) {
+          // 使用批量更新任务（高效模式：按日期获取所有股票）
+          await taskService.create({
+            type: 'update_a_share_batch',
+            params: {
+              days_back: 1,  // 增量更新只获取最近1天
+            },
+          });
+        } else {
+          // A股数据更新参数（逐股票模式）
+          const params: any = {
+            content_type: 'stock',
+            mode,
+            stock_range: scope,
+            custom_stocks: stockList,
+            start_date: startDate,
+            exclude_st: values.exclude_st !== false, // 默认排除ST
+          };
 
-        // 如果按市场选择，添加市场参数
-        if (scope === 'market') {
-          params.markets = values.markets || ['main'];
+          // 如果按市场选择，添加市场参数
+          if (scope === 'market') {
+            params.markets = values.markets || ['main'];
+          }
+
+          await taskService.create({
+            type: 'update',
+            params,
+          });
         }
-
-        await taskService.create({
-          type: 'update',
-          params,
-        });
       }
 
       message.success({

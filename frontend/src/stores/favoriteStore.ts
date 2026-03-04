@@ -4,6 +4,7 @@ import { favoriteService, type FavoriteItem, type BatchAddResponse, type UpdateF
 
 export interface FavoriteStock extends Stock {
   addedAt: string;
+  notes: string | null;
   safetyRating: string | null;
   fundamentalRating: string | null;
   entryPrice: number | null;
@@ -30,6 +31,7 @@ const toFavoriteStock = (item: FavoriteItem): FavoriteStock => ({
   code: item.stock_code,
   name: item.stock_name,
   addedAt: item.added_at,
+  notes: item.notes,
   safetyRating: item.safety_rating,
   fundamentalRating: item.fundamental_rating,
   entryPrice: item.entry_price,
@@ -88,6 +90,7 @@ export const useFavoriteStore = create<FavoriteState>()((set, get) => ({
           f.code === code
             ? {
                 ...f,
+                notes: data.notes ?? f.notes,
                 safetyRating: data.safety_rating ?? f.safetyRating,
                 fundamentalRating: data.fundamental_rating ?? f.fundamentalRating,
                 entryPrice: data.entry_price ?? f.entryPrice,

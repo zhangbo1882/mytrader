@@ -49,6 +49,31 @@ def create_task(request_data):
         return handle_test_handler(params)
     elif task_type == 'backtest':
         return handle_backtest(params)
+    elif task_type == 'update_a_share_batch':
+        return handle_update_a_share_batch(params)
+    elif task_type == 'update_hk_batch':
+        return handle_update_hk_batch(params)
+    elif task_type == 'update':
+        # 通用更新任务，根据 params.content_type 分发
+        content_type = params.get('content_type', 'stock')
+        if content_type == 'stock':
+            return handle_update_stock_prices(params)
+        elif content_type == 'hk':
+            return handle_update_hk_prices(params)
+        elif content_type == 'industry':
+            return handle_update_industry_classification(params)
+        elif content_type == 'financial':
+            return handle_update_financial_reports(params)
+        elif content_type == 'index':
+            return handle_update_index_data(params)
+        elif content_type == 'statistics':
+            return handle_update_industry_statistics(params)
+        elif content_type == 'moneyflow':
+            return handle_update_moneyflow(params)
+        elif content_type == 'dragon_list':
+            return handle_update_dragon_list(params)
+        else:
+            return {'error': f'未知的 content_type: {content_type}'}, 400
     else:
         return {'error': f'未知的任务类型: {task_type}'}, 400
 
@@ -715,5 +740,79 @@ def handle_update_hk_prices(params):
         'task_id': task_id,
         'status': 'pending',
         'message': f'港股价格更新任务已创建，stock_range={stock_range}'
+    }, 201
+
+
+def handle_update_a_share_batch(params):
+    """
+    Handle A-share batch update task (efficient mode).
+
+    This task uses the batch API to fetch all A-share data for a given date
+    in a single API call, which is 1000x faster than per-stock fetching.
+
+    Args:
+        params: Dictionary with keys:
+            - trade_date: Specific date YYYYMMDD (optional, default: today)
+            - days_back: Number of days to look back (optional, default: 1)
+    """
+    from web.services.task_service import get_task_manager
+
+    trade_date = params.get('trade_date')
+    days_back = params.get('days_back', 1)
+
+    tm = get_task_manager()
+
+    task_params = {
+        'trade_date': trade_date,
+        'days_back': days_back,
+    }
+
+    task_id = tm.create_task(
+        task_type='update_a_share_batch',
+        params=task_params
+    )
+
+    return {
+        'success': True,
+        'task_id': task_id,
+        'status': 'pending',
+        'message': f'A股批量更新任务已创建，days_back={days_back}'
+    }, 201
+
+
+def handle_update_hk_batch(params):
+    """
+    Handle HK stock batch update task (efficient mode).
+
+    This task uses the batch API to fetch all HK stock data for a given date
+    in a single API call.
+
+    Args:
+        params: Dictionary with keys:
+            - trade_date: Specific date YYYYMMDD (optional, default: today)
+            - days_back: Number of days to look back (optional, default: 1)
+    """
+    from web.services.task_service import get_task_manager
+
+    trade_date = params.get('trade_date')
+    days_back = params.get('days_back', 1)
+
+    tm = get_task_manager()
+
+    task_params = {
+        'trade_date': trade_date,
+        'days_back': days_back,
+    }
+
+    task_id = tm.create_task(
+        task_type='update_hk_batch',
+        params=task_params
+    )
+
+    return {
+        'success': True,
+        'task_id': task_id,
+        'status': 'pending',
+        'message': f'港股批量更新任务已创建，days_back={days_back}'
     }, 201
 
