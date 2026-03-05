@@ -5,25 +5,25 @@ source .venv/bin/activate
 ```
 
 ### frontend
-When you want to start the frontend, you should run
+When you want to start the frontend, you must run
 ```
 ./scripts/start_frontend.sh
 ```
-You should save log to ./logs/frontend.log
+You must save log to ./logs/frontend.log
 You can access via http://localhost:5002
 ### backend
-When you want to start the backend or api server, you should run
+When you want to start the backend or api server, you must run
 ```
 ./scripts/start_web.sh
 ```
-You should save log to ./logs/api.log
+You must save log to ./logs/api.log
 You can access via http://localhost:5001
 ### worker
-When you want to start the worker, you should run
+When you want to start the worker, you must run
 ```
 python ./scripts/start_worker.py
 ```
-You should save log to ./logs/worker.log
+You must save log to ./logs/worker.log
 ## Browser Automation
 Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
 Core workflow:

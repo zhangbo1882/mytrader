@@ -106,6 +106,9 @@ class PriceBreakoutStrategyV2(bt.Strategy):
 
         # Warmup period
         ("backtest_start_date", None),  # 回测实际开始日期（用于跳过预热期）
+
+        # 不复权价格映射（用于日志显示实际价格）
+        ("bfq_price_map", None),
     )
 
     def __init__(self):
@@ -147,6 +150,15 @@ class PriceBreakoutStrategyV2(bt.Strategy):
 
         # Initial cash for summary
         self.initial_cash = self.broker.getvalue()
+
+    def _get_bfq_price(self, date_str, price_type='close'):
+        """获取不复权价格（用于日志显示实际价格）"""
+        if not self.params.bfq_price_map:
+            return None
+        date_data = self.params.bfq_price_map.get(str(date_str))
+        if date_data:
+            return date_data.get(price_type)
+        return None
 
     def notify_order(self, order):
         """
@@ -312,18 +324,19 @@ class PriceBreakoutStrategyV2(bt.Strategy):
             self.order = None
             self.pending_buy_price = None
 
-        # Detect market state periodically
+        # Detect market state periodically (only if adaptive thresholds enabled)
         stock_code = self.datas[0]._name
         current_date = self.datas[0].datetime.date(0)
 
-        if self.state_detection_counter % self.params.state_detection_interval == 0:
-            self.stock_state = self.state_detector.detect_state(
-                self.datas[0],
-                stock_code=stock_code,
-                verbose=True
-            )
-            self.state_history.append(self.stock_state)
-        self.state_detection_counter += 1
+        if self.params.enable_adaptive_thresholds:
+            if self.state_detection_counter % self.params.state_detection_interval == 0:
+                self.stock_state = self.state_detector.detect_state(
+                    self.datas[0],
+                    stock_code=stock_code,
+                    verbose=True
+                )
+                self.state_history.append(self.stock_state)
+            self.state_detection_counter += 1
 
         # Get adaptive thresholds
         if self.params.enable_adaptive_thresholds and self.stock_state:
@@ -520,14 +533,33 @@ class PriceBreakoutStrategyV2(bt.Strategy):
         if os.environ.get('STRATEGY_QUIET_MODE', '0') == '1':
             return
 
+        # 获取不复权价格
+        date_str = str(current_date)
+        bfq_open = self._get_bfq_price(date_str, 'open')
+        bfq_low = self._get_bfq_price(date_str, 'low')
+
+        # 计算复权因子
+        adj_factor = bfq_open / self.data_open[0] if bfq_open and self.data_open[0] else None
+        bfq_threshold_price = buy_threshold_price * adj_factor if adj_factor else None
+        bfq_limit_price = buy_limit_price * adj_factor if adj_factor else None
+
         logger.info("=" * 60)
         logger.info(f"【买入信号】{current_date} - {stock_code}")
         logger.info("-" * 60)
         logger.info(f"触发条件:")
-        logger.info(f"  开盘价: {self.data_open[0]:.2f}")
+        open_price_str = f"  开盘价: {self.data_open[0]:.2f}"
+        if bfq_open:
+            open_price_str += f" (实际: {bfq_open:.2f})"
+        logger.info(open_price_str)
         logger.info(f"  买入阈值: {buy_threshold:.2f}%")
-        logger.info(f"  阈值价格: {buy_threshold_price:.2f}")
-        logger.info(f"  当日最低价: {self.data_low[0]:.2f}")
+        threshold_str = f"  阈值价格: {buy_threshold_price:.2f}"
+        if bfq_threshold_price:
+            threshold_str += f" (实际: {bfq_threshold_price:.2f})"
+        logger.info(threshold_str)
+        low_price_str = f"  当日最低价: {self.data_low[0]:.2f}"
+        if bfq_low:
+            low_price_str += f" (实际: {bfq_low:.2f})"
+        logger.info(low_price_str)
         logger.info(f"  条件满足: {self.data_low[0]:.2f} < {buy_threshold_price:.2f} ✓")
 
         if self.stock_state:
@@ -537,7 +569,10 @@ class PriceBreakoutStrategyV2(bt.Strategy):
             logger.info(f"  使用参数: buy_threshold={buy_threshold:.2f}% (自适应)")
 
         logger.info(f"订单信息:")
-        logger.info(f"  限价: {buy_limit_price:.2f}")
+        limit_str = f"  限价: {buy_limit_price:.2f}"
+        if bfq_limit_price:
+            limit_str += f" (实际: {bfq_limit_price:.2f})"
+        logger.info(limit_str)
         logger.info(f"  数量: {size}股 ({size//100}手)")
         logger.info(f"  可用资金: {cash:.2f}")
         logger.info(f"  预计成交额: {buy_limit_price * size:.2f}")
@@ -548,17 +583,43 @@ class PriceBreakoutStrategyV2(bt.Strategy):
         if os.environ.get('STRATEGY_QUIET_MODE', '0') == '1':
             return
 
+        # 获取不复权价格
+        date_str = str(current_date)
+        bfq_open = self._get_bfq_price(date_str, 'open')
+        bfq_high = self._get_bfq_price(date_str, 'high')
+        bfq_low = self._get_bfq_price(date_str, 'low')
+        bfq_close = self._get_bfq_price(date_str, 'close')
+
+        # 计算复权因子（用于转换成交价）
+        adj_factor = bfq_open / open_price if bfq_open and open_price else None
+        bfq_exec_price = order.executed.price * adj_factor if adj_factor else None
+
         logger.info("=" * 60)
         logger.info(f"【买入成交】{current_date} - {self.datas[0]._name}")
         logger.info("-" * 60)
         logger.info(f"当日行情:")
-        logger.info(f"  开盘: {open_price:.2f}")
-        logger.info(f"  最高: {high_price:.2f}")
-        logger.info(f"  最低: {low_price:.2f}")
-        logger.info(f"  收盘: {close_price:.2f}")
+        open_str = f"  开盘: {open_price:.2f}"
+        if bfq_open:
+            open_str += f" (实际: {bfq_open:.2f})"
+        logger.info(open_str)
+        high_str = f"  最高: {high_price:.2f}"
+        if bfq_high:
+            high_str += f" (实际: {bfq_high:.2f})"
+        logger.info(high_str)
+        low_str = f"  最低: {low_price:.2f}"
+        if bfq_low:
+            low_str += f" (实际: {bfq_low:.2f})"
+        logger.info(low_str)
+        close_str = f"  收盘: {close_price:.2f}"
+        if bfq_close:
+            close_str += f" (实际: {bfq_close:.2f})"
+        logger.info(close_str)
         logger.info(f"成交信息:")
         logger.info(f"  限价: {self.pending_buy_price:.2f}" if self.pending_buy_price is not None else f"  限价: N/A")
-        logger.info(f"  实际成交价: {order.executed.price:.2f}")
+        exec_price_str = f"  实际成交价: {order.executed.price:.2f}"
+        if bfq_exec_price:
+            exec_price_str += f" (实际: {bfq_exec_price:.2f})"
+        logger.info(exec_price_str)
         logger.info(f"  成交数量: {order.executed.size}股")
         logger.info(f"  成交金额: {order.executed.value:.2f}")
         logger.info(f"  手续费: {order.executed.comm:.2f}")
@@ -571,12 +632,31 @@ class PriceBreakoutStrategyV2(bt.Strategy):
         if os.environ.get('STRATEGY_QUIET_MODE', '0') == '1':
             return
 
+        # 获取不复权价格
+        date_str = str(current_date)
+        bfq_close = self._get_bfq_price(date_str, 'close')
+        bfq_high = self._get_bfq_price(date_str, 'high')
+        bfq_low = self._get_bfq_price(date_str, 'low')
+
+        # 计算复权因子（用收盘价计算，更稳定）
+        adj_factor = bfq_close / self.data_close[0] if bfq_close and self.data_close[0] else None
+        bfq_stop_loss_price = stop_loss_price * adj_factor if adj_factor else None
+        bfq_take_profit_price = take_profit_price * adj_factor if adj_factor else None
+        bfq_sell_price = sell_price * adj_factor if adj_factor and sell_price else None
+        bfq_buy_price = self.buy_price * adj_factor if adj_factor and self.buy_price else None
+
         logger.info("=" * 60)
         logger.info(f"【{self.sell_reason}信号】{current_date} - {stock_code}")
         logger.info("-" * 60)
         logger.info(f"持仓信息:")
-        logger.info(f"  买入价: {self.buy_price:.2f}")
-        logger.info(f"  当前价: {self.data_close[0]:.2f}")
+        buy_price_str = f"  买入价: {self.buy_price:.2f}"
+        if bfq_buy_price:
+            buy_price_str += f" (实际: {bfq_buy_price:.2f})"
+        logger.info(buy_price_str)
+        close_str = f"  当前价: {self.data_close[0]:.2f}"
+        if bfq_close:
+            close_str += f" (实际: {bfq_close:.2f})"
+        logger.info(close_str)
         logger.info(f"  持仓数量: {size}股")
 
         profit_pct = (self.data_close[0] / self.buy_price - 1) * 100 if self.buy_price else 0
@@ -585,16 +665,40 @@ class PriceBreakoutStrategyV2(bt.Strategy):
         logger.info(f"触发条件:")
         if self.sell_reason == '止损':
             logger.info(f"  止损阈值: {stop_loss_threshold:.2f}%")
-            logger.info(f"  止损价格: {stop_loss_price:.2f}")
-            logger.info(f"  当日最低价: {self.data_low[0]:.2f}")
+            stop_loss_str = f"  止损价格: {stop_loss_price:.2f}"
+            if bfq_stop_loss_price:
+                stop_loss_str += f" (实际: {bfq_stop_loss_price:.2f})"
+            logger.info(stop_loss_str)
+            low_str = f"  当日最低价: {self.data_low[0]:.2f}"
+            if bfq_low:
+                low_str += f" (实际: {bfq_low:.2f})"
+            logger.info(low_str)
             logger.info(f"  条件满足: {self.data_low[0]:.2f} <= {stop_loss_price:.2f} ✓")
-            logger.info(f"  订单类型: 市价单 (确保成交)" if self.params.use_market_order_for_stop else f"  订单类型: 限价单 {sell_price:.2f}")
+            if self.params.use_market_order_for_stop:
+                logger.info(f"  订单类型: 市价单 (确保成交)")
+            else:
+                order_str = f"  订单类型: 限价单 {sell_price:.2f}"
+                if bfq_sell_price:
+                    order_str += f" (实际: {bfq_sell_price:.2f})"
+                logger.info(order_str)
         else:
             logger.info(f"  止盈阈值: {sell_threshold:.2f}%")
-            logger.info(f"  止盈价格: {take_profit_price:.2f}")
-            logger.info(f"  当日最高价: {self.data_high[0]:.2f}")
+            take_profit_str = f"  止盈价格: {take_profit_price:.2f}"
+            if bfq_take_profit_price:
+                take_profit_str += f" (实际: {bfq_take_profit_price:.2f})"
+            logger.info(take_profit_str)
+            high_str = f"  当日最高价: {self.data_high[0]:.2f}"
+            if bfq_high:
+                high_str += f" (实际: {bfq_high:.2f})"
+            logger.info(high_str)
             logger.info(f"  条件满足: {self.data_high[0]:.2f} > {take_profit_price:.2f} ✓")
-            logger.info(f"  订单类型: 限价单 {sell_price:.2f}" if sell_price else "  订单类型: 市价单")
+            if sell_price:
+                order_str = f"  订单类型: 限价单 {sell_price:.2f}"
+                if bfq_sell_price:
+                    order_str += f" (实际: {bfq_sell_price:.2f})"
+                logger.info(order_str)
+            else:
+                logger.info(f"  订单类型: 市价单")
         logger.info("=" * 60)
 
     def _log_sell_execution(self, order, current_date, open_price, high_price, low_price, close_price,
@@ -603,17 +707,47 @@ class PriceBreakoutStrategyV2(bt.Strategy):
         if os.environ.get('STRATEGY_QUIET_MODE', '0') == '1':
             return
 
+        # 获取不复权价格
+        date_str = str(current_date)
+        bfq_open = self._get_bfq_price(date_str, 'open')
+        bfq_high = self._get_bfq_price(date_str, 'high')
+        bfq_low = self._get_bfq_price(date_str, 'low')
+        bfq_close = self._get_bfq_price(date_str, 'close')
+
+        # 计算复权因子（用于转换成交价）
+        adj_factor = bfq_open / open_price if bfq_open and open_price else None
+        bfq_exec_price = order.executed.price * adj_factor if adj_factor else None
+        bfq_buy_price = self.buy_price * adj_factor if adj_factor and self.buy_price else None
+
         logger.info("=" * 60)
         logger.info(f"【{reason_desc}成交】{current_date} - {self.datas[0]._name}")
         logger.info("-" * 60)
         logger.info(f"当日行情:")
-        logger.info(f"  开盘: {open_price:.2f}")
-        logger.info(f"  最高: {high_price:.2f}")
-        logger.info(f"  最低: {low_price:.2f}")
-        logger.info(f"  收盘: {close_price:.2f}")
+        open_str = f"  开盘: {open_price:.2f}"
+        if bfq_open:
+            open_str += f" (实际: {bfq_open:.2f})"
+        logger.info(open_str)
+        high_str = f"  最高: {high_price:.2f}"
+        if bfq_high:
+            high_str += f" (实际: {bfq_high:.2f})"
+        logger.info(high_str)
+        low_str = f"  最低: {low_price:.2f}"
+        if bfq_low:
+            low_str += f" (实际: {bfq_low:.2f})"
+        logger.info(low_str)
+        close_str = f"  收盘: {close_price:.2f}"
+        if bfq_close:
+            close_str += f" (实际: {bfq_close:.2f})"
+        logger.info(close_str)
         logger.info(f"交易统计:")
-        logger.info(f"  买入价格: {self.buy_price:.2f}")
-        logger.info(f"  卖出价格: {order.executed.price:.2f}")
+        buy_price_str = f"  买入价格: {self.buy_price:.2f}"
+        if bfq_buy_price:
+            buy_price_str += f" (实际: {bfq_buy_price:.2f})"
+        logger.info(buy_price_str)
+        sell_price_str = f"  卖出价格: {order.executed.price:.2f}"
+        if bfq_exec_price:
+            sell_price_str += f" (实际: {bfq_exec_price:.2f})"
+        logger.info(sell_price_str)
         logger.info(f"  卖出数量: {order.executed.size}股")
         logger.info(f"  持有收益: {profit_pct:.2f}%")
         profit_amount = order.executed.value - (self.buy_price * order.executed.size if self.buy_price else 0)

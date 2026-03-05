@@ -449,15 +449,20 @@ def run_scheduled_task(task_type, params):
         # 智能选择批量更新模式
         # 当是A股增量更新且全市场/按市场选择时，自动使用批量模式
         actual_task_type = task_type
-        if task_type == 'update_stock_prices':
-            mode = params.get('mode', 'incremental')
-            stock_range = params.get('stock_range', 'all')
-            content_type = params.get('content_type', 'stock')
+        mode = params.get('mode') or 'incremental'
+        stock_range = params.get('stock_range') or 'all'
 
+        if task_type == 'update_stock_prices':
+            content_type = params.get('content_type') or 'stock'
             if content_type == 'stock' and mode == 'incremental' and stock_range in ['all', 'market']:
                 actual_task_type = 'update_a_share_batch'
                 logging.info(f"[ScheduledJob] 自动切换到批量更新模式: {task_type} -> {actual_task_type}")
             elif content_type == 'hk' and mode == 'incremental' and stock_range in ['all', 'market']:
+                actual_task_type = 'update_hk_batch'
+                logging.info(f"[ScheduledJob] 自动切换到港股批量更新模式: {task_type} -> {actual_task_type}")
+        elif task_type == 'update_hk_prices':
+            # 港股任务：增量更新且全市场时，自动使用批量模式
+            if mode == 'incremental' and stock_range in ['all', 'market']:
                 actual_task_type = 'update_hk_batch'
                 logging.info(f"[ScheduledJob] 自动切换到港股批量更新模式: {task_type} -> {actual_task_type}")
 

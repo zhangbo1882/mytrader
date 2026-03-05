@@ -99,14 +99,14 @@ task_model = task_ns.model('Task', {
 
 create_task_model = task_ns.model('CreateTaskRequest', {
     'task_type': fields.String(
-        description='任务类型',
+        description='任务类型（全市场更新会自动使用批量模式）',
         required=True,
         example='update_stock_prices',
         enum=[
-            'update_stock_prices',
-            'update_a_share_batch',
-            'update_hk_batch',
-            'update_hk_prices',
+            'update_stock_prices',       # A股更新（自动切换到批量模式）
+            'update_hk_prices',          # 港股更新（自动切换到批量模式）
+            'update_a_share_batch',      # A股批量更新（直接调用）
+            'update_hk_batch',           # 港股批量更新（直接调用）
             'update_financial_reports',
             'update_industry_classification',
             'update_index_data',
@@ -123,6 +123,8 @@ create_task_model = task_ns.model('CreateTaskRequest', {
         description='任务参数 (根据不同任务类型需要不同参数)',
         example={
             'stock_range': 'all',
+            'mode': 'incremental',
+            'days_back': 1,
             'custom_stocks': ['600382'],
             'src': 'SW2021',
             'force': False,
@@ -789,24 +791,28 @@ class TaskCreateResource(Resource):
 
 支持的任务类型和参数：
 
-1. **update_stock_prices** - 更新股票价格数据
-   - stock_range: "all" | "favorites" | "custom" (默认: all)
-   - custom_stocks: 自定义股票列表 (当 stock_range="custom" 时必需)
+1. **update_a_share_batch** - A股批量更新（推荐，高效）
+   - days_back: 回溯天数 (默认: 1)
+   - trade_date: 指定日期 YYYYMMDD (可选)
 
-2. **update_financial_reports** - 更新财务报表数据
+2. **update_hk_batch** - 港股批量更新（推荐，高效）
+   - days_back: 回溯天数 (默认: 1)
+   - trade_date: 指定日期 YYYYMMDD (可选)
+
+3. **update_financial_reports** - 更新财务报表数据
    - stock_range: "all" | "favorites" | "custom" (默认: all)
    - custom_stocks: 自定义股票列表 (当 stock_range="custom" 时必需)
    - include_indicators: 是否包含财务指标表 (默认: true)
    - include_reports: 是否包含三大报表 (默认: true)
 
-3. **update_industry_classification** - 更新申万行业分类数据
+4. **update_industry_classification** - 更新申万行业分类数据
    - src: "SW2021" | "SW2014" (默认: SW2021)
    - force: 是否强制重新获取 (默认: false)
 
-4. **update_index_data** - 更新指数数据
+5. **update_index_data** - 更新指数数据
    - markets: 市场列表 ["SSE", "SZSE"] (默认: ["SSE", "SZSE"])
 
-5. **update_moneyflow** - 更新资金流向数据（个股数据）
+6. **update_moneyflow** - 更新资金流向数据（个股数据）
    - mode: "incremental" | "full" (默认: "incremental")
    - stock_range: "all" | "favorites" | "custom" (默认: "all")
    - custom_stocks: 自定义股票列表 (当 stock_range="custom" 时必需)
@@ -814,29 +820,29 @@ class TaskCreateResource(Resource):
    - end_date: 结束日期 YYYYMMDD (可选)
    - exclude_st: 是否排除ST股 (默认: true)
 
-6. **calculate_industry_moneyflow** - 计算行业资金流向汇总
+7. **calculate_industry_moneyflow** - 计算行业资金流向汇总
    - start_date: 开始日期 YYYYMMDD (可选)
    - end_date: 结束日期 YYYYMMDD (可选)
 
-7. **update_industry_statistics** - 更新行业统计数据
+8. **update_industry_statistics** - 更新行业统计数据
    - metrics: 指标列表 ["pe_ttm", "pb", "ps_ttm", "total_mv", "circ_mv"] (默认: 全部)
 
-8. **update_dragon_list** - 更新龙虎榜数据
+9. **update_dragon_list** - 更新龙虎榜数据
    - mode: "incremental" | "batch" (默认: "incremental")
    - start_date: 开始日期 YYYY-MM-DD (批量模式下必填)
    - end_date: 结束日期 YYYY-MM-DD (可选)
 
-9. **backtest** - 回测任务
-   - stock: 股票代码（必需）
-   - start_date: 开始日期（必需）
-   - end_date: 结束日期（可选）
-   - cash: 初始资金（可选，默认100万）
-   - commission: 手续费率（可选，默认0.2%）
-   - benchmark: 基准指数（可选）
-   - strategy: 策略类型（必需，如 "sma_cross"）
-   - strategy_params: 策略参数（必需）
+10. **backtest** - 回测任务
+    - stock: 股票代码（必需）
+    - start_date: 开始日期（必需）
+    - end_date: 结束日期（可选）
+    - cash: 初始资金（可选，默认100万）
+    - commission: 手续费率（可选，默认0.2%）
+    - benchmark: 基准指数（可选）
+    - strategy: 策略类型（必需，如 "sma_cross"）
+    - strategy_params: 策略参数（必需）
 
-10. **test_handler** - 测试任务处理器（用于测试Worker功能）
+11. **test_handler** - 测试任务处理器（用于测试Worker功能）
     - total_items: 处理项总数 (默认: 100)
     - item_duration_ms: 每项处理时间(ms) (默认: 100)
     - checkpoint_interval: 检查点保存间隔 (默认: 10)
@@ -846,10 +852,9 @@ class TaskCreateResource(Resource):
 **请求体示例：**
 ```json
 {
-  "task_type": "update_stock_prices",
+  "task_type": "update_a_share_batch",
   "params": {
-    "stock_range": "custom",
-    "custom_stocks": ["600382", "000001"]
+    "days_back": 1
   }
 }
 ```
@@ -1738,7 +1743,7 @@ class FavoriteClearResource(Resource):
 
 # Backtest models
 # 支持的策略类型枚举
-SUPPORTED_STRATEGIES = ['sma_cross', 'price_breakout', 'price_breakout_v2']
+SUPPORTED_STRATEGIES = ['sma_cross', 'price_breakout', 'price_breakout_v2', 'market_regime_switch']
 
 backtest_request_model = backtest_ns.model('BacktestRequest', {
     # 回测共有参数

@@ -1,11 +1,12 @@
 /**
- * 调整止损弹窗组件
+ * 编辑持仓弹窗组件
+ * 支持编辑：股数、成本价、止损基数、止损比例
  */
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, InputNumber, Descriptions, Space, Tag, message } from 'antd';
-import { LockOutlined, WarningOutlined } from '@ant-design/icons';
+import { Modal, Form, InputNumber, Descriptions, Space, Tag, message, Divider } from 'antd';
+import { LockOutlined, WarningOutlined, EditOutlined } from '@ant-design/icons';
 import type { PositionDetail, AdjustStopLossResponse } from '../../types/risk.types';
-import { adjustStopLoss } from '../../services/riskService';
+import { adjustStopLoss, updatePositionInDb } from '../../services/riskService';
 
 interface PositionEditorProps {
   visible: boolean;
@@ -27,6 +28,8 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
   useEffect(() => {
     if (position && visible) {
       form.setFieldsValue({
+        shares: position.shares,
+        cost_price: position.cost_price,
         new_stop_loss_base: position.stop_loss_base,
         new_stop_loss_percent: position.stop_loss_percent,
       });
@@ -38,25 +41,28 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
     if (!position) return;
 
     const values = form.getFieldsValue();
-    try {
-      const response = await adjustStopLoss({
-        position: {
-          symbol: position.symbol,
-          shares: position.shares,
-          cost_price: position.cost_price,
-          current_price: position.current_price,
-          stop_loss_base: position.stop_loss_base,
-          stop_loss_percent: position.stop_loss_percent,
-        },
-        new_stop_loss_base: values.new_stop_loss_base,
-        new_stop_loss_percent: values.new_stop_loss_percent,
-      });
+    // 只有止损相关字段变化时才计算预览
+    if (values.new_stop_loss_base !== undefined && values.new_stop_loss_percent !== undefined) {
+      try {
+        const response = await adjustStopLoss({
+          position: {
+            symbol: position.symbol,
+            shares: values.shares ?? position.shares,
+            cost_price: values.cost_price ?? position.cost_price,
+            current_price: position.current_price,
+            stop_loss_base: position.stop_loss_base,
+            stop_loss_percent: position.stop_loss_percent,
+          },
+          new_stop_loss_base: values.new_stop_loss_base,
+          new_stop_loss_percent: values.new_stop_loss_percent,
+        });
 
-      if (response.success) {
-        setPreview(response);
+        if (response.success) {
+          setPreview(response);
+        }
+      } catch {
+        // 忽略预览错误
       }
-    } catch {
-      // 忽略预览错误
     }
   };
 
@@ -67,28 +73,74 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
       const values = await form.validateFields();
       setLoading(true);
 
-      const response = await adjustStopLoss({
-        position: {
-          symbol: position.symbol,
-          shares: position.shares,
-          cost_price: position.cost_price,
-          current_price: position.current_price,
-          stop_loss_base: position.stop_loss_base,
-          stop_loss_percent: position.stop_loss_percent,
-        },
-        new_stop_loss_base: values.new_stop_loss_base,
-        new_stop_loss_percent: values.new_stop_loss_percent,
-      });
+      // 检查是否有股数或成本价变化
+      const hasSharesChange = values.shares !== position.shares;
+      const hasCostPriceChange = values.cost_price !== position.cost_price;
+      const hasStopLossChange = values.new_stop_loss_base !== position.stop_loss_base ||
+                                 values.new_stop_loss_percent !== position.stop_loss_percent;
 
-      if (response.success) {
-        message.success('止损调整成功');
-        onSuccess(response);
+      // 如果有股数或成本价变化，先更新数据库
+      if (hasSharesChange || hasCostPriceChange) {
+        const updateResult = await updatePositionInDb(position.symbol, {
+          shares: values.shares,
+          cost_price: values.cost_price,
+          stop_loss_base: values.new_stop_loss_base,
+          stop_loss_percent: values.new_stop_loss_percent,
+        });
+
+        if (!updateResult.success) {
+          message.error(updateResult.error || '更新持仓失败');
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 如果有止损变化，调用止损调整API获取预览结果
+      if (hasStopLossChange) {
+        const response = await adjustStopLoss({
+          position: {
+            symbol: position.symbol,
+            shares: values.shares,
+            cost_price: values.cost_price,
+            current_price: position.current_price,
+            stop_loss_base: position.stop_loss_base,
+            stop_loss_percent: position.stop_loss_percent,
+          },
+          new_stop_loss_base: values.new_stop_loss_base,
+          new_stop_loss_percent: values.new_stop_loss_percent,
+        });
+
+        if (response.success) {
+          message.success('持仓更新成功');
+          onSuccess(response);
+          onClose();
+        } else {
+          message.error(response.error || '更新失败');
+        }
+      } else if (hasSharesChange || hasCostPriceChange) {
+        // 只有股数或成本价变化，没有止损变化
+        message.success('持仓更新成功');
+        // 触发刷新
+        onSuccess({
+          success: true,
+          position: {
+            ...position,
+            shares: values.shares,
+            cost_price: values.cost_price,
+          },
+          adjustment: {
+            old_risk: position.total_risk,
+            new_risk: position.total_risk,
+            released_risk: 0,
+            old_stop_loss_price: position.stop_loss_price,
+            new_stop_loss_price: position.stop_loss_price,
+            locked_profit: position.locked_profit,
+          },
+        });
         onClose();
-      } else {
-        message.error(response.error || '调整失败');
       }
     } catch (error) {
-      message.error('调整失败');
+      message.error('更新失败');
     } finally {
       setLoading(false);
     }
@@ -104,33 +156,71 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
     <Modal
       title={
         <Space>
-          <LockOutlined />
-          调整止损 - {position.symbol}
+          <EditOutlined />
+          编辑持仓 - {position.symbol} {position.name}
         </Space>
       }
       open={visible}
       onCancel={onClose}
       onOk={handleOk}
       confirmLoading={loading}
-      okText="确认调整"
+      okText="确认保存"
       cancelText="取消"
-      width={500}
+      width={550}
     >
       <Form
         form={form}
         layout="vertical"
         onValuesChange={handleValuesChange}
       >
+        {/* 基本信息 */}
         <Descriptions column={2} size="small" style={{ marginBottom: 16 }}>
-          <Descriptions.Item label="成本价">¥{position.cost_price.toFixed(2)}（不变）</Descriptions.Item>
           <Descriptions.Item label="当前价">¥{position.current_price.toFixed(2)}</Descriptions.Item>
-          <Descriptions.Item label="持仓数量">{position.shares.toLocaleString()} 股</Descriptions.Item>
           <Descriptions.Item label="原止损价">¥{position.stop_loss_price.toFixed(2)}</Descriptions.Item>
         </Descriptions>
 
+        <Divider orientation="left" plain style={{ margin: '12px 0' }}>持仓信息</Divider>
+
+        {/* 可编辑：股数 */}
+        <Form.Item
+          name="shares"
+          label="持仓数量（股）"
+          rules={[{ required: true, message: '请输入持仓数量' }]}
+        >
+          <InputNumber
+            style={{ width: '100%' }}
+            min={0}
+            step={100}
+            precision={0}
+            placeholder="持仓数量"
+          />
+        </Form.Item>
+
+        {/* 可编辑：成本价 */}
+        <Form.Item
+          name="cost_price"
+          label="成本价"
+          rules={[{ required: true, message: '请输入成本价' }]}
+        >
+          <InputNumber
+            style={{ width: '100%' }}
+            min={0}
+            precision={2}
+            placeholder="成本价"
+            formatter={(value) => `¥ ${value}`}
+            parser={(displayValue) => {
+              const parsed = parseFloat(displayValue?.replace('¥', '').replace(',', '') || '0');
+              return parsed;
+            }}
+          />
+        </Form.Item>
+
+        <Divider orientation="left" plain style={{ margin: '12px 0' }}>止损设置</Divider>
+
+        {/* 可编辑：止损基数 */}
         <Form.Item
           name="new_stop_loss_base"
-          label="新止损基数"
+          label="止损基数"
           rules={[{ required: true, message: '请输入止损基数' }]}
         >
           <InputNumber
@@ -138,9 +228,15 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
             min={0}
             precision={2}
             placeholder="止损基数价格"
+            formatter={(value) => `¥ ${value}`}
+            parser={(displayValue) => {
+              const parsed = parseFloat(displayValue?.replace('¥', '').replace(',', '') || '0');
+              return parsed;
+            }}
           />
         </Form.Item>
 
+        {/* 可编辑：止损比例 */}
         <Form.Item
           name="new_stop_loss_percent"
           label="止损比例 (%)"

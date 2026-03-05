@@ -1298,14 +1298,29 @@ def execute_update_hk_prices(tm, task_id, params):
     for i in range(start_index, len(stock_list)):
         stock_code = stock_list[i]
 
-        # Check for stop flag file every stock (not just every 10)
-        # Using flag file to avoid database connection conflicts
-        if stop_flag_path.exists():
-            logger.info(f"[HK-Task-{task_id[:8]}] 发现停止标志文件，在索引 {i} 处停止")
-            stop_flag_path.unlink(missing_ok=True)
+        # Check for stop request (using both flag file and database check)
+        if stop_flag_path.exists() or tm.is_stop_requested(task_id):
+            logger.info(f"[HK-Task-{task_id[:8]}] 收到停止请求，在索引 {i} 处停止")
+            if stop_flag_path.exists():
+                stop_flag_path.unlink(missing_ok=True)
             tm.save_checkpoint(task_id, i, stats)
             tm.update_task(task_id, status='stopped', message='任务已停止')
             return
+
+        # Check pause request
+        while tm.is_pause_requested(task_id):
+            tm.update_task(task_id, status='paused', message=f'任务已暂停 ({i+1}/{len(stock_list)})')
+            logger.info(f"[HK-Task-{task_id[:8]}] 任务暂停，等待恢复...")
+            import time
+            time.sleep(2)
+            # Check if pause is cleared or stop is requested
+            if tm.is_stop_requested(task_id):
+                tm.clear_pause_request(task_id)
+                break
+            if not tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='running', message=f'任务已恢复 ({i+1}/{len(stock_list)})')
+                logger.info(f"[HK-Task-{task_id[:8]}] 任务恢复")
+                break
 
         try:
             # Update progress
@@ -1429,6 +1444,21 @@ def execute_update_a_share_batch(tm, task_id, params):
                 tm.update_task(task_id, status='stopped', message='任务已停止')
                 return
 
+            # Check pause request
+            while tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='paused', message=f'任务已暂停 ({i+1}/{len(dates)})')
+                logger.info(f"[A-Share-Batch-{task_id[:8]}] Paused at date {date}, waiting...")
+                import time
+                time.sleep(2)
+                # Check if pause is cleared or stop is requested
+                if stop_flag_path.exists():
+                    tm.clear_pause_request(task_id)
+                    break
+                if not tm.is_pause_requested(task_id):
+                    tm.update_task(task_id, status='running', message=f'任务已恢复 ({i+1}/{len(dates)})')
+                    logger.info(f"[A-Share-Batch-{task_id[:8]}] Resumed at date {date}")
+                    break
+
             progress = int(((i + 1) / len(dates)) * 100)
             tm.update_task(task_id,
                 progress=progress,
@@ -1532,6 +1562,21 @@ def execute_update_hk_batch(tm, task_id, params):
                 stop_flag_path.unlink(missing_ok=True)
                 tm.update_task(task_id, status='stopped', message='任务已停止')
                 return
+
+            # Check pause request
+            while tm.is_pause_requested(task_id):
+                tm.update_task(task_id, status='paused', message=f'任务已暂停 ({i+1}/{len(dates)})')
+                logger.info(f"[HK-Batch-{task_id[:8]}] Paused at date {date}, waiting...")
+                import time
+                time.sleep(2)
+                # Check if pause is cleared or stop is requested
+                if stop_flag_path.exists():
+                    tm.clear_pause_request(task_id)
+                    break
+                if not tm.is_pause_requested(task_id):
+                    tm.update_task(task_id, status='running', message=f'任务已恢复 ({i+1}/{len(dates)})')
+                    logger.info(f"[HK-Batch-{task_id[:8]}] Resumed at date {date}")
+                    break
 
             progress = int(((i + 1) / len(dates)) * 100)
             tm.update_task(task_id,

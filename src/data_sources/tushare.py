@@ -3801,6 +3801,7 @@ class TushareDB(BaseStockDB):
             df['datetime'] = pd.to_datetime(df['trade_date'], format='%Y%m%d', errors='coerce')
             df['turnover'] = df.get('amount')  # 成交额
             df['pct_chg'] = df.get('pct_chg')
+            df['volume'] = df.get('vol')  # 成交量：API返回的是vol，数据库需要volume
 
             df_to_save = df[~df['datetime'].isna()].copy()
 

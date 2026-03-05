@@ -10,7 +10,7 @@ import json
 import logging
 from flask import request
 from web.services.task_service import get_task_manager
-from src.strategies.registry import get_strategy_description
+from src.strategies.base.registry import get_strategy_description
 from src.utils.stock_lookup import get_stock_name_from_code
 
 logger = logging.getLogger(__name__)

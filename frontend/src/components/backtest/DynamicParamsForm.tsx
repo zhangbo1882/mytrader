@@ -1,4 +1,4 @@
-import { Form, InputNumber, Switch } from 'antd';
+import { Form, InputNumber, Switch, Select, Input } from 'antd';
 import type { StrategySchema } from '@/types';
 
 interface DynamicParamsFormProps {
@@ -32,6 +32,29 @@ export function DynamicParamsForm({ schema, value, onChange }: DynamicParamsForm
           <Switch
             checked={currentValue}
             onChange={(val) => handleChange(key, val)}
+          />
+        );
+      case 'string':
+        // 如果有 enum 选项，使用下拉选择框
+        if (fieldSchema.enum && fieldSchema.enum.length > 0) {
+          return (
+            <Select
+              value={currentValue ?? fieldSchema.default}
+              onChange={(val) => handleChange(key, val)}
+              style={{ width: '100%' }}
+              options={fieldSchema.enum.map((opt: string) => ({
+                value: opt,
+                label: opt,
+              }))}
+            />
+          );
+        }
+        // 普通 string 类型使用输入框
+        return (
+          <Input
+            value={currentValue}
+            onChange={(e) => handleChange(key, e.target.value)}
+            style={{ width: '100%' }}
           />
         );
       default:

@@ -12,6 +12,7 @@
 from typing import Optional, Tuple, Dict, Any, Type
 from src.strategies.sma_cross.strategy import SMACrossStrategy
 from src.strategies.price_breakout.strategy import PriceBreakoutStrategyV2
+from src.strategies.market_regime_switch.strategy import MarketRegimeSwitchStrategy
 
 
 # ============================================================================
@@ -21,6 +22,7 @@ from src.strategies.price_breakout.strategy import PriceBreakoutStrategyV2
 STRATEGY_CLASSES: Dict[str, Type] = {
     'sma_cross': SMACrossStrategy,
     'price_breakout': PriceBreakoutStrategyV2,
+    'market_regime_switch': MarketRegimeSwitchStrategy,
     # 未来扩展：
     # 'dual_ma': DualMAStrategy,
     # 'bollinger_bands': BollingerBandsStrategy,
@@ -79,6 +81,32 @@ STRATEGY_PARAMS_SCHEMA: Dict[str, Dict[str, Any]] = {
                 'type': 'boolean',
                 'default': True,
                 'description': '是否启用自适应阈值。启用后根据市场状态（牛/熊/震荡）自动调整买卖阈值'
+            }
+        },
+        'required': []
+    },
+    'market_regime_switch': {
+        'type': 'object',
+        'properties': {
+            'cycle': {
+                'type': 'string',
+                'enum': ['short', 'medium', 'long'],
+                'default': 'medium',
+                'description': '周期类型：short适合短线，medium适合波段，long适合长线'
+            },
+            'bull_confirm_days': {
+                'type': 'integer',
+                'minimum': 1,
+                'maximum': 5,
+                'default': 2,
+                'description': '牛市确认天数（连续N天牛市才买入）'
+            },
+            'bear_confirm_days': {
+                'type': 'integer',
+                'minimum': 1,
+                'maximum': 5,
+                'default': 1,
+                'description': '熊市确认天数（连续N天熊市才卖出）'
             }
         },
         'required': []
@@ -149,6 +177,18 @@ STRATEGY_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
             'enable_adaptive_thresholds - 是否启用自适应阈值'
         ],
         'category': '突破策略'
+    },
+    'market_regime_switch': {
+        'name': '牛熊市转换策略',
+        'description': '基于市场状态转换的交易策略。从熊市/震荡市转入牛市时买入，进入熊市时卖出。使用StockStateDetector进行市场状态检测，支持确认机制避免频繁交易。',
+        'params': [
+            'cycle - 周期类型 (short/medium/long)',
+            'bull_confirm_days - 牛市确认天数',
+            'bear_confirm_days - 熊市确认天数',
+            'buy_price_buffer - 买入价格缓冲',
+            'use_market_order_for_sell - 卖出时使用市价单'
+        ],
+        'category': '市场状态'
     },
     # 未来扩展示例：
     # 'dual_ma': {

@@ -64,8 +64,9 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
           row[`${code}_change`] = data.changePercent || data.pct_chg || 0;
           row[`${code}_volume`] = data.volume;
           row[`${code}_amount`] = data.amount || data.turnover;
-          // 优先使用 turnover（基于总股本的换手率），如果为空则使用 turnover_rate_f（基于自由流通股）
-          row[`${code}_turnoverRate`] = data.turnover ?? data.turnoverRate ?? data.turnover_rate_f;
+          // 换手率：优先使用 turnover_rate_f（基于自由流通股的换手率），这是最常用的换手率指标
+          // 注意：turnover 字段在数据库中存储的是成交额，不是换手率
+          row[`${code}_turnoverRate`] = data.turnover_rate_f ?? data.turnoverRate;
         }
       });
 

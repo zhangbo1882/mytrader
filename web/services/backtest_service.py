@@ -374,7 +374,8 @@ def run_single_backtest(params: Dict[str, Any]) -> Dict[str, Any]:
     # 策略可以使用这个参数来跳过预热期的交易
     merged_strategy_params_with_warmup = {
         **merged_strategy_params,
-        'backtest_start_date': start_date  # 传递回测实际开始日期
+        'backtest_start_date': start_date,  # 传递回测实际开始日期
+        'bfq_price_map': bfq_price_map  # 传递不复权价格映射，用于日志显示实际价格
     }
     cerebro.addstrategy(strategy_class, **merged_strategy_params_with_warmup)
 

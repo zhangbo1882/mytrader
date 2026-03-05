@@ -80,7 +80,9 @@ def create_task(request_data):
 
 def handle_update_stock_prices(params):
     """
-    Handle stock price update task (merged update_all_stocks + update_favorites).
+    Handle stock price update task.
+
+    全市场更新自动使用批量模式，收藏/自定义列表使用逐股票更新。
 
     Args:
         params: Dictionary with keys:
@@ -92,11 +94,11 @@ def handle_update_stock_prices(params):
             - start_date: Start date YYYY-MM-DD (optional, for full mode)
             - end_date: End date YYYY-MM-DD (optional)
     """
-    stock_range = params.get('stock_range', 'all')
+    stock_range = params.get('stock_range') or 'all'
     custom_stocks = params.get('custom_stocks', [])
     markets = params.get('markets', [])
     exclude_st = params.get('exclude_st', True)
-    mode = params.get('mode', 'incremental')
+    mode = params.get('mode') or 'incremental'
     start_date = params.get('start_date')
     end_date = params.get('end_date')
 
@@ -149,7 +151,7 @@ def handle_update_stock_prices(params):
                     # 6位是A股
                     a_share_stocks.append(stock)
 
-        # 创建A股更新任务
+        # 创建A股更新任务（逐股票模式，因为是收藏列表）
         if a_share_stocks:
             a_task_params = {
                 'mode': mode,
@@ -174,7 +176,7 @@ def handle_update_stock_prices(params):
                 'message': task_msg
             })
 
-        # 创建港股更新任务
+        # 创建港股更新任务（逐股票模式，因为是收藏列表）
         if hk_stocks:
             hk_task_params = {
                 'mode': mode,
@@ -209,35 +211,63 @@ def handle_update_stock_prices(params):
             'message': f'已创建 {len(created_tasks)} 个更新任务: {task_summary}'
         }, 201
 
-    # Build task parameters for non-favorites
+    # 全市场或自定义列表：自定义列表用逐股票，全市场用批量
+    if stock_range == 'custom':
+        # 自定义列表：逐股票更新
+        task_params = {
+            'mode': mode,
+            'stock_range': stock_range,
+            'custom_stocks': custom_stocks,
+            'start_date': start_date,
+            'end_date': end_date,
+            'exclude_st': exclude_st,
+        }
+        task_id = tm.create_task(
+            task_type='update_stock_prices',
+            params=task_params
+        )
+        tm.update_task(task_id, message=f'A股数据更新任务已创建 ({len(custom_stocks)}只股票)...')
+
+        return {
+            'success': True,
+            'task_id': task_id,
+            'status': 'pending',
+            'message': f'A股数据更新任务已创建，{len(custom_stocks)}只股票'
+        }, 201
+
+    # 全市场更新：自动使用批量模式
     task_params = {
         'mode': mode,
         'stock_range': stock_range,
-        'custom_stocks': custom_stocks,
-        'start_date': start_date,
-        'end_date': end_date,
+        'markets': markets,
         'exclude_st': exclude_st,
     }
 
-    # Add markets parameter if stock_range is 'market'
-    if stock_range == 'market':
-        task_params['markets'] = markets
+    # 计算回溯天数
+    days_back = 1
+    if mode == 'full' and start_date:
+        from datetime import datetime
+        try:
+            start = datetime.strptime(start_date, '%Y-%m-%d')
+            end = datetime.strptime(end_date, datetime.now().strftime('%Y-%m-%d')) if end_date else datetime.now()
+            days_back = max(1, (end - start).days + 1)
+        except:
+            days_back = 30  # 默认30天
 
-    # Create task with status='pending' - Worker will pick it up
+    task_params['days_back'] = days_back
     task_id = tm.create_task(
-        task_type='update_stock_prices',
+        task_type='update_a_share_batch',
         params=task_params
     )
 
     market_info = f', markets={",".join(markets)}' if stock_range == 'market' else ''
-    exclude_info = ', 排除ST' if exclude_st else ''
-    tm.update_task(task_id, message=f'任务已创建，等待Worker执行{market_info}{exclude_info}...')
+    tm.update_task(task_id, message=f'A股批量更新任务已创建{market_info}...')
 
     return {
         'success': True,
         'task_id': task_id,
         'status': 'pending',
-        'message': f'A股数据更新任务已创建，stock_range={stock_range}{market_info}{exclude_info}'
+        'message': f'A股批量更新任务已创建，stock_range={stock_range}{market_info}，回溯{days_back}天'
     }, 201
 
 
@@ -697,9 +727,9 @@ def handle_update_hk_prices(params):
             - start_date: Start date YYYY-MM-DD (optional, for full mode)
             - end_date: End date YYYY-MM-DD (optional)
     """
-    stock_range = params.get('stock_range', 'all')
+    stock_range = params.get('stock_range') or 'all'
     custom_stocks = params.get('custom_stocks', [])
-    mode = params.get('mode', 'incremental')
+    mode = params.get('mode') or 'incremental'
     start_date = params.get('start_date')
     end_date = params.get('end_date')
 
@@ -713,6 +743,11 @@ def handle_update_hk_prices(params):
     if stock_range == 'custom':
         if not custom_stocks or not isinstance(custom_stocks, list):
             return {'error': '当 stock_range="custom" 时，custom_stocks 必须是非空列表'}, 400
+
+    # 智能选择批量更新模式：增量更新且全市场时，自动使用批量模式
+    actual_task_type = 'update_hk_prices'
+    if mode == 'incremental' and stock_range == 'all':
+        actual_task_type = 'update_hk_batch'
 
     # Build task parameters
     task_params = {
@@ -730,16 +765,17 @@ def handle_update_hk_prices(params):
     # Create task with status='pending' - Worker will pick it up
     tm = get_task_manager()
     task_id = tm.create_task(
-        task_type='update_hk_prices',
+        task_type=actual_task_type,
         params=task_params
     )
     tm.update_task(task_id, message='港股数据更新任务已创建，等待Worker执行...')
 
+    task_type_desc = '批量更新' if actual_task_type == 'update_hk_batch' else '逐股票更新'
     return {
         'success': True,
         'task_id': task_id,
         'status': 'pending',
-        'message': f'港股价格更新任务已创建，stock_range={stock_range}'
+        'message': f'港股价格更新任务已创建({task_type_desc})，stock_range={stock_range}'
     }, 201
 
 

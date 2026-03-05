@@ -104,9 +104,24 @@ class TradeAnalyzer(bt.Analyzer):
             current_date = self.strategy.datas[0].datetime.date(0)
             current_price = order.executed.price
 
-            # 获取当日价格映射（与回测使用的价格类型一致）
+            # 获取当日价格映射（不复权价格）
             date_str = current_date.strftime('%Y-%m-%d')
             price_map = self.params.price_map.get(date_str, {})
+
+            # 获取当日复权价格（用于计算复权因子）
+            data = self.strategy.datas[0]
+            adj_open = data.open[0]
+            adj_close = data.close[0]
+
+            # 获取不复权价格
+            bfq_open = price_map.get('open')
+            bfq_close = price_map.get('close')
+
+            # 计算复权因子（使用开盘价计算，更稳定）
+            adj_factor = bfq_open / adj_open if bfq_open and adj_open else None
+
+            # 计算实际成交价（不复权价格）
+            original_price = current_price * adj_factor if adj_factor else None
 
             if order.isbuy():
                 # 记录买入信息
@@ -116,14 +131,14 @@ class TradeAnalyzer(bt.Analyzer):
                 self.buy_size = order.executed.size
                 self.buy_commission = order.executed.comm
                 self.buy_order = order
-                self.buy_original_price = price_map.get('close', current_price)
+                self.buy_original_price = original_price  # 使用复权因子计算的实际价格
 
                 # 记录到所有订单列表
                 self.all_orders_list.append({
                     'order_type': 'buy',
                     'date': current_date,
                     'price': current_price,
-                    'price_map': price_map.get('close', current_price),
+                    'price_map': original_price,
                     'size': order.executed.size,
                     'commission': order.executed.comm,
                     'value': current_price * order.executed.size
@@ -138,7 +153,7 @@ class TradeAnalyzer(bt.Analyzer):
                     # 使用买入时的数量，而不是卖出订单的数量
                     sell_size = self.buy_size
                     sell_commission = order.executed.comm
-                    self.sell_original_price = price_map.get('close', current_price)
+                    self.sell_original_price = original_price  # 使用复权因子计算的实际价格
 
                     # 计算持仓天数
                     hold_days = (sell_date - self.buy_date).days
