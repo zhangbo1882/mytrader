@@ -141,8 +141,10 @@ const RiskManagementPage: React.FC = () => {
   // 更新投资组合状态
   const updatePortfolioState = useCallback(async () => {
     try {
+      // 使用 capitalState 的数据来计算风险
       const state = await getPortfolioState({
-        total_capital: totalCapital,
+        total_capital: capitalState?.current_capital || totalCapital,
+        initial_capital: capitalState?.initial_capital || totalCapital,
         max_total_risk_percent: maxTotalRiskPercent,
         max_single_risk_percent: maxSingleRiskPercent,
         positions,
@@ -151,7 +153,7 @@ const RiskManagementPage: React.FC = () => {
     } catch (error) {
       console.error('获取投资组合状态失败:', error);
     }
-  }, [totalCapital, maxTotalRiskPercent, maxSingleRiskPercent, positions]);
+  }, [totalCapital, maxTotalRiskPercent, maxSingleRiskPercent, positions, capitalState]);
 
   useEffect(() => {
     if (!loading) {

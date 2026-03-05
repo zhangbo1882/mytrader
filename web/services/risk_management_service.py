@@ -41,9 +41,19 @@ class Position:
         return self.cost_price - self.stop_loss_price
 
     @property
+    def current_potential_risk(self) -> float:
+        """当前潜在风险：从当前价格到止损价的风险"""
+        return max(0, self.current_price - self.stop_loss_price) * self.shares
+
+    @property
     def total_risk(self) -> float:
-        """总风险占用"""
-        return self.shares * self.risk_per_share
+        """初始风险：买入时设定的风险（用于兼容）"""
+        return self.shares * (self.cost_price - self.stop_loss_price)
+
+    @property
+    def unrealized_loss(self) -> float:
+        """未实现亏损（正数表示亏损）"""
+        return max(0, self.cost_price - self.current_price) * self.shares
 
     @property
     def market_value(self) -> float:
@@ -79,6 +89,8 @@ class Position:
             'stop_loss_price': round(self.stop_loss_price, 2),
             'risk_per_share': round(self.risk_per_share, 4),
             'total_risk': round(self.total_risk, 2),
+            'current_potential_risk': round(self.current_potential_risk, 2),
+            'unrealized_loss': round(self.unrealized_loss, 2),
             'market_value': round(self.market_value, 2),
             'profit_per_share': round(self.profit_per_share, 2),
             'total_profit': round(self.total_profit, 2),
@@ -89,25 +101,40 @@ class Position:
 @dataclass
 class Portfolio:
     """投资组合"""
-    total_capital: float
+    total_capital: float  # 当前资金
+    initial_capital: float = None  # 初始资金
     positions: List[Position] = field(default_factory=list)
     max_total_risk_percent: float = 6.0
     max_single_risk_percent: float = 2.0
 
+    def __post_init__(self):
+        if self.initial_capital is None:
+            self.initial_capital = self.total_capital
+
     @property
     def total_risk_budget(self) -> float:
         """总风险预算"""
-        return self.total_capital * (self.max_total_risk_percent / 100)
+        return self.initial_capital * (self.max_total_risk_percent / 100)
 
     @property
     def single_risk_budget(self) -> float:
         """单笔风险预算"""
-        return self.total_capital * (self.max_single_risk_percent / 100)
+        return self.initial_capital * (self.max_single_risk_percent / 100)
 
     @property
     def used_risk(self) -> float:
-        """已用风险"""
-        return sum(p.total_risk for p in self.positions)
+        """已用风险 = 已亏损部分 + 潜在风险
+
+        已亏损部分 = 初始资金 - 当前资金（正数表示亏损）
+        潜在风险 = Σ (当前价格 - 止损价) × 股数
+        """
+        # 1. 已亏损部分（正数表示亏损）
+        unrealized_loss = max(0, self.initial_capital - self.total_capital)
+
+        # 2. 潜在风险：每只股票从当前价格到止损价的风险
+        potential_risk = sum(p.current_potential_risk for p in self.positions)
+
+        return unrealized_loss + potential_risk
 
     @property
     def available_risk(self) -> float:
@@ -127,11 +154,20 @@ class Portfolio:
     def get_state(self) -> Dict[str, Any]:
         """获取投资组合状态"""
         risk_usage = self.used_risk / self.total_risk_budget * 100 if self.total_risk_budget > 0 else 0
+
+        # 计算已亏损部分（用于显示）
+        unrealized_loss = max(0, self.initial_capital - self.total_capital)
+        # 计算潜在风险（用于显示）
+        potential_risk = sum(p.current_potential_risk for p in self.positions)
+
         return {
+            'initial_capital': round(self.initial_capital, 2),
             'total_capital': self.total_capital,
             'total_risk_budget': round(self.total_risk_budget, 2),
             'single_risk_budget': round(self.single_risk_budget, 2),
             'used_risk': round(self.used_risk, 2),
+            'unrealized_loss': round(unrealized_loss, 2),
+            'potential_risk': round(potential_risk, 2),
             'available_risk': round(self.available_risk, 2),
             'positions_value': round(self.positions_value, 2),
             'remaining_cash': round(self.remaining_cash, 2),
@@ -163,6 +199,7 @@ def create_portfolio_from_dict(data: Dict[str, Any]) -> Portfolio:
     positions = [create_position_from_dict(p) for p in data.get('positions', [])]
     return Portfolio(
         total_capital=data['total_capital'],
+        initial_capital=data.get('initial_capital'),
         positions=positions,
         max_total_risk_percent=data.get('max_total_risk_percent', 6.0),
         max_single_risk_percent=data.get('max_single_risk_percent', 2.0)
@@ -524,14 +561,17 @@ def load_portfolio_settings() -> Dict[str, Any]:
     try:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT total_capital, max_total_risk_percent, max_single_risk_percent, updated_at
+            SELECT total_capital, initial_capital, max_total_risk_percent, max_single_risk_percent, updated_at
             FROM risk_portfolio WHERE id = 1
         ''')
         row = cursor.fetchone()
 
         if row:
+            total_capital = row['total_capital'] or 650000
+            initial_capital = row['initial_capital'] or total_capital
             return {
-                'total_capital': row['total_capital'] or 650000,
+                'total_capital': total_capital,
+                'initial_capital': initial_capital,
                 'max_total_risk_percent': row['max_total_risk_percent'] or 6.0,
                 'max_single_risk_percent': row['max_single_risk_percent'] or 2.0,
                 'updated_at': row['updated_at']
@@ -539,13 +579,14 @@ def load_portfolio_settings() -> Dict[str, Any]:
 
         # 创建默认设置
         cursor.execute('''
-            INSERT INTO risk_portfolio (id, total_capital)
-            VALUES (1, 650000)
+            INSERT INTO risk_portfolio (id, total_capital, initial_capital)
+            VALUES (1, 650000, 650000)
         ''')
         conn.commit()
 
         return {
             'total_capital': 650000,
+            'initial_capital': 650000,
             'max_total_risk_percent': 6.0,
             'max_single_risk_percent': 2.0
         }
@@ -799,6 +840,7 @@ def load_full_portfolio() -> Dict[str, Any]:
 
     return {
         'total_capital': settings['total_capital'],
+        'initial_capital': settings.get('initial_capital', settings['total_capital']),
         'max_total_risk_percent': settings['max_total_risk_percent'],
         'max_single_risk_percent': settings['max_single_risk_percent'],
         'positions': positions,
