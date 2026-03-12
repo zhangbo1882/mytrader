@@ -2,7 +2,6 @@ import { Button, Space, message, Modal } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { stockService } from '@/services';
 import { useQueryStore } from '@/stores';
-import type { ExportProps } from 'antd/es/button';
 
 interface ExportButtonsProps {
   disabled?: boolean;
@@ -10,7 +9,7 @@ interface ExportButtonsProps {
 }
 
 export function ExportButtons({ disabled, style }: ExportButtonsProps) {
-  const { symbols, dateRange, priceType } = useQueryStore();
+  const { symbols, dateRange, priceType, interval } = useQueryStore();
 
   const handleExport = async (format: 'csv' | 'excel') => {
     if (symbols.length === 0) {
@@ -28,6 +27,7 @@ export function ExportButtons({ disabled, style }: ExportButtonsProps) {
         symbols: symbols.map((s) => s.code),
         startDate: dateRange.start,
         endDate: dateRange.end,
+        interval,
         priceType,
       };
 

@@ -2,10 +2,7 @@ import { useState, useCallback } from 'react';
 import { valuationService } from '@/services';
 import type {
   ValuationRequest,
-  ValuationResult,
-  ValuationMethod,
-  CombineMethod,
-  DCFConfig
+  ValuationResult
 } from '@/types';
 
 interface UseValuationResult {
@@ -31,6 +28,7 @@ export function useValuation(): UseValuationResult {
         {
           methods: request.methods,
           date: request.date,
+          fiscal_date: request.fiscal_date,
           combine_method: request.combine_method,
           dcf_config: request.dcf_config
         }

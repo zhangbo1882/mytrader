@@ -91,8 +91,8 @@ def download_stocks(stock_list, db, incremental=False):
             print(f"{'='*60}")
 
             # 下载所有财务数据（传递日期范围，限制最近2年）
-            count = db.save_all_financial(ts_code, start_date=start_date_str, end_date=end_date_str)
-            if count > 0:
+            result = db.save_all_financial(ts_code, start_date=start_date_str, end_date=end_date_str)
+            if result.get('total_records', 0) > 0:
                 success_count += 1
             else:
                 failed_count += 1

@@ -33,12 +33,6 @@ export function TaskProgress({ status, processed, total, failed, progress: backe
   const isInitializing = displayTotal === 0 && (status === 'pending' || status === 'running') && percent === 0;
   const isCompleted = percent === 100 || status === 'completed' || status === 'completed_with_errors';
 
-  const displayText = isInitializing
-    ? '初始化中...'
-    : isCompleted
-      ? `已完成 ${displayProcessed}/${displayTotal}`
-      : `${displayProcessed}/${displayTotal}`;
-
   const getStatusIcon = () => {
     if (isCompleted && status === 'running') {
       // Task is 100% complete but status still shows running
@@ -61,15 +55,13 @@ export function TaskProgress({ status, processed, total, failed, progress: backe
   };
 
   const getStatusColor = (): string => {
-    if (isCompleted) {
-      return '#52c41a'; // Green for completed
-    }
-
     switch (status) {
       case 'running':
         return '#1890ff';
       case 'completed':
         return '#52c41a';
+      case 'completed_with_errors':
+        return '#faad14';
       case 'failed':
         return '#f5222d';
       case 'stopped':

@@ -154,33 +154,48 @@ class BearToBullTransitionCriteria(BaseCriteria):
         if not symbols:
             return []
 
-        symbols_placeholder = ', '.join([f"'{s}'" for s in symbols])
-        date_filter = f"AND datetime <= '{trade_date_str}'" if trade_date_str else ""
-
-        query = f"""
-        SELECT stock_code, datetime, open, high, low, close, volume
-        FROM {table_name}
-        WHERE stock_code IN ({symbols_placeholder})
-          {date_filter}
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY datetime DESC) <= {total_days}
-        ORDER BY stock_code, datetime
-        """
-
-        try:
-            result_df = conn.execute(query).fetchdf()
-        except Exception as e:
-            logger.error(f"[BearToBullTransitionCriteria] DuckDB query error: {e}")
-            return []
-
-        if result_df.empty:
-            return []
-
+        # 使用 query_bars 获取前复权数据（与回测/API 保持一致）
+        from web.services.duckdb_query_service import get_duckdb_query_service
         from web.services.market_regime_service import MarketRegimeService
 
+        query_service = get_duckdb_query_service()
+
+        # 计算查询的起始日期（往前推 total_days 天）
+        from datetime import datetime, timedelta
+        if trade_date_str:
+            end_date = trade_date_str
+        else:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+        start_date = (datetime.strptime(end_date, '%Y-%m-%d') - timedelta(days=total_days * 2)).strftime('%Y-%m-%d')
+
+        # 根据表名确定股票类型（A股或港股）
+        is_a_share = table_name == 'bars_a_1d'
+
+        # 获取前复权数据
+        price_type = 'qfq' if is_a_share else 'bfq'  # 港股用不复权
+
+        try:
+            results = query_service.query_bars(
+                symbols=symbols,
+                start_date=start_date,
+                end_date=end_date,
+                interval='1d',
+                price_type=price_type
+            )
+        except Exception as e:
+            logger.error(f"[BearToBullTransitionCriteria] query_bars error: {e}")
+            return []
+
+        if not results:
+            return []
+
         qualified = []
-        for symbol, group_df in result_df.groupby('stock_code'):
+        for symbol, data in results.items():
             try:
-                data = group_df[['datetime', 'open', 'high', 'low', 'close', 'volume']].to_dict('records')
+                if len(data) < total_days:
+                    continue
+
                 service = MarketRegimeService(cycle=self.cycle)
                 regime_history = service.calculate_regime_history(data)
 

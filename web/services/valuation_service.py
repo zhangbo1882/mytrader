@@ -12,6 +12,7 @@ def valuation_summary(
     symbol: str,
     methods: Optional[str] = None,
     date: Optional[str] = None,
+    fiscal_date: Optional[str] = None,
     combine_method: str = 'weighted',
     dcf_config: Optional[Dict[str, Any]] = None
 ) -> tuple[Dict[str, Any], int]:
@@ -21,8 +22,9 @@ def valuation_summary(
     Args:
         symbol: 股票代码
         methods: 估值方法，逗号分隔 (pe, pb, ps, peg, dcf, combined)，默认全部
-        date: 估值日期 (YYYY-MM-DD 或 YYYYMMDD)
-        combine_method: 组合方式 (weighted, average, median, max_confidence)
+        date: 估值日期/股价日期 (YYYY-MM-DD 或 YYYYMMDD)
+        fiscal_date: 财务数据截止报告期 (YYYY-MM-DD 或 YYYYMMDD)，不传则取最新
+        combine_method: 组合方式 (weighted, average, median, max_confidence, bayesian, min_fair_value)
         dcf_config: DCF估值配置参数（可选）
             - risk_profile: 风险偏好 ('conservative', 'balanced', 'aggressive')
             - 或直接指定参数:
@@ -73,25 +75,21 @@ def valuation_summary(
             import logging
             logging.getLogger(__name__).warning(f"Failed to register DCF model: {e}")
 
+        # 模型注册完毕后，统一设置财务数据截止报告期（会传播到所有已注册模型）
+        if fiscal_date:
+            engine.set_fiscal_date(fiscal_date, valuation_date=date)
         # 解析估值方法
         if methods:
             method_list = [m.strip().lower() for m in methods.split(',')]
             # 转换方法名到模型名
             model_names = []
 
-            # 如果选择了combined且提供了DCF配置，则使用所有单独的模型+DCF
-            uses_combined_with_dcf = 'combined' in method_list and dcf_config is not None
-
             for m in method_list:
                 if m == 'combined':
-                    if uses_combined_with_dcf:
-                        # 使用所有相对估值方法 + DCF
-                        model_names.extend(['Relative_PE', 'Relative_PB', 'Relative_PS', 'Relative_PEG'])
-                        if dcf_config:
-                            model_names.append('DCF')
-                    else:
-                        # 只使用相对估值的组合
-                        model_names.append('Relative_COMBINED')
+                    # combined 表示 PE/PB/PS 三种相对估值方法，使用用户选择的组合方式
+                    model_names.extend(['Relative_PE', 'Relative_PB', 'Relative_PS'])
+                elif m == 'peg':
+                    model_names.append('Relative_PEG')
                 elif m == 'dcf':
                     model_names.append('DCF')
                 else:
@@ -184,15 +182,8 @@ def batch_valuation(
         # 注册相对估值模型
         for method in ['pe', 'pb', 'ps', 'peg']:
             if method in method_list or 'combined' in method_list:
-                config = {**base_config, 'method': method}  # 传递fiscal_date
-                model = RelativeValuationModel(config=config)
+                model = RelativeValuationModel(method=method, config=base_config if base_config else None)
                 engine.register_model(model)
-
-        # 注册combined模型（如果请求了）
-        if 'combined' in method_list:
-            config = {**base_config, 'method': 'combined'}  # 传递fiscal_date
-            combined_model = RelativeValuationModel(config=config)
-            engine.register_model(combined_model)
 
         # 注册DCF模型（如果请求了）
         if 'dcf' in method_list:
@@ -211,7 +202,10 @@ def batch_valuation(
         model_names = []
         for m in method_list:
             if m == 'combined':
-                model_names.append('Relative_COMBINED')
+                # combined 表示 PE/PB/PS 三种相对估值方法
+                model_names.extend(['Relative_PE', 'Relative_PB', 'Relative_PS'])
+            elif m == 'peg':
+                model_names.append('Relative_PEG')
             elif m == 'dcf':
                 model_names.append('DCF')
             else:
@@ -364,6 +358,23 @@ def list_models() -> tuple[Dict[str, Any], int]:
         }, 500
 
 
+def _sanitize_nan(obj):
+    """
+    递归地将 NaN/Infinity 值替换为 None（JSON null），以确保合法的 JSON 输出。
+    标准 JSON 不支持 NaN 和 Infinity，浏览器无法解析含有这些值的响应。
+    """
+    import math
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: _sanitize_nan(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_nan(item) for item in obj]
+    return obj
+
+
 def _format_valuation_result(result: Dict[str, Any]) -> Dict[str, Any]:
     """
     格式化估值结果
@@ -394,7 +405,8 @@ def _format_valuation_result(result: Dict[str, Any]) -> Dict[str, Any]:
             _format_valuation_result(r) for r in result['individual_results']
         ]
 
-    return formatted
+    # 清理 NaN/Infinity 值，确保合法的 JSON 输出
+    return _sanitize_nan(formatted)
 
 
 def get_dcf_preset_config(risk_profile: str) -> Dict[str, Any]:

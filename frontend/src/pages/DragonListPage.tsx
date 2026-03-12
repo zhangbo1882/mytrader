@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
   Card,
-  Tabs,
   Table,
   DatePicker,
   Button,
@@ -10,14 +9,11 @@ import {
   Statistic,
   Row,
   Col,
-  Tag,
   message,
   Select
 } from 'antd';
 import {
   TrophyOutlined,
-  RiseOutlined,
-  FallOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
 import { dragonlistService } from '@/services';
@@ -25,10 +21,9 @@ import type { DragonList, DragonListStats, DragonListSortBy } from '@/types/drag
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
-const { RangePicker } = DatePicker;
 
 function DragonListPage() {
-  const [activeTab, setActiveTab] = useState('daily');
+  const [activeTab] = useState('daily');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<DragonList[]>([]);
   const [stats, setStats] = useState<DragonListStats | null>(null);
@@ -229,40 +224,40 @@ function DragonListPage() {
         {stats && (
           <Row gutter={16}>
             <Col span={4}>
-              <Statistic title="上榜总数" value={stats.data?.summary?.total_count || 0} />
+              <Statistic title="上榜总数" value={stats?.summary?.total_count || 0} />
             </Col>
             <Col span={4}>
               <Statistic
                 title="净买入家数"
-                value={stats.data?.summary?.net_buy_count || 0}
+                value={stats?.summary?.net_buy_count || 0}
                 valueStyle={{ color: '#cf1322' }}
               />
             </Col>
             <Col span={4}>
               <Statistic
                 title="净卖出家数"
-                value={stats.data?.summary?.net_sell_count || 0}
+                value={stats?.summary?.net_sell_count || 0}
                 valueStyle={{ color: '#3f8600' }}
               />
             </Col>
             <Col span={4}>
               <Statistic
                 title="净买入总额(万元)"
-                value={stats.data?.summary?.total_net_amount || 0}
+                value={stats?.summary?.total_net_amount || 0}
                 precision={2}
               />
             </Col>
             <Col span={4}>
               <Statistic
                 title="龙虎榜成交额(万元)"
-                value={stats.data?.summary?.total_l_amount || 0}
+                value={stats?.summary?.total_l_amount || 0}
                 precision={2}
               />
             </Col>
             <Col span={4}>
               <Statistic
                 title="平均净买额占比(%)"
-                value={stats.data?.summary?.avg_net_rate || 0}
+                value={stats?.summary?.avg_net_rate || 0}
                 precision={2}
               />
             </Col>

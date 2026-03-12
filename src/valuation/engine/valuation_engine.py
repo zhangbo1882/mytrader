@@ -13,6 +13,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 from src.valuation.models.base_valuation_model import BaseValuationModel
+from src.valuation.config.industry_params import get_industry_method_weights, DEFAULT_METHOD_WEIGHTS
 
 
 class ValuationEngine:
@@ -231,7 +232,7 @@ class ValuationEngine:
         # 排序：按涨跌幅空间降序
         sorted_results = sorted(
             results,
-            key=lambda x: x.get('upside_downside', 0),
+            key=lambda x: x.get('upside_downside') or 0,
             reverse=True
         )
 
@@ -249,6 +250,9 @@ class ValuationEngine:
     ) -> Dict[str, Any]:
         """
         组合多个估值模型的结果
+
+        支持分层加权：行业基础权重 × 置信度修正 → 归一化
+        方法不适用（如亏损股PE为负）时自动归零权重
 
         Args:
             results: 多个模型的结果列表
@@ -271,49 +275,49 @@ class ValuationEngine:
         date = valid_results[0]['date']
         current_price = valid_results[0]['current_price']
 
-        # 计算公允价值
+        # 计算公允价值和置信度
         fair_values = [r['fair_value'] for r in valid_results]
         confidences = [r.get('confidence', 0.5) for r in valid_results]
+        model_names = [r.get('model', '') for r in valid_results]
 
         if method == 'weighted':
-            # 加权平均（基于置信度）
-            total_confidence = sum(confidences)
-            if total_confidence > 0:
-                weights = [c / total_confidence for c in confidences]
-                combined_fair_value = sum(fv * w for fv, w in zip(fair_values, weights))
-            else:
-                combined_fair_value = np.mean(fair_values)
+            # 分层加权：行业基础权重 × 置信度修正 → 归一化
+            combined_fair_value = self._layered_weighted_combine(
+                valid_results, fair_values, confidences, model_names, current_price
+            )
+
+        elif method == 'bayesian':
+            # 贝叶斯加权：历史准确率 × 当前置信度 → 归一化
+            combined_fair_value = self._bayesian_weighted_combine(
+                valid_results, fair_values, confidences, model_names, current_price
+            )
 
         elif method == 'average':
-            # 简单平均
-            combined_fair_value = np.mean(fair_values)
+            combined_fair_value = float(np.mean(fair_values))
 
         elif method == 'median':
-            # 中位数
-            combined_fair_value = np.median(fair_values)
+            combined_fair_value = float(np.median(fair_values))
 
         elif method == 'max_confidence':
-            # 使用置信度最高的模型结果
-            max_idx = np.argmax(confidences)
+            max_idx = int(np.argmax(confidences))
             combined_fair_value = fair_values[max_idx]
 
+        elif method == 'min_fair_value':
+            combined_fair_value = float(np.min(fair_values))
+
         else:
-            # 默认使用加权平均
-            total_confidence = sum(confidences)
-            if total_confidence > 0:
-                weights = [c / total_confidence for c in confidences]
-                combined_fair_value = sum(fv * w for fv, w in zip(fair_values, weights))
-            else:
-                combined_fair_value = np.mean(fair_values)
+            combined_fair_value = self._layered_weighted_combine(
+                valid_results, fair_values, confidences, model_names, current_price
+            )
 
         # 计算涨跌幅空间
-        if current_price > 0:
+        if current_price is not None and current_price > 0:
             upside_downside = (combined_fair_value - current_price) / current_price * 100
         else:
             upside_downside = 0
 
-        # 组合置信度（平均）
-        combined_confidence = np.mean(confidences)
+        # 组合置信度（加权平均）
+        combined_confidence = float(np.mean(confidences))
 
         # 计算评级
         rating = self._calculate_rating(upside_downside, combined_confidence)
@@ -353,6 +357,188 @@ class ValuationEngine:
             'individual_results': valid_results,
             'combination_method': method
         }
+
+    def _extract_industry_info(
+        self,
+        valid_results: List[Dict]
+    ):
+        """
+        从结果中提取L1和L2行业代码和名称（供多个组合方法复用）
+
+        Args:
+            valid_results: 有效估值结果列表
+
+        Returns:
+            (l1_code, l1_name, l2_code, l2_name) 四元组
+        """
+        l1_code = None
+        l1_name = None
+        l2_code = None
+        l2_name = None
+
+        for r in valid_results:
+            metrics = r.get('metrics', {})
+            if isinstance(metrics, dict):
+                # 扁平字典（单模型结果）
+                if metrics.get('sw_l1_code') or metrics.get('sw_l1'):
+                    l1_code = l1_code or metrics.get('sw_l1_code')
+                    l1_name = l1_name or metrics.get('sw_l1')
+                    l2_code = l2_code or metrics.get('sw_l2_code')
+                    l2_name = l2_name or metrics.get('sw_l2')
+                    if l1_code or l1_name:
+                        break
+                # 嵌套字典（组合模型的 all_metrics）
+                else:
+                    for v in metrics.values():
+                        if isinstance(v, dict) and (v.get('sw_l1_code') or v.get('sw_l1')):
+                            l1_code = l1_code or v.get('sw_l1_code')
+                            l1_name = l1_name or v.get('sw_l1')
+                            l2_code = l2_code or v.get('sw_l2_code')
+                            l2_name = l2_name or v.get('sw_l2')
+                            break
+                if l1_code or l1_name:
+                    break
+
+        return l1_code, l1_name, l2_code, l2_name
+
+    def _bayesian_weighted_combine(
+        self,
+        valid_results: List[Dict],
+        fair_values: List[float],
+        confidences: List[float],
+        model_names: List[str],
+        current_price: float
+    ) -> float:
+        """
+        贝叶斯加权组合：prior_accuracy × current_confidence → 归一化
+
+        流程：
+        1. 提取行业信息
+        2. 从 PriorMatrix 获取历史准确率 {method: accuracy}
+        3. 若无数据，回退到 get_industry_method_weights() 静态权重
+        4. final_weight[i] = prior_accuracy[i] × confidence[i]
+        5. 方法不适用时（估值≈当前价格）weight=0
+        6. 归一化后加权求和
+        """
+        # 提取行业信息（L1 + L2）
+        l1_code, l1_name, l2_code, l2_name = self._extract_industry_info(valid_results)
+
+        # 获取历史准确率（先验）：L2 优先，无数据回退到 L1
+        prior_accuracies = None
+        try:
+            from src.valuation.bayesian.prior_matrix import PriorMatrix
+            prior_matrix = PriorMatrix(db_path=self.db_path)
+            prior_accuracies = prior_matrix.get_weights_hierarchical(
+                l2_code, l2_name, l1_code, l1_name
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"贝叶斯先验获取失败: {e}")
+
+        # 若无先验数据，退化为静态行业权重
+        if not prior_accuracies:
+            prior_accuracies = get_industry_method_weights(l1_code, l1_name)
+
+        # 模型名 → 方法名映射
+        def model_to_method(model_name: str) -> str:
+            name_lower = model_name.lower()
+            if 'pe' in name_lower and 'peg' not in name_lower:
+                return 'pe'
+            elif 'pb' in name_lower:
+                return 'pb'
+            elif 'ps' in name_lower:
+                return 'ps'
+            elif 'peg' in name_lower:
+                return 'peg'
+            elif 'dcf' in name_lower:
+                return 'dcf'
+            return 'pe'
+
+        # 计算最终权重
+        final_weights = []
+        for model_name, fair_val, confidence in zip(model_names, fair_values, confidences):
+            method_key = model_to_method(model_name)
+
+            # 方法不适用检测（公允价值≈当前价格时权重归零）
+            if abs(fair_val - current_price) < 1e-6 * current_price:
+                final_weights.append(0.0)
+                continue
+
+            # prior_accuracy × confidence
+            prior_acc = prior_accuracies.get(method_key, DEFAULT_METHOD_WEIGHTS.get(method_key, 0.20))
+            final_weights.append(prior_acc * confidence)
+
+        # 归一化
+        total_w = sum(final_weights)
+        if total_w <= 0:
+            return float(np.mean(fair_values))
+
+        norm_weights = [w / total_w for w in final_weights]
+        combined = sum(fv * w for fv, w in zip(fair_values, norm_weights))
+        return combined
+
+    def _layered_weighted_combine(
+        self,
+        valid_results: List[Dict],
+        fair_values: List[float],
+        confidences: List[float],
+        model_names: List[str],
+        current_price: float
+    ) -> float:
+        """
+        分层加权组合：行业基础权重 × 置信度修正 → 归一化
+
+        流程：
+        1. 获取行业基础权重（来自 industry_params.py）
+        2. 最终权重[i] = 基础权重[i] × 置信度[i]
+        3. 方法不适用时（如估值==当前价格，可能是亏损）权重自动归零
+        4. 归一化
+        5. 组合估值 = Σ(估值[i] × 最终权重[i])
+        """
+        # 提取行业信息（复用共享方法，只需L1用于静态权重）
+        l1_code, l1_name, _, _ = self._extract_industry_info(valid_results)
+
+        # 获取行业基础权重
+        base_weights_config = get_industry_method_weights(l1_code, l1_name)
+
+        # 将模型名映射到方法名
+        def model_to_method(model_name: str) -> str:
+            name_lower = model_name.lower()
+            if 'pe' in name_lower and 'peg' not in name_lower:
+                return 'pe'
+            elif 'pb' in name_lower:
+                return 'pb'
+            elif 'ps' in name_lower:
+                return 'ps'
+            elif 'peg' in name_lower:
+                return 'peg'
+            elif 'dcf' in name_lower:
+                return 'dcf'
+            return 'pe'
+
+        # 计算每个模型的最终权重
+        final_weights = []
+        for i, (model_name, fair_val, confidence) in enumerate(zip(model_names, fair_values, confidences)):
+            method_key = model_to_method(model_name)
+            base_w = base_weights_config.get(method_key, 0.20)
+
+            # 方法不适用检测：若公允价值==当前价格（估值方法回退）则权重归零
+            if abs(fair_val - current_price) < 1e-6 * current_price:
+                final_weights.append(0.0)
+            else:
+                final_weights.append(base_w * confidence)
+
+        # 归一化
+        total_w = sum(final_weights)
+        if total_w <= 0:
+            # 全部方法不适用，退化为简单平均
+            return float(np.mean(fair_values))
+
+        norm_weights = [w / total_w for w in final_weights]
+
+        # 加权组合
+        combined = sum(fv * w for fv, w in zip(fair_values, norm_weights))
+        return combined
 
     def _calculate_rating(self, upside_downside: float, confidence: float) -> str:
         """
@@ -394,7 +580,7 @@ class ValuationEngine:
         if not valid_results:
             return {}
 
-        upside_downsides = [r.get('upside_downside', 0) for r in valid_results]
+        upside_downsides = [r.get('upside_downside') or 0 for r in valid_results]
 
         return {
             'total_stocks': len(results),

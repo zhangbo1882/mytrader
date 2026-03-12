@@ -2,7 +2,7 @@ import { TaskStatus } from './common.types';
 
 export interface Task {
   id: string;
-  type: 'update' | 'screen' | 'prediction' | 'backtest';
+  type: 'update' | 'screen' | 'prediction' | 'backtest' | 'update_dragon_list' | 'update_hk_prices' | 'update_a_share_batch';
   status: TaskStatus;
   total: number;
   processed: number;
@@ -20,7 +20,7 @@ export interface TaskListResponse {
 }
 
 export interface CreateTaskParams {
-  type: 'update' | 'screen' | 'prediction' | 'backtest';
+  type: 'update' | 'screen' | 'prediction' | 'backtest' | 'update_dragon_list' | 'update_hk_prices' | 'update_a_share_batch';
   params: Record<string, any>;
 }
 
@@ -32,9 +32,10 @@ export interface ScheduledJob {
   task_type?: string; // Task type from backend: update_stock_prices, update_index_data, etc.
   content_type?: 'stock' | 'index';
   mode?: 'incremental' | 'full'; // Made optional
-  stock_range?: 'all' | 'favorites' | 'custom';
+  stock_range?: 'all' | 'favorites' | 'custom' | 'market';
   custom_stocks?: string[];
   markets?: ('SSE' | 'SZSE')[];
+  exclude_st?: boolean;
   next_run_time?: string;
   enabled: boolean;
 }
@@ -44,7 +45,8 @@ export interface CreateScheduledJobParams {
   cron_expression: string;
   content_type?: 'stock' | 'index';
   mode?: 'incremental' | 'full';
-  stock_range?: 'all' | 'favorites' | 'custom';
+  stock_range?: 'all' | 'favorites' | 'custom' | 'market';
   custom_stocks?: string[];
   markets?: ('SSE' | 'SZSE')[];
+  exclude_st?: boolean;
 }

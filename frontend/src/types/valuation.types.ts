@@ -1,8 +1,8 @@
-// Valuation method types
-export type ValuationMethod = 'pe' | 'pb' | 'ps' | 'peg' | 'dcf' | 'combined';
+// Valuation method types (pe/pb/ps 已合并为 combined 相对估值)
+export type ValuationMethod = 'combined' | 'peg' | 'dcf';
 
 // Combination method types
-export type CombineMethod = 'weighted' | 'average' | 'median' | 'max_confidence';
+export type CombineMethod = 'weighted' | 'average' | 'median' | 'max_confidence' | 'bayesian' | 'min_fair_value';
 
 // Valuation rating types
 export type ValuationRating = '强烈买入' | '买入' | '持有' | '卖出' | '强烈卖出';
@@ -56,6 +56,7 @@ export interface ValuationRequest {
   symbol: string;
   methods?: ValuationMethod[];
   date?: string;
+  fiscal_date?: string;
   combine_method?: CombineMethod;
   dcf_config?: DCFConfig;
 }

@@ -1,5 +1,4 @@
 import { Card, Skeleton, Row, Col, Table } from 'antd';
-import React from 'react';
 
 interface PageSkeletonProps {
   rowCount?: number;
@@ -15,7 +14,7 @@ export function PageSkeleton({ rowCount = 3 }: PageSkeletonProps) {
             <Card>
               <Skeleton.Input active style={{ marginBottom: 12 }} />
               <Skeleton.Input active style={{ width: '60%', marginBottom: 12 }} />
-              <Skeleton paragraph active rows={3} />
+              <Skeleton paragraph={{ rows: 3 }} active />
             </Card>
           </Col>
         ))}

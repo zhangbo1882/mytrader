@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Input, AutoComplete, Button, Space } from 'antd';
+import { AutoComplete, Button, Space } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { stockService } from '@/services';
 
@@ -12,7 +12,6 @@ interface ValuationSearchProps {
 
 export function ValuationSearch({ value, onChange, onSearch, loading }: ValuationSearchProps) {
   const [options, setOptions] = useState<{ value: string; label: string }[]>([]);
-  const [searchText, setSearchText] = useState('');
 
   const handleSearch = async (text: string) => {
     if (!text || text.length < 2) {
@@ -41,7 +40,6 @@ export function ValuationSearch({ value, onChange, onSearch, loading }: Valuatio
         value={value}
         onChange={(val) => {
           onChange(val);
-          setSearchText(val);
         }}
         onSearch={handleSearch}
         options={options}

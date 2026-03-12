@@ -17,6 +17,7 @@ from src.screening.criteria.turnover_criteria import AverageTurnoverCriteria
 from src.screening.criteria.market_criteria import MarketFilter
 from src.screening.criteria.field_criteria import FieldFilterCriteria
 from src.screening.criteria.bear_to_bull_criteria import BearToBullTransitionCriteria
+from src.screening.criteria.valuation_criteria import ValuationUpsideCriteria
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class RuleEngine:
         'MarketFilter': MarketFilter,
         'FieldFilter': FieldFilterCriteria,
         'BearToBull': BearToBullTransitionCriteria,
+        'ValuationUpside': ValuationUpsideCriteria,
     }
 
     @classmethod
@@ -90,8 +92,8 @@ class RuleEngine:
 
         elif crit_type in cls.CRITERIA_MAP:
             logger.debug(f"[RuleEngine] Building {crit_type} criteria from config")
-            # AverageAmplitude、AmplitudeColumn、TurnoverColumn 和 PositiveDays 需要传递 db_path
-            if crit_type in ['AverageAmplitude', 'AmplitudeColumn', 'TurnoverColumn', 'PositiveDays']:
+            # AverageAmplitude、AmplitudeColumn、TurnoverColumn、PositiveDays 和 ValuationUpside 需要传递 db_path
+            if crit_type in ['AverageAmplitude', 'AmplitudeColumn', 'TurnoverColumn', 'PositiveDays', 'ValuationUpside']:
                 if db_path is None:
                     logger.warning(f"[RuleEngine] {crit_type} criteria requires db_path parameter")
                     raise ValueError(f"{crit_type} criteria requires db_path parameter")

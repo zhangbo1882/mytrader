@@ -1,6 +1,5 @@
 import api from './api';
 import type {
-  Stock,
   StockData,
   QueryParams,
   StockSearchResult,
@@ -69,7 +68,7 @@ export const stockService = {
       interval: params.interval || '1d',
       price_type: params.priceType,
     };
-    return api.post('/stock/export/csv', backendParams, { responseType: 'blob' });
+    return api.post<Blob>('/stock/export/csv', backendParams, { responseType: 'blob' });
   },
 
   // Export data to Excel
@@ -81,7 +80,7 @@ export const stockService = {
       interval: params.interval || '1d',
       price_type: params.priceType,
     };
-    return api.post('/stock/export/excel', backendParams, { responseType: 'blob' });
+    return api.post<Blob>('/stock/export/excel', backendParams, { responseType: 'blob' });
   },
 
   // Traditional stock screening

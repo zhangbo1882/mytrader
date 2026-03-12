@@ -32,35 +32,35 @@ const BASE_URL = '/risk';
  * 获取投资组合状态
  */
 export async function getPortfolioState(data: PortfolioInput): Promise<PortfolioState> {
-  return api.post<any, PortfolioState>(`${BASE_URL}/portfolio`, data);
+  return api.post<PortfolioState>(`${BASE_URL}/portfolio`, data);
 }
 
 /**
  * 计算新股可买股数
  */
 export async function calculateNewPosition(data: CalculateRequest): Promise<CalculateResponse> {
-  return api.post<any, CalculateResponse>(`${BASE_URL}/calculate`, data);
+  return api.post<CalculateResponse>(`${BASE_URL}/calculate`, data);
 }
 
 /**
  * 卖出股票
  */
 export async function sellPosition(data: SellRequest): Promise<SellResponse> {
-  return api.post<any, SellResponse>(`${BASE_URL}/sell`, data);
+  return api.post<SellResponse>(`${BASE_URL}/sell`, data);
 }
 
 /**
  * 调整止损参数
  */
 export async function adjustStopLoss(data: AdjustStopLossRequest): Promise<AdjustStopLossResponse> {
-  return api.post<any, AdjustStopLossResponse>(`${BASE_URL}/adjust-stop-loss`, data);
+  return api.post<AdjustStopLossResponse>(`${BASE_URL}/adjust-stop-loss`, data);
 }
 
 /**
  * 添加新持仓
  */
 export async function addPosition(data: AddPositionRequest): Promise<AddPositionResponse> {
-  return api.post<any, AddPositionResponse>(`${BASE_URL}/add-position`, data);
+  return api.post<AddPositionResponse>(`${BASE_URL}/add-position`, data);
 }
 
 // ============================================================================
@@ -71,49 +71,49 @@ export async function addPosition(data: AddPositionRequest): Promise<AddPosition
  * 加载投资组合设置
  */
 export async function loadPortfolioSettings(): Promise<PortfolioSettings> {
-  return api.get<any, PortfolioSettings>(`${BASE_URL}/portfolio/settings`);
+  return api.get<PortfolioSettings>(`${BASE_URL}/portfolio/settings`);
 }
 
 /**
  * 保存投资组合设置
  */
 export async function savePortfolioSettings(data: PortfolioSettings): Promise<PortfolioSettings> {
-  return api.put<any, PortfolioSettings>(`${BASE_URL}/portfolio/settings`, data);
+  return api.put<PortfolioSettings>(`${BASE_URL}/portfolio/settings`, data);
 }
 
 /**
  * 加载完整投资组合（含实时价格和股票名称）
  */
 export async function loadFullPortfolio(): Promise<StoredPortfolio> {
-  return api.get<any, StoredPortfolio>(`${BASE_URL}/portfolio/full`);
+  return api.get<StoredPortfolio>(`${BASE_URL}/portfolio/full`);
 }
 
 /**
  * 加载所有持仓（含实时价格和股票名称）
  */
 export async function loadPositions(): Promise<{ positions: PositionOutput[] }> {
-  return api.get<any, { positions: PositionOutput[] }>(`${BASE_URL}/positions`);
+  return api.get<{ positions: PositionOutput[] }>(`${BASE_URL}/positions`);
 }
 
 /**
  * 添加持仓到数据库
  */
 export async function addPositionToDb(data: StoredPositionInput): Promise<{ success: boolean; position: PositionOutput; error?: string }> {
-  return api.post<any, { success: boolean; position: PositionOutput; error?: string }>(`${BASE_URL}/positions`, data);
+  return api.post<{ success: boolean; position: PositionOutput; error?: string }>(`${BASE_URL}/positions`, data);
 }
 
 /**
  * 更新持仓
  */
 export async function updatePositionInDb(symbol: string, data: PositionUpdateRequest): Promise<{ success: boolean; updated_at?: string; error?: string }> {
-  return api.put<any, { success: boolean; updated_at?: string; error?: string }>(`${BASE_URL}/positions/${symbol}`, data);
+  return api.put<{ success: boolean; updated_at?: string; error?: string }>(`${BASE_URL}/positions/${symbol}`, data);
 }
 
 /**
  * 删除持仓
  */
 export async function deletePositionFromDb(symbol: string): Promise<{ success: boolean; error?: string }> {
-  return api.delete<any, { success: boolean; error?: string }>(`${BASE_URL}/positions/${symbol}`);
+  return api.delete<{ success: boolean; error?: string }>(`${BASE_URL}/positions/${symbol}`);
 }
 
 
@@ -203,5 +203,5 @@ export async function addRealizedPnl(realizedProfit: number, sellValue: number, 
  * 更新剩余现金（手动校准）
  */
 export async function updateCash(cash: number): Promise<CapitalState> {
-  return api.put<any, CapitalState>(`${BASE_URL}/capital/cash`, { cash });
+  return api.put<CapitalState>(`${BASE_URL}/capital/cash`, { cash });
 }

@@ -1,6 +1,6 @@
 // frontend/src/components/query/IntervalSelector.tsx
 import { Select, Tag, Space, Tooltip } from 'antd';
-import { ClockCircleOutlined, CheckCircleOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { stockService, type IntervalInfo } from '@/services/stockService';
 

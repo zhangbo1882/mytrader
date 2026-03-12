@@ -10,24 +10,38 @@ import {
   Tabs,
   message,
   Popconfirm,
+  Collapse,
+  Tag,
 } from 'antd';
 import {
   StarOutlined,
-  DeleteOutlined,
   SearchOutlined,
   ClearOutlined,
   BarChartOutlined,
 } from '@ant-design/icons';
 import { FavoritesList } from '@/components/favorites/FavoritesList';
 import { AddFavorite } from '@/components/favorites/AddFavorite';
+import { ValuationParamsForm, DcfConfigForm } from '@/components/valuation';
 import { useFavoriteStore } from '@/stores';
 import { useQueryStore } from '@/stores';
+import type { ValuationMethod, CombineMethod, DCFConfig } from '@/types';
 
 const { Title, Text } = Typography;
+
+const METHOD_LABELS: Record<ValuationMethod, string> = {
+  combined: '相对估值',
+  peg: 'PEG',
+  dcf: 'DCF',
+};
 
 function FavoritesPage() {
   const navigate = useNavigate();
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [valuationMethods, setValuationMethods] = useState<ValuationMethod[]>(['combined', 'peg', 'dcf']);
+  const [valuationDate, setValuationDate] = useState('');
+  const [valuationFiscalDate, setValuationFiscalDate] = useState('');
+  const [combineMethod, setCombineMethod] = useState<CombineMethod>('min_fair_value');
+  const [dcfConfig, setDcfConfig] = useState<DCFConfig>({ risk_profile: 'conservative' });
   const { favorites, clearFavorites } = useFavoriteStore();
   const { setSymbols, setDateRange, setPriceType } = useQueryStore();
 
@@ -38,15 +52,12 @@ function FavoritesPage() {
       return;
     }
 
-    // 转换为Stock对象
     const selectedStocks = favorites
       .filter((f) => selectedKeys.includes(f.code))
       .map((f) => ({ code: f.code, name: f.name }));
 
-    // 设置到queryStore
     setSymbols(selectedStocks);
 
-    // 设置默认日期范围（最近3个月）
     const endDate = new Date();
     const startDate = new Date();
     startDate.setMonth(startDate.getMonth() - 3);
@@ -55,12 +66,8 @@ function FavoritesPage() {
       end: endDate.toISOString().split('T')[0]
     });
 
-    // 设置默认复权类型为不复权
     setPriceType('bfq');
-
-    // 导航到查询页面
     navigate('/query');
-
     message.success(`已选择 ${selectedKeys.length} 只股票`);
   };
 
@@ -74,7 +81,6 @@ function FavoritesPage() {
     const allStocks = favorites.map((f) => ({ code: f.code, name: f.name }));
     setSymbols(allStocks);
 
-    // 设置默认日期范围（最近3个月）
     const endDate = new Date();
     const startDate = new Date();
     startDate.setMonth(startDate.getMonth() - 3);
@@ -83,11 +89,8 @@ function FavoritesPage() {
       end: endDate.toISOString().split('T')[0]
     });
 
-    // 设置默认复权类型为不复权
     setPriceType('bfq');
-
     navigate('/query');
-
     message.success(`已选择全部 ${favorites.length} 只股票`);
   };
 
@@ -97,6 +100,10 @@ function FavoritesPage() {
     message.success('已清空所有收藏');
     setSelectedKeys([]);
   };
+
+  const valuationMethodSummary = valuationMethods.length > 0
+    ? valuationMethods.map((method) => METHOD_LABELS[method]).join(' + ')
+    : '未选择方法';
 
   return (
     <div style={{ padding: '0 0 24px 0' }}>
@@ -156,6 +163,48 @@ function FavoritesPage() {
         </Card>
       )}
 
+      {/* 估值参数 */}
+      {favorites.length > 0 && (
+        <Collapse
+          defaultActiveKey={[]}
+          style={{ marginBottom: 16 }}
+          items={[
+            {
+              key: 'valuation-settings',
+              label: (
+                <Space wrap>
+                  <Text strong>收藏估值参数</Text>
+                  <Tag color={valuationMethods.length > 0 ? 'blue' : 'default'}>{valuationMethodSummary}</Tag>
+                  {valuationMethods.length > 1 && <Tag color="gold">{combineMethod}</Tag>}
+                  {valuationMethods.includes('dcf') && (
+                    <Tag color="green">DCF {dcfConfig.risk_profile || 'custom'}</Tag>
+                  )}
+                </Space>
+              ),
+              children: (
+                <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                  <ValuationParamsForm
+                    methods={valuationMethods}
+                    setMethods={setValuationMethods}
+                    date={valuationDate}
+                    setDate={setValuationDate}
+                    fiscalDate={valuationFiscalDate}
+                    setFiscalDate={setValuationFiscalDate}
+                    combineMethod={combineMethod}
+                    setCombineMethod={setCombineMethod}
+                  />
+                  <DcfConfigForm
+                    dcfConfig={dcfConfig}
+                    setDcfConfig={setDcfConfig}
+                    methods={valuationMethods}
+                  />
+                </Space>
+              ),
+            },
+          ]}
+        />
+      )}
+
       {/* 标签页 */}
       <Tabs
         defaultActiveKey="list"
@@ -169,6 +218,11 @@ function FavoritesPage() {
                   selectedRowKeys={selectedKeys}
                   onSelectionChange={setSelectedKeys}
                   showSelection={true}
+                  valuationMethods={valuationMethods}
+                  valuationDate={valuationDate}
+                  valuationFiscalDate={valuationFiscalDate}
+                  combineMethod={combineMethod}
+                  dcfConfig={dcfConfig}
                 />
               </Card>
             ),

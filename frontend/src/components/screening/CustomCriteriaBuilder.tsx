@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Select, InputNumber, Button, Space, Row, Col, Radio, Checkbox, Divider, Typography, Tag, message, DatePicker, Tooltip } from 'antd';
+import { Card, Select, InputNumber, Button, Space, Row, Col, Radio, Checkbox, Divider, Typography, Tag, message, DatePicker, Tooltip } from 'antd';
 import { PlusOutlined, DeleteOutlined, PlayCircleOutlined, FilterOutlined, CalendarOutlined } from '@ant-design/icons';
 import type { Criteria, CriteriaType, ScreeningConfig } from '@/types';
 import { screeningService } from '@/services';
@@ -19,6 +19,7 @@ const FIELD_OPTIONS = [
   { value: 'avg_amplitude', label: '平均振幅(%)' },
   { value: 'positive_days', label: '正收益天数占比' },
   { value: 'bear_to_bull', label: '熊牛交替信号' },
+  { value: 'valuation_upside', label: '估值涨跌幅(%)' },
 ];
 
 // Field descriptions for tooltips
@@ -31,7 +32,8 @@ const FIELD_DESCRIPTIONS: Record<string, string> = {
   turnover_rate: '换手率：一定时期内股票转手买卖的频率',
   avg_amplitude: '平均振幅：股票价格每日波动幅度的平均值',
   positive_days: '正收益天数占比：一定时期内股价上涨的天数比例',
-  bear_to_bull: '当日为牛市，且之前N个交易日持续为熊市或震荡市'
+  bear_to_bull: '当日为牛市，且之前N个交易日持续为熊市或震荡市',
+  valuation_upside: '估值涨跌幅：公允价值相对当前价格的涨跌幅空间，正值表示低估，负值表示高估'
 };
 
 // Industry level options
@@ -50,6 +52,13 @@ const MARKET_OPTIONS = [
   { value: '港股', label: '港股' },
 ];
 
+// Valuation method options - 与估值页面保持一致
+const VALUATION_METHOD_OPTIONS = [
+  { value: 'combined', label: '相对估值（PE/PB/PS）' },
+  { value: 'peg', label: 'PEG估值' },
+  { value: 'dcf', label: 'DCF估值（绝对估值）' },
+];
+
 // Criteria type options - only basic comparison types
 const CRITERIA_TYPE_OPTIONS: { value: CriteriaType; label: string }[] = [
   { value: 'Range', label: '范围' },
@@ -66,7 +75,13 @@ const CRITERIA_TYPE_DESCRIPTIONS: Record<CriteriaType, string> = {
   LessThan: '筛选小于指定阈值的数值',
   Percentile: '基于历史百分位筛选（0-100%）',
   IndustryRelative: '相对于行业平均水平的百分位筛选',
-  BearToBull: '当日为牛市，且之前N个交易日持续为熊市或震荡市'
+  BearToBull: '当日为牛市，且之前N个交易日持续为熊市或震荡市',
+  ValuationUpside: '根据估值模型计算的公允价值涨跌幅空间筛选',
+  IndustryFilter: '行业筛选（包含/排除特定行业）',
+  AmplitudeColumn: '涨跌幅筛选',
+  TurnoverColumn: '换手率筛选',
+  PositiveDays: '上涨天数占比筛选',
+  MarketFilter: '市场筛选（主板/创业板/科创板等）'
 };
 
 // Industry option structure
@@ -105,6 +120,14 @@ interface ConditionData {
 
     // Industry relative params
     industryField?: string;
+
+    // Valuation upside params
+    minUpside?: number;
+    maxUpside?: number;
+    valuationMethods?: string[];
+
+    // Positive days params
+    min_positive_ratio?: number;
   };
 }
 
@@ -140,12 +163,13 @@ const getAvailableTypesForField = (field: string): CriteriaType[] => {
   if (field === 'bear_to_bull') {
     return ['BearToBull'];
   }
+  if (field === 'valuation_upside') {
+    return ['ValuationUpside'];
+  }
   return ['Range', 'GreaterThan', 'LessThan'];
 };
 
-function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: CustomCriteriaBuilderProps) {
-  const [form] = Form.useForm();
-
+function CustomCriteriaBuilder({ onSubmit, loading = false }: CustomCriteriaBuilderProps) {
   // State for conditions list
   const [conditions, setConditions] = useState<ConditionData[]>([
     {
@@ -233,6 +257,9 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
       } else if (newField === 'bear_to_bull') {
         newParams = { period: 10, cycle: 'medium' };
         return { ...c, field: newField, type: 'BearToBull' as CriteriaType, params: newParams };
+      } else if (newField === 'valuation_upside') {
+        newParams = { minUpside: 20, maxUpside: 100, valuationMethods: ['combined'] };
+        return { ...c, field: newField, type: 'ValuationUpside' as CriteriaType, params: newParams };
       }
 
       return { ...c, field: newField, params: newParams };
@@ -674,6 +701,76 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
       );
     }
 
+    // === Valuation Upside Field ===
+    if (field === 'valuation_upside') {
+      return (
+        <div style={{ width: '100%' }}>
+          {/* Performance warning */}
+          <div style={{
+            marginBottom: 16,
+            padding: 8,
+            backgroundColor: '#fff7e6',
+            border: '1px solid #ffd591',
+            borderRadius: 4
+          }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              ⚠️ 估值计算较慢，建议先用其他条件缩小范围
+            </Text>
+          </div>
+
+          {/* Upside range */}
+          <div style={{ marginBottom: 16 }}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+              涨跌幅范围（%）
+            </Text>
+            <Row gutter={[8, 12]}>
+              <Col xs={24} md={12}>
+                <InputNumber
+                  placeholder="最小值"
+                  value={params.minUpside}
+                  onChange={(val) => updateConditionParams(condition.id, { minUpside: val ?? undefined })}
+                  style={{ width: '100%' }}
+                  size="middle"
+                  addonAfter="%"
+                />
+              </Col>
+              <Col xs={24} md={12}>
+                <InputNumber
+                  placeholder="最大值"
+                  value={params.maxUpside}
+                  onChange={(val) => updateConditionParams(condition.id, { maxUpside: val ?? undefined })}
+                  style={{ width: '100%' }}
+                  size="middle"
+                  addonAfter="%"
+                />
+              </Col>
+            </Row>
+            <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+              正值=低估（如20表示至少低估20%），负值=高估
+            </Text>
+          </div>
+
+          {/* Valuation methods */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                估值方法
+              </Text>
+              <Tooltip title="选择用于计算公允价值的估值方法">
+                <span style={{ marginLeft: 4, color: '#1890ff', cursor: 'help' }}>ⓘ</span>
+              </Tooltip>
+            </div>
+            <Checkbox.Group
+              style={{ width: '100%' }}
+              options={VALUATION_METHOD_OPTIONS}
+              value={params.valuationMethods || ['combined']}
+              onChange={(values) => updateConditionParams(condition.id, { valuationMethods: values as string[] })}
+            />
+          </div>
+        </div>
+      );
+    }
+
     return <Text type="secondary">请选择字段</Text>;
   };
 
@@ -816,6 +913,16 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
     if (c.field === 'bear_to_bull') {
       return !!(c.params.period && c.params.period > 0);
     }
+    if (c.field === 'valuation_upside') {
+      // 至少需要设置最小涨跌幅或最大涨跌幅
+      if (c.params.minUpside === undefined && c.params.maxUpside === undefined) {
+        return false;
+      }
+      // 需要至少选择一个估值方法
+      if (!c.params.valuationMethods || c.params.valuationMethods.length === 0) {
+        return false;
+      }
+    }
     return true;
   };
 
@@ -844,6 +951,8 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
           }
         } else if (c.field === 'positive_days') {
           message.error('请设置最小正收益天数比例');
+        } else if (c.field === 'valuation_upside') {
+          message.error('请设置估值涨跌幅范围和至少一种估值方法');
         }
         return false;
       }
@@ -1018,6 +1127,17 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
           };
         }
 
+        // Valuation upside condition
+        if (c.field === 'valuation_upside') {
+          return {
+            type: 'ValuationUpside',
+            min_upside: c.params.minUpside,
+            max_upside: c.params.maxUpside,
+            min_confidence: 0.3,
+            methods: c.params.valuationMethods || ['combined']
+          };
+        }
+
         // Fallback
         return {
           type: c.type,
@@ -1097,7 +1217,7 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
                 <CalendarOutlined style={{ marginRight: 8, color: '#1890ff' }} />
                 <Text strong style={{ fontSize: 14 }}>时间范围配置</Text>
-                <Tag color="blue" size="small" style={{ marginLeft: 8 }}>全局设置</Tag>
+                <Tag color="blue" style={{ marginLeft: 8 }}>全局设置</Tag>
                 <Tooltip title="应用于所有需要历史数据的条件">
                   <span style={{ marginLeft: 4, color: '#1890ff', cursor: 'help' }}>ⓘ</span>
                 </Tooltip>
@@ -1208,7 +1328,7 @@ function CustomCriteriaBuilder({ onSubmit, loading = false, initialConfig }: Cus
               <div>
                 <div style={{ marginBottom: 16 }}>
                   <Text type="secondary">
-                    已添加 {conditions.length} 个条件，使用 <Tag size="small" color="blue">{logicType}</Tag> 逻辑组合
+                    已添加 {conditions.length} 个条件，使用 <Tag color="blue">{logicType}</Tag> 逻辑组合
                   </Text>
                 </div>
                 <Row gutter={[16, 16]}>

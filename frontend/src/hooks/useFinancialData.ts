@@ -48,7 +48,7 @@ export function useFinancialData() {
         const blob = await financialService.export(stockCode, format);
 
         // Create download link
-        const url = window.URL.createObjectURL(new Blob([blob]));
+        const url = window.URL.createObjectURL(new Blob([blob as BlobPart]));
         const link = document.createElement('a');
         link.href = url;
         link.setAttribute('download', `${stockCode}_financial.${format === 'csv' ? 'csv' : 'xlsx'}`);

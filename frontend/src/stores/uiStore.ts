@@ -1,17 +1,24 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-type TabKey =
+export type TabKey =
   | 'query'
   | 'ai-screen'
   | 'prediction'
   | 'favorites'
+  | 'data-import'
   | 'update'
   | 'tasks'
   | 'financial'
+  | 'valuation'
+  | 'backtest'
+  | 'screening'
+  | 'moneyflow'
+  | 'dragon-list'
+  | 'risk'
   | 'boards';
 
-interface UIState {
+export interface UIState {
   activeTab: TabKey;
   sidebarCollapsed: boolean;
 

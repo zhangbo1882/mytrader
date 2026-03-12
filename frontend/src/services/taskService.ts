@@ -1,5 +1,5 @@
 import api from './api';
-import type { Task, CreateTaskParams, TaskListResponse } from '@/types';
+import type { Task, CreateTaskParams } from '@/types';
 
 // Helper function to transform backend task format to frontend format
 function transformTask(task: any): Task {

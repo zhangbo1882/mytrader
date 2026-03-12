@@ -1,6 +1,5 @@
 import { Card, Radio, Slider, Space, Col, Row, InputNumber, Collapse, Typography, Alert } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
-import { useState } from 'react';
 import type { DCFConfig, RiskProfile } from '@/types';
 
 const { Text } = Typography;
@@ -49,7 +48,7 @@ export function DcfConfigForm({ dcfConfig, setDcfConfig, methods }: DcfConfigFor
   const showDcfConfig = hasDcfMethod || hasCombinedWithDcf;
 
   const riskProfile = dcfConfig.risk_profile || 'balanced';
-  const isCustom = dcfConfig.risk_profile === undefined || dcfConfig.risk_profile === 'custom';
+  const isCustom = dcfConfig.risk_profile === undefined;
 
   const handleRiskProfileChange = (value: string) => {
     if (value === 'custom') {
@@ -128,7 +127,6 @@ export function DcfConfigForm({ dcfConfig, setDcfConfig, methods }: DcfConfigFor
         {/* Advanced Parameters */}
         <Collapse
           ghost
-          defaultActiveKey={isCustom ? ['advanced'] : undefined}
         >
           <Panel header="高级参数（自定义）" key="advanced">
             <Row gutter={[16, 16]}>

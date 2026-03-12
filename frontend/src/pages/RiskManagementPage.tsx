@@ -2,7 +2,7 @@
  * 风险管理页面
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { Row, Col, Card, InputNumber, Button, Space, Typography, Divider, message, Spin, Collapse } from 'antd';
+import { Row, Col, Card, InputNumber, Button, Space, Typography, Divider, message, Spin } from 'antd';
 import { SettingOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, CloudSyncOutlined, HistoryOutlined } from '@ant-design/icons';
 import {
   PositionList,
@@ -23,7 +23,6 @@ import {
   updatePositionInDb,
   deletePositionFromDb,
   getCapitalState,
-  adjustInitialCapital,
   getMonthlySnapshots,
   createMonthlySnapshot,
   updateMonthlyCapitalChange,
@@ -43,7 +42,6 @@ import type {
 } from '../types/risk.types';
 
 const { Title, Text } = Typography;
-const { Panel } = Collapse;
 
 const RiskManagementPage: React.FC = () => {
   // 基本参数
@@ -144,7 +142,6 @@ const RiskManagementPage: React.FC = () => {
       // 使用 capitalState 的数据来计算风险
       const state = await getPortfolioState({
         total_capital: capitalState?.current_capital || totalCapital,
-        initial_capital: capitalState?.initial_capital || totalCapital,
         max_total_risk_percent: maxTotalRiskPercent,
         max_single_risk_percent: maxSingleRiskPercent,
         positions,
@@ -169,7 +166,10 @@ const RiskManagementPage: React.FC = () => {
         total_capital: totalCapital,
         max_total_risk_percent: maxTotalRiskPercent,
         max_single_risk_percent: maxSingleRiskPercent,
+        update_initial_capital: true,  // 同步更新初始资金
       });
+      // 刷新资金状态以获取更新后的 initial_capital
+      await loadCapitalState();
       message.success('设置已保存');
     } catch (error) {
       message.error('保存设置失败');

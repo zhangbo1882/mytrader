@@ -1,8 +1,7 @@
-import { Avatar, Tag, Space, Table, Button, Typography } from 'antd';
+import { Avatar, Table, Button, Typography } from 'antd';
 import { UserOutlined, RobotOutlined, LoadingOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { ChatMessage, Stock } from '@/types';
-import { formatNumber, formatPercent } from '@/utils';
 import { useFavoriteStore } from '@/stores';
 
 const { Text } = Typography;

@@ -10,6 +10,9 @@
 /logs/
 *.log
 
+# Reports
+/reports/
+
 # Python virtual environment
 .venv/
 venv/

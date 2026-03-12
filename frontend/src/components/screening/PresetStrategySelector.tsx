@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Card, Row, Col, Typography, Spin, Alert } from 'antd';
-import { BulbOutlined, DollarOutlined, RiseOutlined, ThunderboltOutlined, SafetyOutlined, FundOutlined, HeartOutlined, LineChartOutlined, ExperimentOutlined, FilterOutlined } from '@ant-design/icons';
+import { DollarOutlined, RiseOutlined, ThunderboltOutlined, SafetyOutlined, FundOutlined, HeartOutlined, LineChartOutlined, ExperimentOutlined, FilterOutlined } from '@ant-design/icons';
 import { screeningService } from '@/services';
 import type { PresetStrategy, StrategiesListResponse, ScreeningConfig } from '@/types';
 

@@ -3,7 +3,7 @@ import { Card, Table, Tag, Statistic, Row, Col, Typography, Progress } from 'ant
 import { ArrowUpOutlined, ArrowDownOutlined, MinusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { PredictionResult } from '@/types';
-import { formatPercent, formatNumber } from '@/utils';
+import { formatPercent } from '@/utils';
 import {
   LineChart,
   Line,

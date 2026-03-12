@@ -425,7 +425,115 @@ def init_scheduler(db_path, timezone='Asia/Shanghai'):
 
     scheduler.start()
     print(f"[Scheduler] Started with timezone: {timezone}")
+
+    # 修正过期的 next_run_time
+    _fix_expired_next_run_times(timezone)
+
     return scheduler
+
+
+def _fix_expired_next_run_times(timezone='Asia/Shanghai'):
+    """
+    检查并修正过期的 next_run_time
+
+    如果任务的 next_run_time 是今天之前的时间，且今天应该执行，
+    则将 next_run_time 修正为今天的时间。
+    """
+    import pytz
+    from datetime import datetime
+
+    if scheduler is None:
+        return
+
+    tz = pytz.timezone(timezone)
+    now = datetime.now(tz)
+    today = now.date()
+
+    jobs = scheduler.get_jobs()
+    fixed_count = 0
+
+    for job in jobs:
+        next_run = job.next_run_time
+        if next_run is None:
+            continue
+
+        # 如果 next_run_time 是今天之后的，不需要修正
+        if next_run.date() > today:
+            continue
+
+        # 如果 next_run_time 是今天但还没到，不需要修正
+        if next_run.date() == today and next_run > now:
+            continue
+
+        # 检查今天是否应该执行（根据 trigger 判断）
+        trigger = job.trigger
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+            if isinstance(trigger, CronTrigger):
+                # 直接从 trigger 中获取 hour 和 minute
+                trigger_fields = trigger.fields
+                hour_field = trigger_fields[4]  # hour 是第5个字段（索引4）
+                minute_field = trigger_fields[5]  # minute 是第6个字段（索引5）
+
+                hour = int(str(hour_field)) if str(hour_field) != '*' else 0
+                minute = int(str(minute_field)) if str(minute_field) != '*' else 0
+
+                # 检查今天是否应该执行（根据 day_of_week）
+                day_of_week_field = trigger_fields[3]  # day_of_week 是第4个字段（索引3）
+                today_weekday = today.weekday()  # 0=周一, 6=周日
+
+                should_run_today = _should_run_on_weekday(str(day_of_week_field), today_weekday)
+
+                if should_run_today:
+                    # 计算今天应该执行的时间
+                    today_run_time = tz.localize(datetime(today.year, today.month, today.day, hour, minute))
+
+                    if today_run_time > now:
+                        # 今天的执行时间还没过，修正为今天
+                        scheduler.modify_job(job.id, next_run_time=today_run_time)
+                        logging.info(f"[Scheduler] Fixed next_run_time for {job.id}: {next_run} -> {today_run_time}")
+                        fixed_count += 1
+
+        except Exception as e:
+            logging.warning(f"[Scheduler] Failed to check trigger for {job.id}: {e}")
+
+    if fixed_count > 0:
+        print(f"[Scheduler] Fixed {fixed_count} expired next_run_time(s)")
+
+
+def _should_run_on_weekday(day_of_week_str, weekday):
+    """
+    检查给定的星期几是否在 trigger 的 day_of_week 范围内
+
+    Args:
+        day_of_week_str: day_of_week 字段字符串（如 "1-5", "*", "0,2,4"）
+        weekday: 0=周一, 6=周日
+
+    Returns:
+        bool: 是否应该在该天执行
+    """
+    if day_of_week_str == '*':
+        return True
+
+    try:
+        # 处理范围 (如 "1-5")
+        if '-' in day_of_week_str:
+            parts = day_of_week_str.split('-')
+            start = int(parts[0])
+            end = int(parts[1])
+            return start <= weekday <= end
+
+        # 处理列表 (如 "0,2,4")
+        if ',' in day_of_week_str:
+            days = [int(d.strip()) for d in day_of_week_str.split(',')]
+            return weekday in days
+
+        # 处理单个值
+        return int(day_of_week_str) == weekday
+
+    except (ValueError, TypeError):
+        # 解析失败，假设应该执行
+        return True
 
 
 def get_scheduler():

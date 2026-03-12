@@ -19,7 +19,7 @@ export interface PositionDetail extends Position {
   name?: string;  // 股票名称
   stop_loss_price: number;
   risk_per_share: number;
-  total_risk: number;
+  total_risk: number;  // 风险占用：(成本价 - 止损价) × 股数
   market_value: number;
   profit_per_share: number;
   total_profit: number;
@@ -28,6 +28,7 @@ export interface PositionDetail extends Position {
 
 // 投资组合状态
 export interface PortfolioState {
+  initial_capital: number;
   total_capital: number;
   total_risk_budget: number;
   single_risk_budget: number;
@@ -162,6 +163,7 @@ export interface PortfolioSettings {
   total_capital: number;
   max_total_risk_percent: number;
   max_single_risk_percent: number;
+  update_initial_capital?: boolean;  // 是否同步更新初始资金
   updated_at?: string;
 }
 

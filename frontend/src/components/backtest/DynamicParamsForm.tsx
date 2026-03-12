@@ -1,18 +1,18 @@
-import { Form, InputNumber, Switch, Select, Input } from 'antd';
-import type { StrategySchema } from '@/types';
+import { Form, Input, InputNumber, Select, Switch } from 'antd';
+import type { StrategyParamField, StrategyParamSchema, StrategyParams } from '@/types';
 
 interface DynamicParamsFormProps {
-  schema: StrategySchema['params_schema'];
-  value: Record<string, any>;
-  onChange: (value: Record<string, any>) => void;
+  schema: StrategyParamSchema;
+  value: StrategyParams;
+  onChange: (value: StrategyParams) => void;
 }
 
 export function DynamicParamsForm({ schema, value, onChange }: DynamicParamsFormProps) {
-  const handleChange = (key: string, val: any) => {
+  const handleChange = (key: string, val: string | number | boolean | null) => {
     onChange({ ...value, [key]: val });
   };
 
-  const renderField = (key: string, fieldSchema: any) => {
+  const renderField = (key: string, fieldSchema: StrategyParamField) => {
     const currentValue = value[key];
 
     switch (fieldSchema.type) {
@@ -22,7 +22,7 @@ export function DynamicParamsForm({ schema, value, onChange }: DynamicParamsForm
           <InputNumber
             min={fieldSchema.minimum}
             max={fieldSchema.maximum}
-            value={currentValue}
+            value={typeof currentValue === 'number' ? currentValue : undefined}
             onChange={(val) => handleChange(key, val)}
             style={{ width: '100%' }}
           />
@@ -30,29 +30,27 @@ export function DynamicParamsForm({ schema, value, onChange }: DynamicParamsForm
       case 'boolean':
         return (
           <Switch
-            checked={currentValue}
+            checked={Boolean(currentValue)}
             onChange={(val) => handleChange(key, val)}
           />
         );
       case 'string':
-        // 如果有 enum 选项，使用下拉选择框
         if (fieldSchema.enum && fieldSchema.enum.length > 0) {
           return (
             <Select
-              value={currentValue ?? fieldSchema.default}
+              value={typeof currentValue === 'string' ? currentValue : fieldSchema.default}
               onChange={(val) => handleChange(key, val)}
               style={{ width: '100%' }}
-              options={fieldSchema.enum.map((opt: string) => ({
+              options={fieldSchema.enum.map((opt) => ({
                 value: opt,
                 label: opt,
               }))}
             />
           );
         }
-        // 普通 string 类型使用输入框
         return (
           <Input
-            value={currentValue}
+            value={typeof currentValue === 'string' ? currentValue : ''}
             onChange={(e) => handleChange(key, e.target.value)}
             style={{ width: '100%' }}
           />
@@ -67,7 +65,7 @@ export function DynamicParamsForm({ schema, value, onChange }: DynamicParamsForm
       {Object.entries(schema.properties || {}).map(([key, fieldSchema]) => (
         <Form.Item
           key={key}
-          label={fieldSchema.description}
+          label={fieldSchema.description || fieldSchema.title || key}
           tooltip={`参数名: ${key}`}
         >
           {renderField(key, fieldSchema)}

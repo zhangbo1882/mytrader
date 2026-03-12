@@ -11,7 +11,7 @@ import {
   CloseCircleOutlined,
 } from '@ant-design/icons';
 import { TaskProgress } from './TaskProgress';
-import type { Task, TaskStatus } from '@/types';
+import type { Task } from '@/types';
 import { TASK_STATUS_MAP } from '@/utils';
 
 const { Text, Paragraph } = Typography;

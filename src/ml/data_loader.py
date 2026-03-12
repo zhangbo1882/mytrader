@@ -21,8 +21,8 @@ class MlDataLoader:
     ML数据加载器
 
     负责从数据库提取和准备机器学习训练数据：
-    - 加载OHLCV数据（日线）
-    - 加载财务数据（季报，前向填充到日线）
+    - 加载OHLCV数据（日线）- 从 DuckDB 加载
+    - 加载财务数据（季报，前向填充到日线）- 从 SQLite 加载
     - 合并为统一的时间序列数据集
     """
 
@@ -36,6 +36,64 @@ class MlDataLoader:
         self.db_path = db_path
         self.stock_query = StockQuery(db_path)
         self.financial_query = FinancialQuery(db_path)
+
+    def _load_price_from_duckdb(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        从 DuckDB 加载 A 股行情数据
+
+        Args:
+            symbol: 股票代码（如 601958 或 601958.SH）
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+
+        Returns:
+            包含OHLCV数据的DataFrame
+        """
+        try:
+            from src.db.duckdb_manager import get_duckdb_manager
+
+            # 标准化股票代码（去掉后缀）
+            stock_code = symbol.split('.')[0] if '.' in symbol else symbol
+
+            duckdb_manager = get_duckdb_manager()
+            with duckdb_manager.get_connection() as conn:
+                query = f"""
+                SELECT
+                    stock_code as symbol,
+                    datetime,
+                    open,
+                    high,
+                    low,
+                    close,
+                    volume,
+                    amount,
+                    turnover,
+                    pe_ttm,
+                    pb,
+                    ps_ttm,
+                    total_mv,
+                    circ_mv
+                FROM bars_a_1d
+                WHERE stock_code = '{stock_code}'
+                  AND datetime >= '{start_date}'
+                  AND datetime <= '{end_date}'
+                ORDER BY datetime
+                """
+                df = conn.execute(query).fetchdf()
+
+                if df.empty:
+                    logger.warning(f"No price data found in DuckDB for {symbol}")
+                    return pd.DataFrame()
+
+                df['datetime'] = pd.to_datetime(df['datetime'])
+                df['interval'] = '1d'
+
+                logger.info(f"Loaded {len(df)} rows from DuckDB for {symbol}")
+                return df
+
+        except Exception as e:
+            logger.error(f"Failed to load price data from DuckDB for {symbol}: {e}")
+            return pd.DataFrame()
 
     def load_training_data(
         self,
@@ -58,9 +116,15 @@ class MlDataLoader:
         Returns:
             包含价格和财务特征的DataFrame
         """
-        # 1. 加载价格数据
+        # 1. 加载价格数据（优先从 DuckDB 加载 A 股数据）
         logger.info(f"Loading price data for {symbol} from {start_date} to {end_date}")
-        price_df = self.stock_query.query_bars(symbol, start_date, end_date, price_type=price_type)
+
+        # 先尝试从 DuckDB 加载 A 股数据
+        price_df = self._load_price_from_duckdb(symbol, start_date, end_date)
+
+        # 如果 DuckDB 没有数据，尝试从 SQLite 加载（港股等）
+        if price_df.empty:
+            price_df = self.stock_query.query_bars(symbol, start_date, end_date, price_type=price_type)
 
         if price_df.empty:
             logger.warning(f"No price data found for {symbol}")
@@ -83,8 +147,10 @@ class MlDataLoader:
         # 4. 添加时间特征
         price_df = self._add_time_features(price_df)
 
-        # 5. 删除包含NaN的行
-        price_df = price_df.dropna()
+        # 5. 删除关键列为NaN的行（不删除rolling计算产生的NaN）
+        # 关键列：open, high, low, close, volume, returns_1d
+        essential_cols = ['open', 'high', 'low', 'close', 'volume', 'returns_1d']
+        price_df = price_df.dropna(subset=essential_cols)
 
         logger.info(f"Loaded {len(price_df)} rows of training data")
         return price_df
@@ -152,10 +218,17 @@ class MlDataLoader:
         df['volume_ma_20'] = df['volume'].rolling(20).mean()
         df['volume_ratio'] = df['volume'] / df['volume_ma_20']
 
-        # 换手率特征
+        # 换手率特征（仅当 turnover 列存在且有效数据超过50%时才计算）
         if 'turnover' in df.columns:
-            df['turnover_ma_5'] = df['turnover'].rolling(5).mean()
-            df['turnover_ma_20'] = df['turnover'].rolling(20).mean()
+            turnover_valid_ratio = df['turnover'].notna().sum() / len(df)
+            if turnover_valid_ratio > 0.5:
+                df['turnover_ma_5'] = df['turnover'].rolling(5).mean()
+                df['turnover_ma_20'] = df['turnover'].rolling(20).mean()
+            else:
+                # turnover 数据不足，不添加这些特征
+                logger.warning(f"turnover data is mostly missing ({turnover_valid_ratio:.1%}), skipping turnover features")
+                # 删除 turnover 列，避免后续 dropna 时删除所有行
+                df = df.drop(columns=['turnover'])
 
         # 波动率（20日收益率标准差）
         df['volatility_20'] = df['returns_1d'].rolling(20).std()

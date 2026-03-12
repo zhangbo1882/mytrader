@@ -10,6 +10,7 @@ import { useQueryStore } from '@/stores';
 import { useFavoriteStore } from '@/stores';
 import { useQuery } from '@/hooks';
 import { stockService } from '@/services';
+import type { IntervalType } from '@/types';
 
 const { Title, Text } = Typography;
 
@@ -115,7 +116,7 @@ function QueryPage() {
       <Space direction="vertical" style={{ width: '100%' }} size="large">
         {/* 股票选择 */}
         <Card title="选择股票" size="small">
-          <StockSelector maxStocks={10} />
+          <StockSelector />
         </Card>
 
         {/* 日期范围和复权类型 */}
@@ -126,7 +127,7 @@ function QueryPage() {
                 <Text>时间周期：</Text>
                 <IntervalSelector
                   value={interval}
-                  onChange={setInterval}
+                  onChange={(val) => setInterval(val as IntervalType)}
                   style={{ width: 120, marginLeft: 8 }}
                 />
               </Col>

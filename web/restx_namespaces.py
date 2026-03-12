@@ -1,6 +1,7 @@
 """
 Flask-RESTX Namespaces for API endpoints
 """
+
 from flask_restx import Namespace, Resource, fields
 from flask import request, session
 from web.services.task_service import get_task_manager
@@ -10,186 +11,259 @@ from web.services.task_service import get_task_manager
 # ============================================================================
 
 # Health Namespace
-health_ns = Namespace('health', description='健康检查接口')
+health_ns = Namespace("health", description="健康检查接口")
 
 # Stock Namespace
-stock_ns = Namespace('stock', description='股票相关接口')
+stock_ns = Namespace("stock", description="股票相关接口")
 
 # Task Namespace
-task_ns = Namespace('tasks', description='任务管理接口')
+task_ns = Namespace("tasks", description="任务管理接口")
 
 # Schedule Namespace
-schedule_ns = Namespace('schedule', description='定时任务接口')
+schedule_ns = Namespace("schedule", description="定时任务接口")
 
 # Financial Namespace
-financial_ns = Namespace('financial', description='财务数据接口')
+financial_ns = Namespace("financial", description="财务数据接口")
 
 # SW Industry Namespace
-sw_industry_ns = Namespace('sw-industry', description='申万行业接口')
+sw_industry_ns = Namespace("sw-industry", description="申万行业接口")
 
 # Boards Namespace (DEPRECATED - board functionality removed)
-boards_ns = Namespace('boards', description='板块数据接口 (已废弃)')
+boards_ns = Namespace("boards", description="板块数据接口 (已废弃)")
 
 # Favorites Namespace
-favorites_ns = Namespace('favorites', description='收藏功能接口')
+favorites_ns = Namespace("favorites", description="收藏功能接口")
 
 # Valuation Namespace
-valuation_ns = Namespace('valuation', description='股票估值接口')
+valuation_ns = Namespace("valuation", description="股票估值接口")
 
 # Backtest Namespace
-backtest_ns = Namespace('backtest', description='回测接口')
+backtest_ns = Namespace("backtest", description="回测接口")
 
 # Screening Namespace
-screening_ns = Namespace('screening', description='股票筛选接口')
+screening_ns = Namespace("screening", description="股票筛选接口")
 
 # Moneyflow Namespace
-moneyflow_ns = Namespace('moneyflow', description='资金流向接口')
+moneyflow_ns = Namespace("moneyflow", description="资金流向接口")
 
 # Dragon List Namespace
-dragon_list_ns = Namespace('dragon-list', description='龙虎榜接口')
+dragon_list_ns = Namespace("dragon-list", description="龙虎榜接口")
 
 # Alpha Namespace
-alpha_ns = Namespace('alphas', description='101 Formulaic Alphas 因子库接口')
+alpha_ns = Namespace("alphas", description="101 Formulaic Alphas 因子库接口")
 
 # Risk Management Namespace
-risk_ns = Namespace('risk', description='风险管理接口')
+risk_ns = Namespace("risk", description="风险管理接口")
 
 # ============================================================================
 # Models (DTOs) - must be defined AFTER namespaces
 # ============================================================================
 
 # Stock models
-stock_search_item_model = stock_ns.model('StockSearchItem', {
-    'code': fields.String(description='股票代码', example='600382'),
-    'name': fields.String(description='股票名称', example='广东明珠'),
-    'type': fields.String(description='类型 (stock/index)', example='stock', enum=['stock', 'index'])
-})
+stock_search_item_model = stock_ns.model(
+    "StockSearchItem",
+    {
+        "code": fields.String(description="股票代码", example="600382"),
+        "name": fields.String(description="股票名称", example="广东明珠"),
+        "type": fields.String(
+            description="类型 (stock/index)", example="stock", enum=["stock", "index"]
+        ),
+    },
+)
 
-stock_query_model = stock_ns.model('StockQueryRequest', {
-    'symbols': fields.List(fields.String, description='股票代码列表，支持A股和指数代码', example=['600382', '000001', '000001.SH']),
-    'start_date': fields.String(description='开始日期，格式 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS（分钟线）', example='2024-01-01'),
-    'end_date': fields.String(description='结束日期，格式 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS（分钟线）', example='2024-12-31'),
-    'interval': fields.String(description='时间周期: 1d=日线, 5m=5分钟, 15m=15分钟, 30m=30分钟, 60m=60分钟', example='1d', enum=['1d', '5m', '15m', '30m', '60m']),
-    'price_type': fields.String(description='价格类型: qfq=前复权, hfq=后复权, bfq=不复权', example='qfq', enum=['qfq', 'hfq', 'bfq'])
-})
+stock_query_model = stock_ns.model(
+    "StockQueryRequest",
+    {
+        "symbols": fields.List(
+            fields.String,
+            description="股票代码列表，支持A股和指数代码",
+            example=["600382", "000001", "000001.SH"],
+        ),
+        "start_date": fields.String(
+            description="开始日期，格式 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS（分钟线）",
+            example="2024-01-01",
+        ),
+        "end_date": fields.String(
+            description="结束日期，格式 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS（分钟线）",
+            example="2024-12-31",
+        ),
+        "interval": fields.String(
+            description="时间周期: 1d=日线, 5m=5分钟, 15m=15分钟, 30m=30分钟, 60m=60分钟",
+            example="1d",
+            enum=["1d", "5m", "15m", "30m", "60m"],
+        ),
+        "price_type": fields.String(
+            description="价格类型: qfq=前复权, hfq=后复权, bfq=不复权",
+            example="qfq",
+            enum=["qfq", "hfq", "bfq"],
+        ),
+    },
+)
 
-stock_bar_model = stock_ns.model('StockBarData', {
-    'datetime': fields.String(description='日期', example='2024-01-01'),
-    'open': fields.Float(description='开盘价', example=10.5),
-    'high': fields.Float(description='最高价', example=11.0),
-    'low': fields.Float(description='最低价', example=10.3),
-    'close': fields.Float(description='收盘价', example=10.8),
-    'volume': fields.Float(description='成交量', example=1000000),
-    'turnover': fields.Float(description='成交额', example=10800000),
-    'pct_chg': fields.Float(description='涨跌幅', example=2.5),
-    'amount': fields.Float(description='成交额', example=10800000)
-})
+stock_bar_model = stock_ns.model(
+    "StockBarData",
+    {
+        "datetime": fields.String(description="日期", example="2024-01-01"),
+        "open": fields.Float(description="开盘价", example=10.5),
+        "high": fields.Float(description="最高价", example=11.0),
+        "low": fields.Float(description="最低价", example=10.3),
+        "close": fields.Float(description="收盘价", example=10.8),
+        "volume": fields.Float(description="成交量", example=1000000),
+        "turnover": fields.Float(description="成交额", example=10800000),
+        "pct_chg": fields.Float(description="涨跌幅", example=2.5),
+        "amount": fields.Float(description="成交额", example=10800000),
+    },
+)
 
 # Task models
-task_model = task_ns.model('Task', {
-    'task_id': fields.String(description='任务ID', example='abc123'),
-    'task_type': fields.String(description='任务类型', example='update_stock_prices'),
-    'status': fields.String(description='状态 (pending/running/completed/failed/stopped)', example='running'),
-    'progress': fields.Integer(description='进度 (0-100)', example=50),
-    'message': fields.String(description='消息', example='正在更新股票数据...'),
-    'stats': fields.Raw(description='统计信息'),
-    'created_at': fields.String(description='创建时间', example='2024-01-01 10:00:00'),
-    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:05:00')
-})
+task_model = task_ns.model(
+    "Task",
+    {
+        "task_id": fields.String(description="任务ID", example="abc123"),
+        "task_type": fields.String(
+            description="任务类型", example="update_stock_prices"
+        ),
+        "status": fields.String(
+            description="状态 (pending/running/completed/failed/stopped)",
+            example="running",
+        ),
+        "progress": fields.Integer(description="进度 (0-100)", example=50),
+        "message": fields.String(description="消息", example="正在更新股票数据..."),
+        "stats": fields.Raw(description="统计信息"),
+        "created_at": fields.String(
+            description="创建时间", example="2024-01-01 10:00:00"
+        ),
+        "updated_at": fields.String(
+            description="更新时间", example="2024-01-01 10:05:00"
+        ),
+    },
+)
 
-create_task_model = task_ns.model('CreateTaskRequest', {
-    'task_type': fields.String(
-        description='任务类型（全市场更新会自动使用批量模式）',
-        required=True,
-        example='update_stock_prices',
-        enum=[
-            'update_stock_prices',       # A股更新（自动切换到批量模式）
-            'update_hk_prices',          # 港股更新（自动切换到批量模式）
-            'update_a_share_batch',      # A股批量更新（直接调用）
-            'update_hk_batch',           # 港股批量更新（直接调用）
-            'update_financial_reports',
-            'update_industry_classification',
-            'update_index_data',
-            'update_industry_statistics',
-            'update_moneyflow',
-            'calculate_industry_moneyflow',
-            'test_handler',
-            'backtest',
-            'update_dragon_list'
-        ],
-        attribute='task_type'
-    ),
-    'params': fields.Raw(
-        description='任务参数 (根据不同任务类型需要不同参数)',
-        example={
-            'stock_range': 'all',
-            'mode': 'incremental',
-            'days_back': 1,
-            'custom_stocks': ['600382'],
-            'src': 'SW2021',
-            'force': False,
-            'include_indicators': True,
-            'include_reports': True,
-            'markets': ['SSE', 'SZSE']
-        }
-    )
-})
+create_task_model = task_ns.model(
+    "CreateTaskRequest",
+    {
+        "task_type": fields.String(
+            description="任务类型（全市场更新会自动使用批量模式）",
+            required=True,
+            example="update_stock_prices",
+            enum=[
+                "update_stock_prices",  # A股更新（自动切换到批量模式）
+                "update_hk_prices",  # 港股更新（自动切换到批量模式）
+                "update_a_share_batch",  # A股批量更新（直接调用）
+                "update_hk_batch",  # 港股批量更新（直接调用）
+                "update_financial_reports",
+                "update_industry_classification",
+                "update_index_data",
+                "update_industry_statistics",
+                "update_moneyflow",
+                "calculate_industry_moneyflow",
+                "test_handler",
+                "backtest",
+                "update_dragon_list",
+            ],
+            attribute="task_type",
+        ),
+        "params": fields.Raw(
+            description="任务参数 (根据不同任务类型需要不同参数)",
+            example={
+                "stock_range": "all",
+                "mode": "incremental",
+                "days_back": 1,
+                "custom_stocks": ["600382"],
+                "src": "SW2021",
+                "force": False,
+                "include_indicators": True,
+                "include_reports": True,
+                "markets": ["SSE", "SZSE"],
+            },
+        ),
+    },
+)
 
 # SW Industry models
 # Define child industry model (used for recursive structure)
-sw_industry_child_model = sw_industry_ns.model('SWIndustryChild', {
-    'index_code': fields.String(description='行业代码', example='801010.SI'),
-    'industry_name': fields.String(description='行业名称', example='种植业'),
-    'industry_code': fields.String(description='行业编号', example='1150001'),
-    'level': fields.String(description='级别 (L1/L2/L3)', example='L2'),
-    'parent_code': fields.String(description='父级代码', example='801010.SI'),
-    'children': fields.List(fields.Nested(sw_industry_ns.model('SWIndustryGrandChild', {
-        'index_code': fields.String(description='行业代码', example='801010.SI'),
-        'industry_name': fields.String(description='行业名称', example='粮食种植'),
-        'industry_code': fields.String(description='行业编号', example='1150001'),
-        'level': fields.String(description='级别 (L3)', example='L3'),
-        'parent_code': fields.String(description='父级代码', example='801010.SI'),
-        'children': fields.List(fields.Raw, description='子行业列表')
-    })))
-})
+sw_industry_child_model = sw_industry_ns.model(
+    "SWIndustryChild",
+    {
+        "index_code": fields.String(description="行业代码", example="801010.SI"),
+        "industry_name": fields.String(description="行业名称", example="种植业"),
+        "industry_code": fields.String(description="行业编号", example="1150001"),
+        "level": fields.String(description="级别 (L1/L2/L3)", example="L2"),
+        "parent_code": fields.String(description="父级代码", example="801010.SI"),
+        "children": fields.List(
+            fields.Nested(
+                sw_industry_ns.model(
+                    "SWIndustryGrandChild",
+                    {
+                        "index_code": fields.String(
+                            description="行业代码", example="801010.SI"
+                        ),
+                        "industry_name": fields.String(
+                            description="行业名称", example="粮食种植"
+                        ),
+                        "industry_code": fields.String(
+                            description="行业编号", example="1150001"
+                        ),
+                        "level": fields.String(description="级别 (L3)", example="L3"),
+                        "parent_code": fields.String(
+                            description="父级代码", example="801010.SI"
+                        ),
+                        "children": fields.List(fields.Raw, description="子行业列表"),
+                    },
+                )
+            )
+        ),
+    },
+)
 
 # Main industry model
-sw_industry_model = sw_industry_ns.model('SWIndustry', {
-    'index_code': fields.String(description='行业代码', example='801010.SI'),
-    'industry_name': fields.String(description='行业名称', example='农林牧渔'),
-    'industry_code': fields.String(description='行业编号', example='1150001'),
-    'level': fields.String(description='级别 (L1/L2/L3)', example='L1'),
-    'parent_code': fields.String(description='父级代码', example=None),
-    'children': fields.List(fields.Nested(sw_industry_child_model))
-})
+sw_industry_model = sw_industry_ns.model(
+    "SWIndustry",
+    {
+        "index_code": fields.String(description="行业代码", example="801010.SI"),
+        "industry_name": fields.String(description="行业名称", example="农林牧渔"),
+        "industry_code": fields.String(description="行业编号", example="1150001"),
+        "level": fields.String(description="级别 (L1/L2/L3)", example="L1"),
+        "parent_code": fields.String(description="父级代码", example=None),
+        "children": fields.List(fields.Nested(sw_industry_child_model)),
+    },
+)
 
 # Member model
-sw_member_model = sw_industry_ns.model('SWMember', {
-    'ts_code': fields.String(description='股票代码', example='002311.SZ'),
-    'name': fields.String(description='股票名称', example='海大集团')
-})
+sw_member_model = sw_industry_ns.model(
+    "SWMember",
+    {
+        "ts_code": fields.String(description="股票代码", example="002311.SZ"),
+        "name": fields.String(description="股票名称", example="海大集团"),
+    },
+)
 
 # ============================================================================
 # Health Resources
 # ============================================================================
 
-@health_ns.route('')
+
+@health_ns.route("")
 class HealthResource(Resource):
     """健康检查"""
+
     def get(self):
         """健康检查接口"""
-        return {'status': 'ok', 'message': 'MyTrader API is running'}
+        return {"status": "ok", "message": "MyTrader API is running"}
 
 
 # ============================================================================
 # Stock Resources
 # ============================================================================
 
-@stock_ns.route('/search')
+
+@stock_ns.route("/search")
 class StockSearchResource(Resource):
     """股票搜索"""
-    @stock_ns.doc('search_stocks',
-        description='''股票/指数搜索自动补全接口。
+
+    @stock_ns.doc(
+        "search_stocks",
+        description="""股票/指数搜索自动补全接口。
 
 支持搜索方式：
 1. 股票代码: 600382, 000001
@@ -204,21 +278,31 @@ class StockSearchResource(Resource):
   - stock: 仅返回股票
   - index: 仅返回指数
   - all: 返回股票和指数（默认）
-''')
-    @stock_ns.param('q', '搜索关键词（代码或名称）', type='string', required=True)
-    @stock_ns.param('limit', '返回结果数量，默认10，最大50', type='integer', default=10)
-    @stock_ns.param('type', '资产类型 (stock/index/all)', type='string', enum=['stock', 'index', 'all'], default='all')
+""",
+    )
+    @stock_ns.param("q", "搜索关键词（代码或名称）", type="string", required=True)
+    @stock_ns.param("limit", "返回结果数量，默认10，最大50", type="integer", default=10)
+    @stock_ns.param(
+        "type",
+        "资产类型 (stock/index/all)",
+        type="string",
+        enum=["stock", "index", "all"],
+        default="all",
+    )
     def get(self):
         """股票搜索（自动补全，支持股票和指数）"""
         from web.services.stock_service import stock_search
+
         return stock_search()
 
 
-@stock_ns.route('/query')
+@stock_ns.route("/query")
 class StockQueryResource(Resource):
     """股票查询"""
-    @stock_ns.doc('query_stocks',
-        description='''查询股票/指数历史行情数据（K线数据）。
+
+    @stock_ns.doc(
+        "query_stocks",
+        description="""查询股票/指数历史行情数据（K线数据）。
 
 **请求体参数：**
 - **symbols**: 股票代码列表，支持多支股票批量查询
@@ -244,29 +328,51 @@ class StockQueryResource(Resource):
 - turnover: 成交额（元）
 - pct_chg: 涨跌幅（%）
 - amount: 成交额（元）
-''')
+""",
+    )
     @stock_ns.expect(stock_query_model)
     def post(self):
         """股票查询"""
         from web.services.stock_service import stock_query
+
         return stock_query()
 
 
 # 牛熊市判断请求模型
-market_regime_model = stock_ns.model('MarketRegimeQuery', {
-    'symbol': fields.String(required=True, description='股票代码', example='600382'),
-    'start_date': fields.String(required=False, description='开始日期 (YYYY-MM-DD)', example='2025-01-01'),
-    'end_date': fields.String(required=False, description='结束日期 (YYYY-MM-DD)', example='2025-02-25'),
-    'cycle': fields.String(required=False, description='单周期查询: short(短周期), medium(中周期), long(长周期)', example='medium', enum=['short', 'medium', 'long']),
-    'cycles': fields.List(fields.String, required=False, description='多周期查询: 传入多个周期如 ["short", "medium", "long"]'),
-})
+market_regime_model = stock_ns.model(
+    "MarketRegimeQuery",
+    {
+        "symbol": fields.String(
+            required=True, description="股票代码", example="600382"
+        ),
+        "start_date": fields.String(
+            required=False, description="开始日期 (YYYY-MM-DD)", example="2025-01-01"
+        ),
+        "end_date": fields.String(
+            required=False, description="结束日期 (YYYY-MM-DD)", example="2025-02-25"
+        ),
+        "cycle": fields.String(
+            required=False,
+            description="单周期查询: short(短周期), medium(中周期), long(长周期)",
+            example="medium",
+            enum=["short", "medium", "long"],
+        ),
+        "cycles": fields.List(
+            fields.String,
+            required=False,
+            description='多周期查询: 传入多个周期如 ["short", "medium", "long"]',
+        ),
+    },
+)
 
 
-@stock_ns.route('/regime')
+@stock_ns.route("/regime")
 class MarketRegimeResource(Resource):
     """牛熊市判断"""
-    @stock_ns.doc('get_market_regime',
-        description='''计算股票的牛熊市状态历史。
+
+    @stock_ns.doc(
+        "get_market_regime",
+        description="""计算股票的牛熊市状态历史。
 
 **支持多周期查询：**
 - **短周期 (short)**: EMA 3/5/10 + SMA20锚, 回看30天, 适合短线/题材股
@@ -295,97 +401,148 @@ class MarketRegimeResource(Resource):
 **返回数据：**
 - 单周期: { symbol, data: [...] }
 - 多周期: { symbol, cycles: { short: [...], medium: [...], long: [...] } }
-''')
+""",
+    )
     @stock_ns.expect(market_regime_model)
     def post(self):
         """计算牛熊市状态历史"""
         from flask import request
         from web.services.duckdb_query_service import get_duckdb_query_service
-        from web.services.market_regime_service import MarketRegimeService, CYCLE_CONFIGS
+        from web.services.market_regime_service import (
+            MarketRegimeService,
+            CYCLE_CONFIGS,
+        )
 
         data = request.get_json()
-        symbol = data.get('symbol')
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
-        cycle = data.get('cycle')
-        cycles = data.get('cycles')
+        symbol = data.get("symbol")
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+        cycle = data.get("cycle")
+        cycles = data.get("cycles")
 
         if not symbol:
-            return {'error': 'symbol is required'}, 400
+            return {"error": "symbol is required"}, 400
 
         # 确定需要获取的最大回看天数
         if cycles:
-            max_lookback = max(CYCLE_CONFIGS[c]['lookback_days'] for c in cycles if c in CYCLE_CONFIGS)
+            max_lookback = max(
+                CYCLE_CONFIGS[c]["lookback_days"] for c in cycles if c in CYCLE_CONFIGS
+            )
         elif cycle and cycle in CYCLE_CONFIGS:
-            max_lookback = CYCLE_CONFIGS[cycle]['lookback_days']
+            max_lookback = CYCLE_CONFIGS[cycle]["lookback_days"]
         else:
             max_lookback = 120  # 默认使用长周期的回看天数
 
         # 默认查询最近3个月
         from datetime import datetime, timedelta
+
         if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime("%Y-%m-%d")
         if not start_date:
-            start_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
         try:
             # 牛熊市计算需要回看窗口，扩展开始日期
-            extended_start = (datetime.strptime(start_date, '%Y-%m-%d') - timedelta(days=max_lookback + 30)).strftime('%Y-%m-%d')
+            extended_start = (
+                datetime.strptime(start_date, "%Y-%m-%d")
+                - timedelta(days=max_lookback + 30)
+            ).strftime("%Y-%m-%d")
 
-            # 获取K线数据（使用扩展的日期范围）
             query_service = get_duckdb_query_service()
-            results = query_service.query_bars(
+
+            # 获取前复权数据用于计算（与回测保持一致）
+            results_qfq = query_service.query_bars(
                 symbols=[symbol],
                 start_date=extended_start,
                 end_date=end_date,
-                interval='1d',
-                price_type='bfq'
+                interval="1d",
+                price_type="qfq",
             )
 
-            if not results or symbol not in results or not results[symbol]:
-                return {'error': f'No data found for {symbol}', 'data': []}
+            if not results_qfq or symbol not in results_qfq or not results_qfq[symbol]:
+                return {"error": f"No data found for {symbol}", "data": []}
+
+            # 获取不复权数据用于展示（用户看到实际交易价格）
+            # 使用扩展的日期范围，确保所有计算结果日期都有对应的不复权价格
+            results_bfq = query_service.query_bars(
+                symbols=[symbol],
+                start_date=extended_start,
+                end_date=end_date,
+                interval="1d",
+                price_type="bfq",
+            )
+
+            # 构建不复权价格的日期映射
+            bfq_price_map = {}
+            if results_bfq and symbol in results_bfq and results_bfq[symbol]:
+                for item in results_bfq[symbol]:
+                    date_str = str(item.get('datetime', item.get('date', '')))[:10]
+                    bfq_price_map[date_str] = item.get('close')
+
+            def replace_close_with_bfq(regime_data):
+                """将计算结果中的close替换为不复权价格"""
+                for item in regime_data:
+                    date_str = str(item.get('date', ''))[:10]
+                    if date_str in bfq_price_map:
+                        item['close'] = bfq_price_map[date_str]
+                return regime_data
 
             # 多周期查询
             if cycles:
                 regime_service = MarketRegimeService()
-                multi_results = regime_service.calculate_multi_cycle_regimes(results[symbol], cycles)
-                return {'symbol': symbol, 'cycles': multi_results}
+                multi_results = regime_service.calculate_multi_cycle_regimes(
+                    results_qfq[symbol], cycles
+                )
+                # 替换每个周期的展示价格
+                for cycle_name in multi_results:
+                    multi_results[cycle_name] = replace_close_with_bfq(multi_results[cycle_name])
+                return {"symbol": symbol, "cycles": multi_results}
 
             # 单周期查询
-            cycle_type = cycle or 'medium'
+            cycle_type = cycle or "medium"
             regime_service = MarketRegimeService(cycle=cycle_type)
-            regime_history = regime_service.calculate_regime_history(results[symbol])
+            regime_history = regime_service.calculate_regime_history(results_qfq[symbol])
 
-            return {'symbol': symbol, 'cycle': cycle_type, 'data': regime_history}
+            # 替换展示价格为不复权价格
+            regime_history = replace_close_with_bfq(regime_history)
+
+            return {"symbol": symbol, "cycle": cycle_type, "data": regime_history}
 
         except Exception as e:
             import logging
+
             logging.error(f"计算牛熊市状态失败: {e}")
-            return {'error': str(e)}, 500
+            return {"error": str(e)}, 500
 
 
-@stock_ns.route('/regime/cycles')
+@stock_ns.route("/regime/cycles")
 class MarketRegimeCyclesResource(Resource):
     """获取可用周期配置"""
-    @stock_ns.doc('get_regime_cycles',
-        description='''获取可用的牛熊市判断周期配置。
+
+    @stock_ns.doc(
+        "get_regime_cycles",
+        description="""获取可用的牛熊市判断周期配置。
 
 **返回数据：**
 - short: 短周期 (EMA 3/5/10 + SMA20锚, 回看30天, 适合短线/题材股)
 - medium: 中周期 (EMA 5/10/20 + SMA60锚, 回看60天, 适合波段/成长股)
 - long: 长周期 (EMA 10/20/40 + SMA120锚, 回看120天, 适合长线/蓝筹股)
-''')
+""",
+    )
     def get(self):
         """获取可用的周期配置"""
         from web.services.market_regime_service import get_all_cycle_configs
-        return {'cycles': get_all_cycle_configs()}
+
+        return {"cycles": get_all_cycle_configs()}
 
 
-@stock_ns.route('/name/<code>')
+@stock_ns.route("/name/<code>")
 class StockNameResource(Resource):
     """获取股票名称"""
-    @stock_ns.doc('get_stock_name',
-        description='''根据股票代码获取股票名称。
+
+    @stock_ns.doc(
+        "get_stock_name",
+        description="""根据股票代码获取股票名称。
 
 **路径参数：**
 - **code**: 股票或指数代码
@@ -394,19 +551,25 @@ class StockNameResource(Resource):
 **返回数据：**
 - name: 股票名称
 - code: 股票代码
-''')
-    @stock_ns.param('code', '股票代码 (如: 600382, 000001.SH)', type='string', required=True)
+""",
+    )
+    @stock_ns.param(
+        "code", "股票代码 (如: 600382, 000001.SH)", type="string", required=True
+    )
     def get(self, code):
         """获取股票名称"""
         from web.services.stock_service import get_stock_name
+
         return get_stock_name(code)
 
 
-@stock_ns.route('/min-date')
+@stock_ns.route("/min-date")
 class StockMinDateResource(Resource):
     """获取最小日期"""
-    @stock_ns.doc('get_min_date',
-        description='''获取所有股票数据的最小日期（最早数据日期）。
+
+    @stock_ns.doc(
+        "get_min_date",
+        description="""获取所有股票数据的最小日期（最早数据日期）。
 
 **用途：**
 - 确定系统中数据的起始日期
@@ -414,18 +577,22 @@ class StockMinDateResource(Resource):
 
 **返回数据：**
 - min_date: 最早数据的日期 (YYYY-MM-DD 格式)
-''')
+""",
+    )
     def get(self):
         """获取所有股票的最小日期"""
         from web.services.stock_service import get_min_date
+
         return get_min_date()
 
 
-@stock_ns.route('/export/<format>')
+@stock_ns.route("/export/<format>")
 class StockExportResource(Resource):
     """数据导出"""
-    @stock_ns.doc('export_stocks',
-        description='''导出股票查询结果为文件。
+
+    @stock_ns.doc(
+        "export_stocks",
+        description="""导出股票查询结果为文件。
 
 **路径参数：**
 - **format**: 导出格式
@@ -435,20 +602,30 @@ class StockExportResource(Resource):
 **注意：**
 - 导出前需要先调用 /stock/query 进行查询
 - 导出的是最近一次查询的结果
-''')
-    @stock_ns.param('format', '导出格式 (csv 或 excel)', type='string', required=True, enum=['csv', 'excel'])
+""",
+    )
+    @stock_ns.param(
+        "format",
+        "导出格式 (csv 或 excel)",
+        type="string",
+        required=True,
+        enum=["csv", "excel"],
+    )
     def get(self, format):
         """导出查询结果"""
         from web.services.stock_service import stock_export
+
         data, status_code = stock_export(format)
         return data, status_code
 
 
-@stock_ns.route('/intervals')
+@stock_ns.route("/intervals")
 class StockIntervalsResource(Resource):
     """可用时间周期"""
-    @stock_ns.doc('get_available_intervals',
-        description='''获取可用的时间周期列表及数据统计。
+
+    @stock_ns.doc(
+        "get_available_intervals",
+        description="""获取可用的时间周期列表及数据统计。
 
 **返回数据：**
 ```json
@@ -469,18 +646,22 @@ class StockIntervalsResource(Resource):
   ]
 }
 ```
-''')
+""",
+    )
     def get(self):
         """获取可用的时间周期列表"""
         from web.services.stock_service import get_available_intervals
+
         return get_available_intervals()
 
 
-@stock_ns.route('/ai-screen', methods=['POST'])
+@stock_ns.route("/ai-screen", methods=["POST"])
 class StockAIScreenResource(Resource):
     """AI智能筛选"""
-    @stock_ns.doc('ai_screen_stocks',
-        description='''使用自然语言筛选股票。
+
+    @stock_ns.doc(
+        "ai_screen_stocks",
+        description="""使用自然语言筛选股票。
 
 **请求体参数：**
 ```json
@@ -498,22 +679,35 @@ class StockAIScreenResource(Resource):
   "params": {...}
 }
 ```
-''')
-    @stock_ns.expect(stock_ns.model('AIScreenRequest', {
-        'query': fields.String(description='自然语言筛选条件', example='查找最近5天涨幅超过5%的股票', required=True)
-    }))
+""",
+    )
+    @stock_ns.expect(
+        stock_ns.model(
+            "AIScreenRequest",
+            {
+                "query": fields.String(
+                    description="自然语言筛选条件",
+                    example="查找最近5天涨幅超过5%的股票",
+                    required=True,
+                )
+            },
+        )
+    )
     def post(self):
         """使用自然语言筛选股票"""
         from web.services.ai_screen_service import ai_screen
+
         data, status_code = ai_screen()
         return data, status_code
 
 
-@stock_ns.route('/ai-screen-chat', methods=['POST'])
+@stock_ns.route("/ai-screen-chat", methods=["POST"])
 class StockAIChatResource(Resource):
     """AI对话筛选"""
-    @stock_ns.doc('ai_chat_screen',
-        description='''使用对话方式筛选股票。
+
+    @stock_ns.doc(
+        "ai_chat_screen",
+        description="""使用对话方式筛选股票。
 
 **请求体参数：**
 ```json
@@ -522,23 +716,32 @@ class StockAIChatResource(Resource):
   "history": [{"role": "user", "content": "..."}]
 }
 ```
-''')
-    @stock_ns.expect(stock_ns.model('AIChatRequest', {
-        'query': fields.String(description='用户消息', required=True),
-        'history': fields.List(fields.Raw, description='对话历史')
-    }))
+""",
+    )
+    @stock_ns.expect(
+        stock_ns.model(
+            "AIChatRequest",
+            {
+                "query": fields.String(description="用户消息", required=True),
+                "history": fields.List(fields.Raw, description="对话历史"),
+            },
+        )
+    )
     def post(self):
         """AI对话筛选"""
         from web.services.ai_screen_service import ai_screen_chat
+
         data, status_code = ai_screen_chat()
         return data, status_code
 
 
-@stock_ns.route('/screen', methods=['POST'])
+@stock_ns.route("/screen", methods=["POST"])
 class StockScreenResource(Resource):
     """股票筛选"""
-    @stock_ns.doc('screen_stocks',
-        description='''根据条件筛选股票列表。
+
+    @stock_ns.doc(
+        "screen_stocks",
+        description="""根据条件筛选股票列表。
 
 **请求体参数：**
 ```json
@@ -577,21 +780,28 @@ class StockScreenResource(Resource):
 **注意：**
 - 最多返回500只股票
 - 所有参数都是可选的
-''')
-    @stock_ns.expect(stock_ns.model('StockScreenRequest', {
-        'days': fields.Integer(description='最近N天', example=5, default=5),
-        'turnover_min': fields.Float(description='最小成交额', example=1000),
-        'turnover_max': fields.Float(description='最大成交额', example=100000),
-        'pct_chg_min': fields.Float(description='最小涨跌幅(%)', example=-5),
-        'pct_chg_max': fields.Float(description='最大涨跌幅(%)', example=5),
-        'price_min': fields.Float(description='最低价', example=10),
-        'price_max': fields.Float(description='最高价', example=100),
-        'volume_min': fields.Float(description='最小成交量', example=10000),
-        'volume_max': fields.Float(description='最大成交量', example=1000000)
-    }))
+""",
+    )
+    @stock_ns.expect(
+        stock_ns.model(
+            "StockScreenRequest",
+            {
+                "days": fields.Integer(description="最近N天", example=5, default=5),
+                "turnover_min": fields.Float(description="最小成交额", example=1000),
+                "turnover_max": fields.Float(description="最大成交额", example=100000),
+                "pct_chg_min": fields.Float(description="最小涨跌幅(%)", example=-5),
+                "pct_chg_max": fields.Float(description="最大涨跌幅(%)", example=5),
+                "price_min": fields.Float(description="最低价", example=10),
+                "price_max": fields.Float(description="最高价", example=100),
+                "volume_min": fields.Float(description="最小成交量", example=10000),
+                "volume_max": fields.Float(description="最大成交量", example=1000000),
+            },
+        )
+    )
     def post(self):
         """根据条件筛选股票"""
         from web.services.stock_service import stock_screen
+
         data, status_code = stock_screen()
         return data, status_code
 
@@ -600,11 +810,14 @@ class StockScreenResource(Resource):
 # Task Resources
 # ============================================================================
 
-@task_ns.route('')
+
+@task_ns.route("")
 class TaskListResource(Resource):
     """任务列表"""
-    @task_ns.doc('list_tasks',
-        description='''获取任务列表，支持按状态筛选。
+
+    @task_ns.doc(
+        "list_tasks",
+        description="""获取任务列表，支持按状态筛选。
 
 **查询参数：**
 - **status**: 按状态筛选任务
@@ -617,26 +830,32 @@ class TaskListResource(Resource):
 
 **返回数据：**
 - 任务列表，包含每个任务的状态、进度、消息等信息
-''')
-    @task_ns.param('status', '按状态筛选 (pending/running/completed/failed/stopped)', type='string', enum=['pending', 'running', 'completed', 'failed', 'stopped'], required=False)
+""",
+    )
+    @task_ns.param(
+        "status",
+        "按状态筛选 (pending/running/completed/failed/stopped)",
+        type="string",
+        enum=["pending", "running", "completed", "failed", "stopped"],
+        required=False,
+    )
     def get(self):
         """获取任务列表"""
         from flask import jsonify
+
         tm = get_task_manager()
-        status_filter = request.args.get('status')
+        status_filter = request.args.get("status")
         tasks = tm.get_all_tasks(status=status_filter)
-        return jsonify({
-            'success': True,
-            'total': len(tasks),
-            'tasks': tasks
-        })
+        return jsonify({"success": True, "total": len(tasks), "tasks": tasks})
 
 
-@task_ns.route('/<task_id>')
+@task_ns.route("/<task_id>")
 class TaskResource(Resource):
     """任务详情"""
-    @task_ns.doc('get_task',
-        description='''获取任务详情。
+
+    @task_ns.doc(
+        "get_task",
+        description="""获取任务详情。
 
 **路径参数：**
 - **task_id**: 任务ID
@@ -650,34 +869,39 @@ class TaskResource(Resource):
 - stats: 统计信息
 - created_at: 创建时间
 - updated_at: 更新时间
-''')
+""",
+    )
     def get(self, task_id):
         """获取任务详情"""
         tm = get_task_manager()
         task = tm.get_task(task_id)
         if not task:
-            return {'error': '任务不存在'}, 404
+            return {"error": "任务不存在"}, 404
         return task
 
-    @task_ns.doc('delete_task',
-        description='''删除任务记录。
+    @task_ns.doc(
+        "delete_task",
+        description="""删除任务记录。
 
 **注意：**
 - 只能删除已完成、失败或停止的任务
 - 运行中的任务无法删除，需要先停止
-''')
+""",
+    )
     def delete(self, task_id):
         """删除任务"""
         tm = get_task_manager()
         tm.delete_task(task_id)
-        return {'message': '任务已删除'}
+        return {"message": "任务已删除"}
 
 
-@task_ns.route('/<task_id>/cancel')
+@task_ns.route("/<task_id>/cancel")
 class TaskCancelResource(Resource):
     """取消任务"""
-    @task_ns.doc('cancel_task',
-        description='''取消任务。
+
+    @task_ns.doc(
+        "cancel_task",
+        description="""取消任务。
 
 **适用场景：**
 - 取消等待中的任务
@@ -685,19 +909,22 @@ class TaskCancelResource(Resource):
 
 **路径参数：**
 - **task_id**: 任务ID
-''')
+""",
+    )
     def post(self, task_id):
         """取消任务"""
         tm = get_task_manager()
         tm.cancel_task(task_id)
-        return {'message': '任务已取消'}
+        return {"message": "任务已取消"}
 
 
-@task_ns.route('/<task_id>/pause')
+@task_ns.route("/<task_id>/pause")
 class TaskPauseResource(Resource):
     """暂停任务"""
-    @task_ns.doc('pause_task',
-        description='''暂停正在运行的任务。
+
+    @task_ns.doc(
+        "pause_task",
+        description="""暂停正在运行的任务。
 
 **适用场景：**
 - 临时暂停任务以释放资源
@@ -709,19 +936,23 @@ class TaskPauseResource(Resource):
 **注意：**
 - 任务会在完成当前处理的股票后暂停
 - 已保存的进度不会丢失
-''')
+""",
+    )
     def post(self, task_id):
         """暂停任务"""
         from web.services.task_service import pause_task
+
         data, status_code = pause_task(task_id)
         return data, status_code
 
 
-@task_ns.route('/<task_id>/resume')
+@task_ns.route("/<task_id>/resume")
 class TaskResumeResource(Resource):
     """恢复任务"""
-    @task_ns.doc('resume_task',
-        description='''恢复已暂停的任务。
+
+    @task_ns.doc(
+        "resume_task",
+        description="""恢复已暂停的任务。
 
 **路径参数：**
 - **task_id**: 任务ID
@@ -729,19 +960,23 @@ class TaskResumeResource(Resource):
 **注意：**
 - 只能恢复暂停状态的任务
 - 任务将从上次暂停的位置继续执行
-''')
+""",
+    )
     def post(self, task_id):
         """恢复任务"""
         from web.services.task_service import resume_task
+
         data, status_code = resume_task(task_id)
         return data, status_code
 
 
-@task_ns.route('/<task_id>/stop')
+@task_ns.route("/<task_id>/stop")
 class TaskStopResource(Resource):
     """停止任务"""
-    @task_ns.doc('stop_task',
-        description='''停止正在运行的任务。
+
+    @task_ns.doc(
+        "stop_task",
+        description="""停止正在运行的任务。
 
 **与 cancel 的区别：**
 - cancel: 取消等待中的任务
@@ -754,19 +989,23 @@ class TaskStopResource(Resource):
 - 任务会保存当前进度
 - 已停止的任务无法恢复
 - 如需继续执行，需要创建新任务
-''')
+""",
+    )
     def post(self, task_id):
         """停止任务"""
         from web.services.task_service import stop_task
+
         data, status_code = stop_task(task_id)
         return data, status_code
 
 
-@task_ns.route('/cleanup')
+@task_ns.route("/cleanup")
 class TaskCleanupResource(Resource):
     """清理任务"""
-    @task_ns.doc('cleanup_tasks',
-        description='''清理陈旧的任务记录。
+
+    @task_ns.doc(
+        "cleanup_tasks",
+        description="""清理陈旧的任务记录。
 
 **清理规则：**
 - 删除超过24小时的任务记录
@@ -775,19 +1014,23 @@ class TaskCleanupResource(Resource):
 **用途：**
 - 定期清理已完成的历史任务
 - 释放存储空间
-''')
+""",
+    )
     def post(self):
         """清理陈旧任务"""
         from web.services.task_service import cleanup_tasks
+
         data, status_code = cleanup_tasks()
         return data, status_code
 
 
-@task_ns.route('/create', methods=['POST'])
+@task_ns.route("/create", methods=["POST"])
 class TaskCreateResource(Resource):
     """创建任务"""
-    @task_ns.doc('create_task',
-        description='''创建新的后台任务。
+
+    @task_ns.doc(
+        "create_task",
+        description="""创建新的后台任务。
 
 支持的任务类型和参数：
 
@@ -858,23 +1101,27 @@ class TaskCreateResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     @task_ns.expect(create_task_model)
     def post(self):
         """创建新任务"""
         from web.services.task_creation_service import create_task
         from web.exceptions import TaskExistsError
+
         try:
             return create_task(request.get_json())
         except TaskExistsError as e:
-            return {'error': str(e)}, 409
+            return {"error": str(e)}, 409
 
 
-@task_ns.route('/active-check')
+@task_ns.route("/active-check")
 class TaskActiveCheckResource(Resource):
     """活跃任务检查"""
-    @task_ns.doc('active_check',
-        description='''检查是否有活跃任务。
+
+    @task_ns.doc(
+        "active_check",
+        description="""检查是否有活跃任务。
 
 **返回数据：**
 - has_active: 是否有活跃任务
@@ -883,10 +1130,12 @@ class TaskActiveCheckResource(Resource):
 **用途：**
 - 在创建新任务前检查是否有冲突
 - 防止同时运行多个资源密集型任务
-''')
+""",
+    )
     def get(self):
         """检查是否有活跃任务"""
         from web.services.task_service import active_check
+
         data, status_code = active_check()
         return data, status_code
 
@@ -895,11 +1144,14 @@ class TaskActiveCheckResource(Resource):
 # Schedule Resources
 # ============================================================================
 
-@schedule_ns.route('/jobs')
+
+@schedule_ns.route("/jobs")
 class ScheduleJobListResource(Resource):
     """定时任务列表"""
-    @schedule_ns.doc('list_jobs',
-        description='''获取定时任务列表。
+
+    @schedule_ns.doc(
+        "list_jobs",
+        description="""获取定时任务列表。
 
 **返回数据：**
 - jobs: 定时任务列表
@@ -912,15 +1164,18 @@ class ScheduleJobListResource(Resource):
 **用途：**
 - 查看所有已配置的定时任务
 - 检查任务状态和下次执行时间
-''')
+""",
+    )
     def get(self):
         """获取定时任务列表"""
         from web.services.schedule_service import get_jobs
+
         data, status_code = get_jobs()
         return data, status_code
 
-    @schedule_ns.doc('create_job',
-        description='''创建定时任务。
+    @schedule_ns.doc(
+        "create_job",
+        description="""创建定时任务。
 
 **请求体参数：**
 - name: 任务名称
@@ -940,19 +1195,23 @@ class ScheduleJobListResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     def post(self):
         """创建定时任务"""
         from web.services.schedule_service import create_job
+
         data, status_code = create_job()
         return data, status_code
 
 
-@schedule_ns.route('/jobs/<job_id>')
+@schedule_ns.route("/jobs/<job_id>")
 class ScheduleJobResource(Resource):
     """定时任务操作"""
-    @schedule_ns.doc('update_job',
-        description='''更新定时任务。
+
+    @schedule_ns.doc(
+        "update_job",
+        description="""更新定时任务。
 
 **路径参数：**
 - **job_id**: 任务ID
@@ -979,15 +1238,18 @@ class ScheduleJobResource(Resource):
   "mode": "incremental"
 }
 ```
-''')
+""",
+    )
     def put(self, job_id):
         """更新定时任务"""
         from web.services.schedule_service import update_job
+
         data, status_code = update_job(job_id)
         return data, status_code
 
-    @schedule_ns.doc('delete_job',
-        description='''删除定时任务。
+    @schedule_ns.doc(
+        "delete_job",
+        description="""删除定时任务。
 
 **路径参数：**
 - **job_id**: 任务ID
@@ -995,19 +1257,23 @@ class ScheduleJobResource(Resource):
 **注意：**
 - 删除后任务将不再执行
 - 需要重新创建才能恢复
-''')
+""",
+    )
     def delete(self, job_id):
         """删除定时任务"""
         from web.services.schedule_service import delete_job
+
         data, status_code = delete_job(job_id)
         return data, status_code
 
 
-@schedule_ns.route('/jobs/<job_id>/pause')
+@schedule_ns.route("/jobs/<job_id>/pause")
 class ScheduleJobPauseResource(Resource):
     """暂停定时任务"""
-    @schedule_ns.doc('pause_job',
-        description='''暂停定时任务。
+
+    @schedule_ns.doc(
+        "pause_job",
+        description="""暂停定时任务。
 
 **路径参数：**
 - **job_id**: 任务ID
@@ -1015,19 +1281,23 @@ class ScheduleJobPauseResource(Resource):
 **效果：**
 - 任务暂停但不会删除
 - 可以通过 resume 恢复
-''')
+""",
+    )
     def post(self, job_id):
         """暂停定时任务"""
         from web.services.schedule_service import pause_job_service
+
         data, status_code = pause_job_service(job_id)
         return data, status_code
 
 
-@schedule_ns.route('/jobs/<job_id>/resume')
+@schedule_ns.route("/jobs/<job_id>/resume")
 class ScheduleJobResumeResource(Resource):
     """恢复定时任务"""
-    @schedule_ns.doc('resume_job',
-        description='''恢复已暂停的定时任务。
+
+    @schedule_ns.doc(
+        "resume_job",
+        description="""恢复已暂停的定时任务。
 
 **路径参数：**
 - **job_id**: 任务ID
@@ -1035,10 +1305,12 @@ class ScheduleJobResumeResource(Resource):
 **效果：**
 - 任务恢复执行
 - 按照原定时间表继续运行
-''')
+""",
+    )
     def post(self, job_id):
         """恢复定时任务"""
         from web.services.schedule_service import resume_job_service
+
         data, status_code = resume_job_service(job_id)
         return data, status_code
 
@@ -1047,11 +1319,14 @@ class ScheduleJobResumeResource(Resource):
 # Financial Resources
 # ============================================================================
 
-@financial_ns.route('/summary/<symbol>')
+
+@financial_ns.route("/summary/<symbol>")
 class FinancialSummaryResource(Resource):
     """财务摘要"""
-    @financial_ns.doc('get_financial_summary',
-        description='''获取股票财务摘要数据。
+
+    @financial_ns.doc(
+        "get_financial_summary",
+        description="""获取股票财务摘要数据。
 
 **路径参数：**
 - **symbol**: 股票代码 (如: 600382, 000001.SZ)
@@ -1064,19 +1339,23 @@ class FinancialSummaryResource(Resource):
 **注意：**
 - 返回最新一期的财务数据
 - 包含财务指标和估值指标
-''')
+""",
+    )
     def get(self, symbol):
         """获取财务摘要数据"""
         from web.services.financial_service import financial_summary
+
         data, status_code = financial_summary(symbol)
         return data, status_code
 
 
-@financial_ns.route('/report/<symbol>')
+@financial_ns.route("/report/<symbol>")
 class FinancialReportResource(Resource):
     """财务报表"""
-    @financial_ns.doc('get_financial_report',
-        description='''获取完整财务报表（前端专用）。
+
+    @financial_ns.doc(
+        "get_financial_report",
+        description="""获取完整财务报表（前端专用）。
 
 **路径参数：**
 - **symbol**: 股票代码 (如: 600382, 000001.SZ)
@@ -1094,19 +1373,23 @@ class FinancialReportResource(Resource):
 **注意：**
 - 返回最近8个季度的数据
 - NaN值已转换为null
-''')
+""",
+    )
     def get(self, symbol):
         """获取完整财务报表"""
         from web.services.financial_service import financial_report
+
         data, status_code = financial_report(symbol)
         return data, status_code
 
 
-@financial_ns.route('/full/<symbol>')
+@financial_ns.route("/full/<symbol>")
 class FinancialFullResource(Resource):
     """完整财务数据和估值"""
-    @financial_ns.doc('get_financial_full',
-        description='''获取完整财务报表（最近8个季度）和估值指标（最近30天）。
+
+    @financial_ns.doc(
+        "get_financial_full",
+        description="""获取完整财务报表（最近8个季度）和估值指标（最近30天）。
 
 **路径参数：**
 - **symbol**: 股票代码 (如: 600382, 000001.SZ)
@@ -1125,19 +1408,23 @@ class FinancialFullResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     def get(self, symbol):
         """获取完整财务数据和估值"""
         from web.services.financial_service import financial_full
+
         data, status_code = financial_full(symbol)
         return data, status_code
 
 
-@financial_ns.route('/check/<symbol>')
+@financial_ns.route("/check/<symbol>")
 class FinancialCheckResource(Resource):
     """检查财务数据"""
-    @financial_ns.doc('check_financial_data',
-        description='''检查股票是否有财务数据。
+
+    @financial_ns.doc(
+        "check_financial_data",
+        description="""检查股票是否有财务数据。
 
 **路径参数：**
 - **symbol**: 股票代码 (如: 600382, 000001.SZ)
@@ -1155,18 +1442,22 @@ class FinancialCheckResource(Resource):
 **用途：**
 - 在查询财务数据前检查是否有数据
 - 确认最新财报日期
-''')
+""",
+    )
     def get(self, symbol):
         """检查是否有财务数据"""
         from web.services.financial_service import financial_check
+
         return financial_check(symbol)
 
 
-@financial_ns.route('/indicators/<symbol>')
+@financial_ns.route("/indicators/<symbol>")
 class FinancialIndicatorsResource(Resource):
     """财务指标"""
-    @financial_ns.doc('get_financial_indicators',
-        description='''获取股票财务指标数据（最近8个季度）。
+
+    @financial_ns.doc(
+        "get_financial_indicators",
+        description="""获取股票财务指标数据（最近8个季度）。
 
 **路径参数：**
 - **symbol**: 股票代码 (如: 600382, 000001.SZ)
@@ -1193,19 +1484,23 @@ class FinancialIndicatorsResource(Resource):
 - 成长能力: 营收增长率, 净利润增长率
 - 偿债能力: 流动比率, 速动比率
 - 营运能力: 总资产周转率等
-''')
+""",
+    )
     def get(self, symbol):
         """获取财务指标"""
         from web.services.financial_service import financial_indicators
+
         data, status_code = financial_indicators(symbol)
         return data, status_code
 
 
-@financial_ns.route('/valuation/<symbol>')
+@financial_ns.route("/valuation/<symbol>")
 class FinancialValuationResource(Resource):
     """估值指标"""
-    @financial_ns.doc('get_financial_valuation',
-        description='''获取股票最新估值指标（PE、PB、市值等）。
+
+    @financial_ns.doc(
+        "get_financial_valuation",
+        description="""获取股票最新估值指标（PE、PB、市值等）。
 
 **路径参数：**
 - **symbol**: 股票代码 (如: 600382, 000001.SZ)
@@ -1237,11 +1532,77 @@ class FinancialValuationResource(Resource):
 - ps_ttm: 市销率（滚动12个月）
 - total_mv: 总市值
 - circ_mv: 流通市值
-''')
+""",
+    )
     def get(self, symbol):
         """获取估值指标"""
         from web.services.financial_service import financial_valuation
+
         data, status_code = financial_valuation(symbol)
+        return data, status_code
+
+
+@financial_ns.route("/available-periods/<symbol>")
+class AvailablePeriodsResource(Resource):
+    """获取可用财务报告期"""
+
+    @financial_ns.doc(
+        "get_available_periods",
+        description="""获取股票所有可用的财务报告期（纯数据质量检查，不涉及估值）
+
+**说明：**
+- 这是纯数据质量检查，与估值无关
+- 检查财务数据的完整性、一致性
+- 返回数据质量评分和可用性
+
+**路径参数：**
+- **symbol**: 股票代码
+
+**查询参数：**
+- **required_fields**: 必需字段（可选）
+  - 格式: balancesheet.total_assets,income.revenue,cashflow.free_cashflow
+  - 不传则使用默认的必需字段
+- **date**: 截止日期（可选）
+- **limit**: 返回数量（默认20）
+
+**返回示例：**
+```json
+{
+  "success": true,
+  "symbol": "601958",
+  "available_periods": [
+    {
+      "end_date": "20241231",
+      "report_type": "annual",
+      "is_available": true,
+      "data_quality": "A",
+      "completeness": 1.0,
+      "missing_fields": []
+    },
+    {
+      "end_date": "20240930",
+      "report_type": "quarterly",
+      "is_available": false,
+      "data_quality": "D",
+      "completeness": 0.6,
+      "missing_fields": ["cashflow.free_cashflow"]
+    }
+  ],
+  "recommended_period": "20241231",
+  "total_periods": 20,
+  "available_count": 5
+}
+```
+""",
+    )
+    @financial_ns.param("required_fields", "必需字段（逗号分隔）", type="string")
+    @financial_ns.param("date", "截止日期", type="string")
+    @financial_ns.param("limit", "返回数量", type="integer", default=20)
+    def get(self, symbol):
+        """获取可用的财务报告期列表"""
+        from web.services.financial_service import get_available_periods
+
+        data, status_code = get_available_periods(symbol)
         return data, status_code
 
 
@@ -1249,11 +1610,14 @@ class FinancialValuationResource(Resource):
 # SW Industry Resources
 # ============================================================================
 
-@sw_industry_ns.route('/list')
+
+@sw_industry_ns.route("/list")
 class SWIndustryListResource(Resource):
     """申万行业列表"""
-    @sw_industry_ns.doc('get_sw_industries',
-        description='''获取申万行业分类列表，支持层级结构。
+
+    @sw_industry_ns.doc(
+        "get_sw_industries",
+        description="""获取申万行业分类列表，支持层级结构。
 
 **查询参数：**
 - **src**: 行业分类来源
@@ -1282,22 +1646,40 @@ class SWIndustryListResource(Resource):
   "total": 511
 }
 ```
-''')
-    @sw_industry_ns.param('src', '行业分类来源 (SW2014/SW2021)', type='string', enum=['SW2014', 'SW2021'], default='SW2021')
-    @sw_industry_ns.param('level', '行业级别 (L1/L2/L3)', type='string', enum=['L1', 'L2', 'L3'], required=False)
-    @sw_industry_ns.param('parent_code', '父级行业代码 (用于筛选子行业)', type='string', required=False)
+""",
+    )
+    @sw_industry_ns.param(
+        "src",
+        "行业分类来源 (SW2014/SW2021)",
+        type="string",
+        enum=["SW2014", "SW2021"],
+        default="SW2021",
+    )
+    @sw_industry_ns.param(
+        "level",
+        "行业级别 (L1/L2/L3)",
+        type="string",
+        enum=["L1", "L2", "L3"],
+        required=False,
+    )
+    @sw_industry_ns.param(
+        "parent_code", "父级行业代码 (用于筛选子行业)", type="string", required=False
+    )
     def get(self):
         """获取申万行业列表（层级结构）"""
         from web.services.sw_industry_service import get_sw_industries
+
         data, status_code = get_sw_industries()
         return data, status_code
 
 
-@sw_industry_ns.route('/members/<index_code>')
+@sw_industry_ns.route("/members/<index_code>")
 class SWIndustryMembersResource(Resource):
     """申万行业成分股"""
-    @sw_industry_ns.doc('get_sw_members',
-        description='''获取指定申万行业的成分股列表。
+
+    @sw_industry_ns.doc(
+        "get_sw_members",
+        description="""获取指定申万行业的成分股列表。
 
 **路径参数：**
 - **index_code**: 行业代码
@@ -1322,20 +1704,26 @@ class SWIndustryMembersResource(Resource):
 **注意：**
 - 返回该行业的所有上市公司
 - 成分股会定期调整
-''')
-    @sw_industry_ns.param('index_code', '行业代码 (如: 801010.SI)', type='string', required=True)
+""",
+    )
+    @sw_industry_ns.param(
+        "index_code", "行业代码 (如: 801010.SI)", type="string", required=True
+    )
     def get(self, index_code):
         """获取指定行业的成分股"""
         from web.services.sw_industry_service import get_sw_industry_members
+
         data, status_code = get_sw_industry_members(index_code)
         return data, status_code
 
 
-@sw_industry_ns.route('/percentile', methods=['GET'])
+@sw_industry_ns.route("/percentile", methods=["GET"])
 class IndustryPercentileResource(Resource):
     """行业分位值查询"""
-    @sw_industry_ns.doc('get_industry_percentile',
-        description='''获取行业指标分位值（使用行业代码）
+
+    @sw_industry_ns.doc(
+        "get_industry_percentile",
+        description="""获取行业指标分位值（使用行业代码）
 
 **查询参数：**
 - **industry_code** (必需): 申万行业代码，如"801010"或"801010.SI"
@@ -1357,21 +1745,29 @@ class IndustryPercentileResource(Resource):
   }
 }
 ```
-    ''')
-    @sw_industry_ns.param('industry_code', '申万行业代码 (如: 801010)', type='string', required=True)
-    @sw_industry_ns.param('metric', '指标名称 (如: pe_ttm, pb, total_mv)', type='string', required=True)
-    @sw_industry_ns.param('percentile', '百分位 (0.1-0.9)', type='float', default=0.75)
+    """,
+    )
+    @sw_industry_ns.param(
+        "industry_code", "申万行业代码 (如: 801010)", type="string", required=True
+    )
+    @sw_industry_ns.param(
+        "metric", "指标名称 (如: pe_ttm, pb, total_mv)", type="string", required=True
+    )
+    @sw_industry_ns.param("percentile", "百分位 (0.1-0.9)", type="float", default=0.75)
     def get(self):
         """查询行业分位值"""
         from web.services.industry_statistics_service import get_industry_percentile
+
         return get_industry_percentile()
 
 
-@sw_industry_ns.route('/statistics-metrics', methods=['GET'])
+@sw_industry_ns.route("/statistics-metrics", methods=["GET"])
 class IndustryStatisticsMetricsResource(Resource):
     """获取可用指标列表"""
-    @sw_industry_ns.doc('get_available_metrics',
-        description='''获取可查询的指标列表
+
+    @sw_industry_ns.doc(
+        "get_available_metrics",
+        description="""获取可查询的指标列表
 
 **返回数据：**
 ```json
@@ -1387,18 +1783,22 @@ class IndustryStatisticsMetricsResource(Resource):
   }
 }
 ```
-    ''')
+    """,
+    )
     def get(self):
         """获取可用指标列表"""
         from web.services.industry_statistics_service import get_available_metrics
+
         return get_available_metrics()
 
 
-@sw_industry_ns.route('/statistics-industries', methods=['GET'])
+@sw_industry_ns.route("/statistics-industries", methods=["GET"])
 class IndustryStatisticsIndustriesResource(Resource):
     """获取有统计数据的行业列表"""
-    @sw_industry_ns.doc('get_industries_with_stats',
-        description='''获取有统计数据的行业列表
+
+    @sw_industry_ns.doc(
+        "get_industries_with_stats",
+        description="""获取有统计数据的行业列表
 
 **查询参数：**
 - **level**: 行业级别 (1/2/3)，默认1
@@ -1421,12 +1821,14 @@ class IndustryStatisticsIndustriesResource(Resource):
   }
 }
 ```
-    ''')
-    @sw_industry_ns.param('level', '行业级别 (1/2/3)', type='integer', default=1)
-    @sw_industry_ns.param('metric', '指标名称 (可选)', type='string', required=False)
+    """,
+    )
+    @sw_industry_ns.param("level", "行业级别 (1/2/3)", type="integer", default=1)
+    @sw_industry_ns.param("metric", "指标名称 (可选)", type="string", required=False)
     def get(self):
         """获取有统计数据的行业列表"""
         from web.services.industry_statistics_service import get_industries_with_stats
+
         return get_industries_with_stats()
 
 
@@ -1434,47 +1836,60 @@ class IndustryStatisticsIndustriesResource(Resource):
 # Boards Resources
 # ============================================================================
 
-@boards_ns.route('')
+
+@boards_ns.route("")
 class BoardsListResource(Resource):
     """板块列表 (已废弃)"""
-    @boards_ns.doc('list_boards',
-        description='''此接口已废弃。板块功能已移除。
+
+    @boards_ns.doc(
+        "list_boards",
+        description="""此接口已废弃。板块功能已移除。
 
 返回空列表。
-''')
+""",
+    )
     def get(self):
         """获取所有板块列表"""
         from web.services.boards_service import get_boards_list
+
         data, status_code = get_boards_list()
         return data, status_code
 
 
-@boards_ns.route('/<board_code>/constituents')
+@boards_ns.route("/<board_code>/constituents")
 class BoardConstituentsResource(Resource):
     """板块成分股 (已废弃)"""
-    @boards_ns.doc('get_board_constituents',
-        description='''此接口已废弃。板块功能已移除。
+
+    @boards_ns.doc(
+        "get_board_constituents",
+        description="""此接口已废弃。板块功能已移除。
 
 返回空列表。
-''')
+""",
+    )
     def get(self, board_code):
         """获取指定板块的成分股"""
         from web.services.boards_service import get_board_constituents
+
         data, status_code = get_board_constituents(board_code)
         return data, status_code
 
 
-@boards_ns.route('/stocks/<stock_code>/boards')
+@boards_ns.route("/stocks/<stock_code>/boards")
 class StockBoardsResource(Resource):
     """股票所属板块 (已废弃)"""
-    @boards_ns.doc('get_stock_boards',
-        description='''此接口已废弃。板块功能已移除。
+
+    @boards_ns.doc(
+        "get_stock_boards",
+        description="""此接口已废弃。板块功能已移除。
 
 返回空列表。
-''')
+""",
+    )
     def get(self, stock_code):
         """获取股票所属的所有板块"""
         from web.services.boards_service import get_stock_boards
+
         data, status_code = get_stock_boards(stock_code)
         return data, status_code
 
@@ -1484,49 +1899,97 @@ class StockBoardsResource(Resource):
 # ============================================================================
 
 # Favorites models
-favorite_item_model = favorites_ns.model('FavoriteItem', {
-    'id': fields.Integer(description='收藏ID', example=1),
-    'stock_code': fields.String(description='股票代码', example='600382'),
-    'stock_name': fields.String(description='股票名称', example='广东明珠'),
-    'added_at': fields.String(description='添加时间', example='2024-01-01T10:00:00'),
-    'notes': fields.String(description='备注', example=''),
-    'safety_rating': fields.String(description='安全性评级 (A/B/C/D/E)', example='A'),
-    'fundamental_rating': fields.String(description='基本面评级 (A/B/C/D/E)', example='B+'),
-    'entry_price': fields.Float(description='进场价格', example=7.5),
-    'urgency': fields.Integer(description='紧急程度 (1-5)', example=3)
-})
+favorite_item_model = favorites_ns.model(
+    "FavoriteItem",
+    {
+        "id": fields.Integer(description="收藏ID", example=1),
+        "stock_code": fields.String(description="股票代码", example="600382"),
+        "stock_name": fields.String(description="股票名称", example="广东明珠"),
+        "added_at": fields.String(
+            description="添加时间", example="2024-01-01T10:00:00"
+        ),
+        "notes": fields.String(description="备注", example=""),
+        "safety_rating": fields.String(
+            description="安全性评级 (A/B/C/D/E)", example="A"
+        ),
+        "fundamental_rating": fields.String(
+            description="基本面评级 (A/B/C/D/E)", example="B+"
+        ),
+        "entry_price": fields.Float(description="进场价格", example=7.5),
+        "urgency": fields.Integer(description="紧急程度 (1-5)", example=3),
+    },
+)
 
-add_favorite_model = favorites_ns.model('AddFavoriteRequest', {
-    'stock_code': fields.String(description='股票代码', required=True, example='600382'),
-    'notes': fields.String(description='备注', example=''),
-    'safety_rating': fields.String(description='安全性评级 (A/B/C/D/E)', example='A'),
-    'fundamental_rating': fields.String(description='基本面评级 (A/B/C/D/E)', example='B+'),
-    'entry_price': fields.Float(description='进场价格', example=7.5),
-    'urgency': fields.Integer(description='紧急程度 (1-5)', example=3)
-})
+add_favorite_model = favorites_ns.model(
+    "AddFavoriteRequest",
+    {
+        "stock_code": fields.String(
+            description="股票代码", required=True, example="600382"
+        ),
+        "notes": fields.String(description="备注", example=""),
+        "safety_rating": fields.String(
+            description="安全性评级 (A/B/C/D/E)", example="A"
+        ),
+        "fundamental_rating": fields.String(
+            description="基本面评级 (A/B/C/D/E)", example="B+"
+        ),
+        "entry_price": fields.Float(description="进场价格", example=7.5),
+        "urgency": fields.Integer(description="紧急程度 (1-5)", example=3),
+    },
+)
 
-batch_add_model = favorites_ns.model('BatchAddRequest', {
-    'stock_codes': fields.List(fields.String, description='股票代码列表（兼容旧格式）', example=['600382', '000001']),
-    'stocks_data': fields.List(fields.Raw, description='股票数据列表（新格式，包含额外字段）', example=[
-        {'code': '600382', 'safety_rating': 'A', 'fundamental_rating': 'B+', 'entry_price': 7.5, 'urgency': 3}
-    ]),
-    'notes': fields.String(description='备注', example='')
-})
+batch_add_model = favorites_ns.model(
+    "BatchAddRequest",
+    {
+        "stock_codes": fields.List(
+            fields.String,
+            description="股票代码列表（兼容旧格式）",
+            example=["600382", "000001"],
+        ),
+        "stocks_data": fields.List(
+            fields.Raw,
+            description="股票数据列表（新格式，包含额外字段）",
+            example=[
+                {
+                    "code": "600382",
+                    "safety_rating": "A",
+                    "fundamental_rating": "B+",
+                    "entry_price": 7.5,
+                    "urgency": 3,
+                }
+            ],
+        ),
+        "notes": fields.String(description="备注", example=""),
+    },
+)
 
-update_favorite_model = favorites_ns.model('UpdateFavoriteRequest', {
-    'safety_rating': fields.String(description='安全性评级 (A/B/C/D/E)', example='A'),
-    'fundamental_rating': fields.String(description='基本面评级 (A/B/C/D/E)', example='B+'),
-    'entry_price': fields.Float(description='进场价格', example=7.5),
-    'urgency': fields.Integer(description='紧急程度 (1-5)', example=3),
-    'notes': fields.String(description='备注', example='')
-})
+update_favorite_model = favorites_ns.model(
+    "UpdateFavoriteRequest",
+    {
+        "safety_rating": fields.String(
+            description="安全性评级 (A/B/C/D/E)", example="A"
+        ),
+        "fundamental_rating": fields.String(
+            description="基本面评级 (A/B/C/D/E)", example="B+"
+        ),
+        "entry_price": fields.Float(description="进场价格", example=7.5),
+        "urgency": fields.Integer(description="紧急程度 (1-5)", example=3),
+        "notes": fields.String(description="备注", example=""),
+        "fair_value": fields.Float(description="合理价格", example=100.5),
+        "upside_downside": fields.Float(description="上涨/下跌空间(%)", example=15.5),
+        "valuation_date": fields.String(description="估值日期", example="2024-01-01"),
+        "valuation_confidence": fields.Float(description="估值置信度", example=0.75),
+    },
+)
 
 
-@favorites_ns.route('')
+@favorites_ns.route("")
 class FavoriteListResource(Resource):
     """收藏列表"""
-    @favorites_ns.doc('list_favorites',
-        description='''获取收藏列表。
+
+    @favorites_ns.doc(
+        "list_favorites",
+        description="""获取收藏列表。
 
 **查询参数：**
 - **user_id**: 用户ID（可选，默认 'default'）
@@ -1538,15 +2001,20 @@ class FavoriteListResource(Resource):
   "total": 10
 }
 ```
-''')
-    @favorites_ns.param('user_id', '用户ID（默认: default）', type='string', required=False)
+""",
+    )
+    @favorites_ns.param(
+        "user_id", "用户ID（默认: default）", type="string", required=False
+    )
     def get(self):
         """获取收藏列表"""
         from web.services.favorite_service import list_favorites
+
         return list_favorites()
 
-    @favorites_ns.doc('add_favorite',
-        description='''添加股票到收藏。
+    @favorites_ns.doc(
+        "add_favorite",
+        description="""添加股票到收藏。
 
 **请求体参数：**
 ```json
@@ -1570,19 +2038,23 @@ class FavoriteListResource(Resource):
 **错误码：**
 - 400: 无效的股票代码
 - 409: 已在收藏列表中
-''')
+""",
+    )
     @favorites_ns.expect(add_favorite_model)
     def post(self):
         """添加收藏"""
         from web.services.favorite_service import add_favorite
+
         return add_favorite()
 
 
-@favorites_ns.route('/<stock_code>')
+@favorites_ns.route("/<stock_code>")
 class FavoriteResource(Resource):
     """单个收藏操作"""
-    @favorites_ns.doc('update_favorite',
-        description='''更新收藏的附加字段。
+
+    @favorites_ns.doc(
+        "update_favorite",
+        description="""更新收藏的附加字段。
 
 **路径参数：**
 - **stock_code**: 股票代码
@@ -1611,16 +2083,19 @@ class FavoriteResource(Resource):
 
 **错误码：**
 - 404: 收藏不存在
-''')
-    @favorites_ns.param('stock_code', '股票代码', type='string', required=True)
+""",
+    )
+    @favorites_ns.param("stock_code", "股票代码", type="string", required=True)
     @favorites_ns.expect(update_favorite_model)
     def put(self, stock_code):
         """更新收藏字段"""
         from web.services.favorite_service import update_favorite
+
         return update_favorite(stock_code)
 
-    @favorites_ns.doc('remove_favorite',
-        description='''删除收藏。
+    @favorites_ns.doc(
+        "remove_favorite",
+        description="""删除收藏。
 
 **路径参数：**
 - **stock_code**: 股票代码
@@ -1634,19 +2109,23 @@ class FavoriteResource(Resource):
 
 **错误码：**
 - 404: 收藏不存在
-''')
-    @favorites_ns.param('stock_code', '股票代码', type='string', required=True)
+""",
+    )
+    @favorites_ns.param("stock_code", "股票代码", type="string", required=True)
     def delete(self, stock_code):
         """删除收藏"""
         from web.services.favorite_service import remove_favorite
+
         return remove_favorite(stock_code)
 
 
-@favorites_ns.route('/check/<stock_code>')
+@favorites_ns.route("/check/<stock_code>")
 class FavoriteCheckResource(Resource):
     """检查收藏状态"""
-    @favorites_ns.doc('check_favorite',
-        description='''检查股票是否已收藏。
+
+    @favorites_ns.doc(
+        "check_favorite",
+        description="""检查股票是否已收藏。
 
 **路径参数：**
 - **stock_code**: 股票代码
@@ -1664,19 +2143,23 @@ class FavoriteCheckResource(Resource):
   }
 }
 ```
-''')
-    @favorites_ns.param('stock_code', '股票代码', type='string', required=True)
+""",
+    )
+    @favorites_ns.param("stock_code", "股票代码", type="string", required=True)
     def get(self, stock_code):
         """检查是否已收藏"""
         from web.services.favorite_service import check_favorite
+
         return check_favorite(stock_code)
 
 
-@favorites_ns.route('/batch', methods=['POST'])
+@favorites_ns.route("/batch", methods=["POST"])
 class FavoriteBatchResource(Resource):
     """批量添加收藏"""
-    @favorites_ns.doc('batch_add_favorites',
-        description='''批量添加股票到收藏。
+
+    @favorites_ns.doc(
+        "batch_add_favorites",
+        description="""批量添加股票到收藏。
 
 **请求体参数：**
 ```json
@@ -1706,19 +2189,23 @@ class FavoriteBatchResource(Resource):
   ]
 }
 ```
-''')
+""",
+    )
     @favorites_ns.expect(batch_add_model)
     def post(self):
         """批量添加收藏"""
         from web.services.favorite_service import batch_add_favorites
+
         return batch_add_favorites()
 
 
-@favorites_ns.route('/clear', methods=['DELETE'])
+@favorites_ns.route("/clear", methods=["DELETE"])
 class FavoriteClearResource(Resource):
     """清空收藏"""
-    @favorites_ns.doc('clear_favorites',
-        description='''清空所有收藏。
+
+    @favorites_ns.doc(
+        "clear_favorites",
+        description="""清空所有收藏。
 
 **查询参数：**
 - **user_id**: 用户ID（可选，默认 'default'）
@@ -1729,11 +2216,15 @@ class FavoriteClearResource(Resource):
   "message": "已清空 10 条收藏"
 }
 ```
-''')
-    @favorites_ns.param('user_id', '用户ID（默认: default）', type='string', required=False)
+""",
+    )
+    @favorites_ns.param(
+        "user_id", "用户ID（默认: default）", type="string", required=False
+    )
     def delete(self):
         """清空收藏"""
         from web.services.favorite_service import clear_favorites
+
         return clear_favorites()
 
 
@@ -1743,38 +2234,75 @@ class FavoriteClearResource(Resource):
 
 # Backtest models
 # 支持的策略类型枚举
-SUPPORTED_STRATEGIES = ['sma_cross', 'price_breakout', 'price_breakout_v2', 'market_regime_switch']
+SUPPORTED_STRATEGIES = [
+    "sma_cross",
+    "price_breakout",
+    "price_breakout_v2",
+    "market_regime_switch",
+]
 
-backtest_request_model = backtest_ns.model('BacktestRequest', {
-    # 回测共有参数
-    'stock': fields.String(required=True, description='股票代码', example='600382'),
-    'start_date': fields.String(required=True, description='开始日期 (YYYY-MM-DD)', example='2024-01-01'),
-    'end_date': fields.String(required=False, description='结束日期 (YYYY-MM-DD)', example='2024-12-31'),
-    'interval': fields.String(required=False, description='时间周期 (1d, 5m, 15m, 30m, 60m)', example='1d', default='1d'),
-    'cash': fields.Float(required=False, description='初始资金', example=1000000, default=1000000),
-    'commission': fields.Float(required=False, description='手续费率', example=0.0002, default=0.0002),
-    'benchmark': fields.String(required=False, description='基准指数', example='000300.SH'),
-    # 策略参数
-    'strategy': fields.String(required=True, description='策略类型',
-                          example='sma_cross',
-                          enum=SUPPORTED_STRATEGIES),
-    'strategy_params': fields.Raw(description='策略参数（根据策略类型不同）。'
-                                   'sma_cross: {maperiod: MA周期}。'
-                                   'price_breakout: {buy_threshold: 买入阈值%, sell_threshold: 止盈阈值%, stop_loss_threshold: 止损阈值%}。'
-                                   'price_breakout_v2: {base_buy_threshold: 基础买入阈值%, base_sell_threshold: 基础止盈阈值%, base_stop_loss_threshold: 基础止损阈值%, enable_adaptive_thresholds: 启用自适应阈值}',
-                               example={'maperiod': 20})
-})
+backtest_request_model = backtest_ns.model(
+    "BacktestRequest",
+    {
+        # 回测共有参数
+        "stock": fields.String(required=True, description="股票代码", example="600382"),
+        "start_date": fields.String(
+            required=True, description="开始日期 (YYYY-MM-DD)", example="2024-01-01"
+        ),
+        "end_date": fields.String(
+            required=False, description="结束日期 (YYYY-MM-DD)", example="2024-12-31"
+        ),
+        "interval": fields.String(
+            required=False,
+            description="时间周期 (1d, 5m, 15m, 30m, 60m)",
+            example="1d",
+            default="1d",
+        ),
+        "cash": fields.Float(
+            required=False, description="初始资金", example=1000000, default=1000000
+        ),
+        "commission": fields.Float(
+            required=False, description="手续费率", example=0.0002, default=0.0002
+        ),
+        "benchmark": fields.String(
+            required=False, description="基准指数", example="000300.SH"
+        ),
+        # 策略参数
+        "strategy": fields.String(
+            required=True,
+            description="策略类型",
+            example="sma_cross",
+            enum=SUPPORTED_STRATEGIES,
+        ),
+        "strategy_params": fields.Raw(
+            description="策略参数（根据策略类型不同）。"
+            "sma_cross: {maperiod: MA周期}。"
+            "price_breakout: {buy_threshold: 买入阈值%, sell_threshold: 止盈阈值%, stop_loss_threshold: 止损阈值%}。"
+            "price_breakout_v2: {base_buy_threshold: 基础买入阈值%, base_sell_threshold: 基础止盈阈值%, base_stop_loss_threshold: 基础止损阈值%, enable_adaptive_thresholds: 启用自适应阈值}",
+            example={"maperiod": 20},
+        ),
+    },
+)
 
-backtest_batch_model = backtest_ns.model('BacktestBatchRequest', {
-    'backtests': fields.List(fields.Nested(backtest_request_model), description='回测任务列表', required=True)
-})
+backtest_batch_model = backtest_ns.model(
+    "BacktestBatchRequest",
+    {
+        "backtests": fields.List(
+            fields.Nested(backtest_request_model),
+            description="回测任务列表",
+            required=True,
+        )
+    },
+)
 
 
-@backtest_ns.route('/strategies')
+@backtest_ns.route("/strategies")
 class BacktestStrategiesResource(Resource):
     """获取支持的策略列表"""
-    @backtest_ns.doc('get_strategies',
-        description='''获取所有支持的回测策略列表。
+
+    @backtest_ns.doc(
+        "get_strategies",
+        description="""获取所有支持的回测策略列表。
 
 **当前支持的策略：**
 1. **sma_cross** - 简单移动平均线交叉策略
@@ -1848,18 +2376,22 @@ class BacktestStrategiesResource(Resource):
 **用途：**
 - 动态获取系统支持的策略列表
 - 获取策略的参数 schema，用于前端表单验证
-''')
+""",
+    )
     def get(self):
         """获取支持的策略列表"""
         from web.services.backtest_service import get_supported_strategies_api
+
         return get_supported_strategies_api()
 
 
-@backtest_ns.route('/run', methods=['POST'])
+@backtest_ns.route("/run", methods=["POST"])
 class BacktestRunResource(Resource):
     """创建回测任务"""
-    @backtest_ns.doc('run_backtest',
-        description='''创建回测任务（支持多策略）。
+
+    @backtest_ns.doc(
+        "run_backtest",
+        description="""创建回测任务（支持多策略）。
 
 **支持的策略类型：**
 1. **sma_cross** - 简单移动平均线交叉策略
@@ -1929,24 +2461,24 @@ class BacktestRunResource(Resource):
   "message": "SMA交叉策略回测任务已创建，股票: 600382"
 }
 ```
-''')
+""",
+    )
     @backtest_ns.expect(backtest_request_model)
     def post(self):
         """创建回测任务"""
         from web.services.task_creation_service import create_task
 
-        request_data = {
-            'task_type': 'backtest',
-            'params': request.get_json()
-        }
+        request_data = {"task_type": "backtest", "params": request.get_json()}
         return create_task(request_data)
 
 
-@backtest_ns.route('/status/<task_id>')
+@backtest_ns.route("/status/<task_id>")
 class BacktestStatusResource(Resource):
     """查询回测任务状态"""
-    @backtest_ns.doc('get_backtest_status',
-        description='''查询回测任务状态。
+
+    @backtest_ns.doc(
+        "get_backtest_status",
+        description="""查询回测任务状态。
 
 **路径参数：**
 - **task_id**: 任务ID
@@ -1961,33 +2493,37 @@ class BacktestStatusResource(Resource):
   "message": "正在执行SMA交叉策略回测..."
 }
 ```
-''')
+""",
+    )
     def get(self, task_id):
         """查询回测任务状态"""
         from web.services.task_service import get_task_manager
+
         tm = get_task_manager()
         task = tm.get_task(task_id)
         if not task:
-            return {'error': '任务不存在'}, 404
+            return {"error": "任务不存在"}, 404
 
         # 只返回轻量级状态信息，不包含完整的 result
         return {
-            'task_id': task.get('task_id'),
-            'task_type': task.get('task_type'),
-            'status': task.get('status'),
-            'progress': task.get('progress', 0),
-            'message': task.get('message'),
-            'error': task.get('error'),
-            'created_at': task.get('created_at'),
-            'completed_at': task.get('completed_at')
+            "task_id": task.get("task_id"),
+            "task_type": task.get("task_type"),
+            "status": task.get("status"),
+            "progress": task.get("progress", 0),
+            "message": task.get("message"),
+            "error": task.get("error"),
+            "created_at": task.get("created_at"),
+            "completed_at": task.get("completed_at"),
         }
 
 
-@backtest_ns.route('/result/<task_id>')
+@backtest_ns.route("/result/<task_id>")
 class BacktestResultResource(Resource):
     """获取回测结果"""
-    @backtest_ns.doc('get_backtest_result',
-        description='''获取回测任务结果。
+
+    @backtest_ns.doc(
+        "get_backtest_result",
+        description="""获取回测任务结果。
 
 **路径参数：**
 - **task_id**: 任务ID
@@ -2027,19 +2563,23 @@ class BacktestResultResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     def get(self, task_id):
         """获取回测结果"""
         from web.services.backtest_service import get_backtest_result
+
         data = get_backtest_result(task_id)
         return data
 
 
-@backtest_ns.route('/optimized-params/<stock_code>')
+@backtest_ns.route("/optimized-params/<stock_code>")
 class BacktestOptimizedParamsResource(Resource):
     """获取股票的最优参数"""
-    @backtest_ns.doc('get_optimized_params',
-        description='''获取股票的最优优化参数。
+
+    @backtest_ns.doc(
+        "get_optimized_params",
+        description="""获取股票的最优优化参数。
 
 **路径参数：**
 - **stock_code**: 股票代码（如：00941, 01810）
@@ -2094,7 +2634,8 @@ class BacktestOptimizedParamsResource(Resource):
 **说明：**
 - 返回该股票在数据库中的最优参数
 - 如果股票未优化，返回404
-''')
+""",
+    )
     def get(self, stock_code):
         """获取股票的最优参数"""
         from web.services.regime_params_api import get_optimized_params
@@ -2104,19 +2645,21 @@ class BacktestOptimizedParamsResource(Resource):
 
         if result is None:
             return {
-                'error': f'股票 {stock_code} 未找到优化参数',
-                'stock_code': stock_code,
-                'suggestion': '请先使用优化系统优化该股票'
+                "error": f"股票 {stock_code} 未找到优化参数",
+                "stock_code": stock_code,
+                "suggestion": "请先使用优化系统优化该股票",
             }, 404
 
         return result
 
 
-@backtest_ns.route('/has-optimized-params/<stock_code>')
+@backtest_ns.route("/has-optimized-params/<stock_code>")
 class BacktestHasOptimizedParamsResource(Resource):
     """检查股票是否有优化参数"""
-    @backtest_ns.doc('has_optimized_params',
-        description='''检查股票是否有已优化的参数。
+
+    @backtest_ns.doc(
+        "has_optimized_params",
+        description="""检查股票是否有已优化的参数。
 
 **路径参数：**
 - **stock_code**: 股票代码（如：00941, 01810）
@@ -2129,7 +2672,8 @@ class BacktestHasOptimizedParamsResource(Resource):
     "updated_at": "2026-02-22 15:45:43"
 }
 ```
-''')
+""",
+    )
     def get(self, stock_code):
         """检查股票是否有优化参数"""
         from web.services.regime_params_api import has_optimized_params
@@ -2139,27 +2683,27 @@ class BacktestHasOptimizedParamsResource(Resource):
 
         if has_params:
             from src.strategies.price_breakout.optimizer.params_db import RegimeParamsDB
+
             db = RegimeParamsDB()
             result = db.get_best_params(stock_code)
             db.close()
 
             return {
-                'stock_code': stock_code,
-                'has_params': True,
-                'updated_at': result['updated_at']
+                "stock_code": stock_code,
+                "has_params": True,
+                "updated_at": result["updated_at"],
             }
         else:
-            return {
-                'stock_code': stock_code,
-                'has_params': False
-            }
+            return {"stock_code": stock_code, "has_params": False}
 
 
-@backtest_ns.route('/batch', methods=['POST'])
+@backtest_ns.route("/batch", methods=["POST"])
 class BacktestBatchResource(Resource):
     """批量回测"""
-    @backtest_ns.doc('batch_backtest',
-        description='''批量创建回测任务。
+
+    @backtest_ns.doc(
+        "batch_backtest",
+        description="""批量创建回测任务。
 
 **请求体参数：**
 ```json
@@ -2190,37 +2734,35 @@ class BacktestBatchResource(Resource):
   "message": "批量回测任务已创建，共2个回测"
 }
 ```
-''')
+""",
+    )
     @backtest_ns.expect(backtest_batch_model)
     def post(self):
         """批量创建回测任务"""
         from web.services.task_creation_service import create_task
 
         data_json = request.get_json()
-        backtests = data_json.get('backtests', [])
+        backtests = data_json.get("backtests", [])
 
         if not backtests:
-            return {'error': 'backtests 列表不能为空'}, 400
+            return {"error": "backtests 列表不能为空"}, 400
 
         # 为每个回测创建独立任务
         task_ids = []
         for backtest_params in backtests:
-            request_data = {
-                'task_type': 'backtest',
-                'params': backtest_params
-            }
+            request_data = {"task_type": "backtest", "params": backtest_params}
             result = create_task(request_data)
             # create_task 返回 (dict, status_code) 元组
             if isinstance(result, tuple):
                 result = result[0]
-            if result.get('success'):
-                task_ids.append(result.get('task_id'))
+            if result.get("success"):
+                task_ids.append(result.get("task_id"))
 
         return {
-            'success': True,
-            'task_ids': task_ids,
-            'count': len(task_ids),
-            'message': f'批量回测任务已创建，共{len(task_ids)}个回测'
+            "success": True,
+            "task_ids": task_ids,
+            "count": len(task_ids),
+            "message": f"批量回测任务已创建，共{len(task_ids)}个回测",
         }
 
 
@@ -2229,31 +2771,39 @@ class BacktestBatchResource(Resource):
 # ============================================================================
 
 # Backtest history models
-backtest_history_item_model = backtest_ns.model('BacktestHistoryItem', {
-    'task_id': fields.String(description='任务ID'),
-    'name': fields.String(description='历史记录名称'),
-    'stock': fields.String(description='股票代码'),
-    'stock_name': fields.String(description='股票名称'),
-    'strategy': fields.String(description='策略类型'),
-    'strategy_name': fields.String(description='策略名称'),
-    'total_return': fields.Float(description='总收益率'),
-    'sharpe_ratio': fields.Float(description='夏普比率'),
-    'max_drawdown': fields.Float(description='最大回撤'),
-    'created_at': fields.String(description='创建时间')
-})
+backtest_history_item_model = backtest_ns.model(
+    "BacktestHistoryItem",
+    {
+        "task_id": fields.String(description="任务ID"),
+        "name": fields.String(description="历史记录名称"),
+        "stock": fields.String(description="股票代码"),
+        "stock_name": fields.String(description="股票名称"),
+        "strategy": fields.String(description="策略类型"),
+        "strategy_name": fields.String(description="策略名称"),
+        "total_return": fields.Float(description="总收益率"),
+        "sharpe_ratio": fields.Float(description="夏普比率"),
+        "max_drawdown": fields.Float(description="最大回撤"),
+        "created_at": fields.String(description="创建时间"),
+    },
+)
 
-backtest_history_list_model = backtest_ns.model('BacktestHistoryList', {
-    'success': fields.Boolean,
-    'total': fields.Integer(description='总数量'),
-    'history': fields.List(fields.Nested(backtest_history_item_model))
-})
+backtest_history_list_model = backtest_ns.model(
+    "BacktestHistoryList",
+    {
+        "success": fields.Boolean,
+        "total": fields.Integer(description="总数量"),
+        "history": fields.List(fields.Nested(backtest_history_item_model)),
+    },
+)
 
 
-@backtest_ns.route('/history')
+@backtest_ns.route("/history")
 class BacktestHistoryListResource(Resource):
     """回测历史记录列表"""
-    @backtest_ns.doc('get_backtest_history',
-        description='''获取回测历史记录列表
+
+    @backtest_ns.doc(
+        "get_backtest_history",
+        description="""获取回测历史记录列表
 
 **查询参数：**
 - page: 页码（默认1）
@@ -2282,23 +2832,27 @@ class BacktestHistoryListResource(Resource):
   ]
 }
 ```
-''')
-    @backtest_ns.param('page', '页码', type='integer', default=1)
-    @backtest_ns.param('page_size', '每页数量', type='integer', default=20)
-    @backtest_ns.param('stock', '股票代码筛选', type='string', required=False)
-    @backtest_ns.param('strategy', '策略类型筛选', type='string', required=False)
+""",
+    )
+    @backtest_ns.param("page", "页码", type="integer", default=1)
+    @backtest_ns.param("page_size", "每页数量", type="integer", default=20)
+    @backtest_ns.param("stock", "股票代码筛选", type="string", required=False)
+    @backtest_ns.param("strategy", "策略类型筛选", type="string", required=False)
     @backtest_ns.marshal_with(backtest_history_list_model)
     def get(self):
         """获取回测历史列表"""
         from web.services.backtest_history_service import get_backtest_history
+
         return get_backtest_history()
 
 
-@backtest_ns.route('/history/<string:task_id>')
+@backtest_ns.route("/history/<string:task_id>")
 class BacktestHistoryDetailResource(Resource):
     """回测历史记录详情"""
-    @backtest_ns.doc('get_backtest_history_detail',
-        description='''获取单个回测任务的完整结果
+
+    @backtest_ns.doc(
+        "get_backtest_history_detail",
+        description="""获取单个回测任务的完整结果
 
 **返回数据：**
 ```json
@@ -2314,14 +2868,17 @@ class BacktestHistoryDetailResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     def get(self, task_id):
         """获取回测历史详情"""
         from web.services.backtest_history_service import get_backtest_history_detail
+
         return get_backtest_history_detail(task_id)
 
-    @backtest_ns.doc('delete_backtest_history',
-        description='''删除回测历史记录
+    @backtest_ns.doc(
+        "delete_backtest_history",
+        description="""删除回测历史记录
 
 **返回数据：**
 ```json
@@ -2330,10 +2887,12 @@ class BacktestHistoryDetailResource(Resource):
   "message": "删除成功"
 }
 ```
-''')
+""",
+    )
     def delete(self, task_id):
         """删除回测历史"""
         from web.services.backtest_history_service import delete_backtest_history
+
         return delete_backtest_history(task_id)
 
 
@@ -2342,28 +2901,41 @@ class BacktestHistoryDetailResource(Resource):
 # ============================================================================
 
 # Screening models
-screening_strategy_model = screening_ns.model('ScreeningStrategyItem', {
-    'name': fields.String(description='策略名称', example='value'),
-    'description': fields.String(description='策略描述', example='价值投资策略')
-})
+screening_strategy_model = screening_ns.model(
+    "ScreeningStrategyItem",
+    {
+        "name": fields.String(description="策略名称", example="value"),
+        "description": fields.String(description="策略描述", example="价值投资策略"),
+    },
+)
 
-custom_screen_model = screening_ns.model('CustomScreenRequest', {
-    'config': fields.Raw(description='筛选条件配置（JSON格式）', example={
-        'type': 'AND',
-        'criteria': [
-            {'type': 'Range', 'column': 'pe_ttm', 'min_val': 0, 'max_val': 30},
-            {'type': 'GreaterThan', 'column': 'latest_roe', 'threshold': 10}
-        ]
-    }),
-    'limit': fields.Integer(description='返回结果数量限制', example=100, default=100)
-})
+custom_screen_model = screening_ns.model(
+    "CustomScreenRequest",
+    {
+        "config": fields.Raw(
+            description="筛选条件配置（JSON格式）",
+            example={
+                "type": "AND",
+                "criteria": [
+                    {"type": "Range", "column": "pe_ttm", "min_val": 0, "max_val": 30},
+                    {"type": "GreaterThan", "column": "latest_roe", "threshold": 10},
+                ],
+            },
+        ),
+        "limit": fields.Integer(
+            description="返回结果数量限制", example=100, default=100
+        ),
+    },
+)
 
 
-@screening_ns.route('/strategies')
+@screening_ns.route("/strategies")
 class ScreeningStrategiesResource(Resource):
     """策略列表"""
-    @screening_ns.doc('list_screening_strategies',
-        description='''列出所有可用的预设筛选策略。
+
+    @screening_ns.doc(
+        "list_screening_strategies",
+        description="""列出所有可用的预设筛选策略。
 
 **返回数据：**
 ```json
@@ -2393,18 +2965,22 @@ class ScreeningStrategiesResource(Resource):
 - turnaround: 困境反转策略
 - momentum_quality: 动量质量策略
 - exclude_financials: 排除金融策略
-''')
+""",
+    )
     def get(self):
         """列出所有可用的预设策略"""
         from web.services.screening_service import list_strategies
+
         return list_strategies()
 
 
-@screening_ns.route('/strategies/<strategy_name>')
+@screening_ns.route("/strategies/<strategy_name>")
 class ScreeningStrategyApplyResource(Resource):
     """应用预设策略"""
-    @screening_ns.doc('apply_preset_strategy',
-        description='''应用预设策略进行筛选。
+
+    @screening_ns.doc(
+        "apply_preset_strategy",
+        description="""应用预设策略进行筛选。
 
 **路径参数：**
 - **strategy_name**: 策略名称
@@ -2431,20 +3007,31 @@ class ScreeningStrategyApplyResource(Resource):
   ]
 }
 ```
-''')
-    @screening_ns.param('strategy_name', '策略名称 (liquidity/value/growth/...)', type='string', required=True)
-    @screening_ns.param('limit', '返回结果数量限制', type='integer', default=100, required=False)
+""",
+    )
+    @screening_ns.param(
+        "strategy_name",
+        "策略名称 (liquidity/value/growth/...)",
+        type="string",
+        required=True,
+    )
+    @screening_ns.param(
+        "limit", "返回结果数量限制", type="integer", default=100, required=False
+    )
     def get(self, strategy_name):
         """应用预设策略"""
         from web.services.screening_service import apply_preset_strategy
+
         return apply_preset_strategy(strategy_name)
 
 
-@screening_ns.route('/custom', methods=['POST'])
+@screening_ns.route("/custom", methods=["POST"])
 class ScreeningCustomResource(Resource):
     """自定义筛选"""
-    @screening_ns.doc('apply_custom_strategy',
-        description='''使用自定义JSON配置进行筛选。
+
+    @screening_ns.doc(
+        "apply_custom_strategy",
+        description="""使用自定义JSON配置进行筛选。
 
 **请求体参数：**
 ```json
@@ -2482,19 +3069,23 @@ class ScreeningCustomResource(Resource):
 - **AND**: 所有条件都满足
 - **OR**: 满足任一条件
 - **NOT**: 不满足条件
-''')
+""",
+    )
     @screening_ns.expect(custom_screen_model)
     def post(self):
         """应用自定义筛选策略"""
         from web.services.screening_service import apply_custom_strategy
+
         return apply_custom_strategy()
 
 
-@screening_ns.route('/criteria-types')
+@screening_ns.route("/criteria-types")
 class ScreeningCriteriaTypesResource(Resource):
     """筛选条件类型"""
-    @screening_ns.doc('list_criteria_types',
-        description='''列出所有支持的筛选条件类型。
+
+    @screening_ns.doc(
+        "list_criteria_types",
+        description="""列出所有支持的筛选条件类型。
 
 **返回数据：**
 ```json
@@ -2507,18 +3098,22 @@ class ScreeningCriteriaTypesResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     def get(self):
         """列出支持的筛选条件类型"""
         from web.services.screening_service import list_criteria_types
+
         return list_criteria_types()
 
 
-@screening_ns.route('/industries')
+@screening_ns.route("/industries")
 class ScreeningIndustriesResource(Resource):
     """行业分类列表"""
-    @screening_ns.doc('list_industries',
-        description='''获取申万行业分类列表。
+
+    @screening_ns.doc(
+        "list_industries",
+        description="""获取申万行业分类列表。
 
 **查询参数：**
 - **level**: 行业级别（1=一级，2=二级，3=三级，默认1）
@@ -2534,13 +3129,21 @@ class ScreeningIndustriesResource(Resource):
   ]
 }
 ```
-''')
-    @screening_ns.param('level', '行业级别 (1=一级, 2=二级, 3=三级)', type='integer', default=1, required=False)
+""",
+    )
+    @screening_ns.param(
+        "level",
+        "行业级别 (1=一级, 2=二级, 3=三级)",
+        type="integer",
+        default=1,
+        required=False,
+    )
     def get(self):
         """获取申万行业分类列表"""
         from web.services.screening_service import list_industries
         from flask import request
-        level = request.args.get('level', 1, type=int)
+
+        level = request.args.get("level", 1, type=int)
         return list_industries(level)
 
 
@@ -2548,36 +3151,47 @@ class ScreeningIndustriesResource(Resource):
 # Screening History Resources
 # ============================================================================
 
-screening_history_model = screening_ns.model('ScreeningHistory', {
-    'id': fields.Integer(description='历史记录ID'),
-    'name': fields.String(description='筛选名称'),
-    'result_count': fields.Integer(description='筛选结果数量'),
-    'stocks_count': fields.Integer(description='保存的股票数量'),
-    'created_at': fields.String(description='创建时间'),
-})
+screening_history_model = screening_ns.model(
+    "ScreeningHistory",
+    {
+        "id": fields.Integer(description="历史记录ID"),
+        "name": fields.String(description="筛选名称"),
+        "result_count": fields.Integer(description="筛选结果数量"),
+        "stocks_count": fields.Integer(description="保存的股票数量"),
+        "created_at": fields.String(description="创建时间"),
+    },
+)
 
-screening_history_detail_model = screening_ns.model('ScreeningHistoryDetail', {
-    'id': fields.Integer(description='历史记录ID'),
-    'name': fields.String(description='筛选名称'),
-    'config': fields.Raw(description='筛选条件配置'),
-    'result_count': fields.Integer(description='筛选结果数量'),
-    'stocks_count': fields.Integer(description='保存的股票数量'),
-    'created_at': fields.String(description='创建时间'),
-    'stocks': fields.List(fields.Raw, description='股票列表'),
-})
+screening_history_detail_model = screening_ns.model(
+    "ScreeningHistoryDetail",
+    {
+        "id": fields.Integer(description="历史记录ID"),
+        "name": fields.String(description="筛选名称"),
+        "config": fields.Raw(description="筛选条件配置"),
+        "result_count": fields.Integer(description="筛选结果数量"),
+        "stocks_count": fields.Integer(description="保存的股票数量"),
+        "created_at": fields.String(description="创建时间"),
+        "stocks": fields.List(fields.Raw, description="股票列表"),
+    },
+)
 
-save_history_model = screening_ns.model('SaveScreeningHistory', {
-    'name': fields.String(description='筛选名称', required=True),
-    'config': fields.Raw(description='筛选条件配置', required=True),
-    'stocks': fields.List(fields.Raw, description='筛选结果股票列表（可选）'),
-})
+save_history_model = screening_ns.model(
+    "SaveScreeningHistory",
+    {
+        "name": fields.String(description="筛选名称", required=True),
+        "config": fields.Raw(description="筛选条件配置", required=True),
+        "stocks": fields.List(fields.Raw, description="筛选结果股票列表（可选）"),
+    },
+)
 
 
-@screening_ns.route('/history')
+@screening_ns.route("/history")
 class ScreeningHistoryListResource(Resource):
     """筛选历史管理"""
-    @screening_ns.doc('save_screening_history',
-        description='''保存筛选历史。
+
+    @screening_ns.doc(
+        "save_screening_history",
+        description="""保存筛选历史。
 
 **请求体：**
 - **name**: 筛选名称（必需）
@@ -2592,15 +3206,18 @@ class ScreeningHistoryListResource(Resource):
   "message": "筛选历史已保存"
 }
 ```
-''')
+""",
+    )
     @screening_ns.expect(save_history_model)
     def post(self):
         """保存筛选历史"""
         from web.services.screening_history_service import save_screening_history
+
         return save_screening_history()
 
-    @screening_ns.doc('get_screening_history',
-        description='''获取筛选历史列表。
+    @screening_ns.doc(
+        "get_screening_history",
+        description="""获取筛选历史列表。
 
 **查询参数：**
 - **user_id**: 用户ID（可选，默认 'default'）
@@ -2620,19 +3237,23 @@ class ScreeningHistoryListResource(Resource):
   ]
 }
 ```
-''')
-    @screening_ns.param('user_id', '用户ID', type='string', required=False)
+""",
+    )
+    @screening_ns.param("user_id", "用户ID", type="string", required=False)
     def get(self):
         """获取筛选历史列表"""
         from web.services.screening_history_service import get_screening_history
+
         return get_screening_history()
 
 
-@screening_ns.route('/history/<int:history_id>')
+@screening_ns.route("/history/<int:history_id>")
 class ScreeningHistoryDetailResource(Resource):
     """筛选历史详情"""
-    @screening_ns.doc('get_screening_history_detail',
-        description='''获取筛选历史详情。
+
+    @screening_ns.doc(
+        "get_screening_history_detail",
+        description="""获取筛选历史详情。
 
 **路径参数：**
 - **history_id**: 历史记录ID
@@ -2655,15 +3276,18 @@ class ScreeningHistoryDetailResource(Resource):
   }
 }
 ```
-''')
-    @screening_ns.param('user_id', '用户ID', type='string', required=False)
+""",
+    )
+    @screening_ns.param("user_id", "用户ID", type="string", required=False)
     def get(self, history_id):
         """获取筛选历史详情"""
         from web.services.screening_history_service import get_screening_history_detail
+
         return get_screening_history_detail(history_id)
 
-    @screening_ns.doc('delete_screening_history',
-        description='''删除筛选历史。
+    @screening_ns.doc(
+        "delete_screening_history",
+        description="""删除筛选历史。
 
 **路径参数：**
 - **history_id**: 历史记录ID
@@ -2678,19 +3302,23 @@ class ScreeningHistoryDetailResource(Resource):
   "message": "历史记录已删除"
 }
 ```
-''')
-    @screening_ns.param('user_id', '用户ID', type='string', required=False)
+""",
+    )
+    @screening_ns.param("user_id", "用户ID", type="string", required=False)
     def delete(self, history_id):
         """删除筛选历史"""
         from web.services.screening_history_service import delete_screening_history
+
         return delete_screening_history(history_id)
 
 
-@screening_ns.route('/history/<int:history_id>/re-run')
+@screening_ns.route("/history/<int:history_id>/re-run")
 class ScreeningHistoryReRunResource(Resource):
     """重新执行筛选"""
-    @screening_ns.doc('re_run_screening',
-        description='''重新执行历史筛选。
+
+    @screening_ns.doc(
+        "re_run_screening",
+        description="""重新执行历史筛选。
 
 **路径参数：**
 - **history_id**: 历史记录ID
@@ -2707,12 +3335,16 @@ class ScreeningHistoryReRunResource(Resource):
   "stocks": [...]
 }
 ```
-''')
-    @screening_ns.param('user_id', '用户ID', type='string', required=False)
-    @screening_ns.param('limit', '返回数量限制', type='integer', default=2000, required=False)
+""",
+    )
+    @screening_ns.param("user_id", "用户ID", type="string", required=False)
+    @screening_ns.param(
+        "limit", "返回数量限制", type="integer", default=2000, required=False
+    )
     def post(self, history_id):
         """重新执行筛选"""
         from web.services.screening_history_service import re_run_screening
+
         return re_run_screening(history_id)
 
 
@@ -2721,61 +3353,69 @@ class ScreeningHistoryReRunResource(Resource):
 # ============================================================================
 
 # Moneyflow models
-stock_moneyflow_model = moneyflow_ns.model('StockMoneyflow', {
-    'ts_code': fields.String(description='股票代码'),
-    'trade_date': fields.String(description='交易日期'),
-    'buy_sm_vol': fields.Integer(description='小单买入量'),
-    'buy_sm_amount': fields.Float(description='小单买入金额'),
-    'sell_sm_vol': fields.Integer(description='小单卖出量'),
-    'sell_sm_amount': fields.Float(description='小单卖出金额'),
-    'buy_md_vol': fields.Integer(description='中单买入量'),
-    'buy_md_amount': fields.Float(description='中单买入金额'),
-    'sell_md_vol': fields.Integer(description='中单卖出量'),
-    'sell_md_amount': fields.Float(description='中单卖出金额'),
-    'buy_lg_vol': fields.Integer(description='大单买入量'),
-    'buy_lg_amount': fields.Float(description='大单买入金额'),
-    'sell_lg_vol': fields.Integer(description='大单卖出量'),
-    'sell_lg_amount': fields.Float(description='大单卖出金额'),
-    'buy_elg_vol': fields.Integer(description='特大单买入量'),
-    'buy_elg_amount': fields.Float(description='特大单买入金额'),
-    'sell_elg_vol': fields.Integer(description='特大单卖出量'),
-    'sell_elg_amount': fields.Float(description='特大单卖出金额'),
-    'net_mf_vol': fields.Integer(description='净流入量'),
-    'net_mf_amount': fields.Float(description='净流入额'),
-    'net_lg_amount': fields.Float(description='大单净流入'),
-    'net_elg_amount': fields.Float(description='特大单净流入'),
-})
+stock_moneyflow_model = moneyflow_ns.model(
+    "StockMoneyflow",
+    {
+        "ts_code": fields.String(description="股票代码"),
+        "trade_date": fields.String(description="交易日期"),
+        "buy_sm_vol": fields.Integer(description="小单买入量"),
+        "buy_sm_amount": fields.Float(description="小单买入金额"),
+        "sell_sm_vol": fields.Integer(description="小单卖出量"),
+        "sell_sm_amount": fields.Float(description="小单卖出金额"),
+        "buy_md_vol": fields.Integer(description="中单买入量"),
+        "buy_md_amount": fields.Float(description="中单买入金额"),
+        "sell_md_vol": fields.Integer(description="中单卖出量"),
+        "sell_md_amount": fields.Float(description="中单卖出金额"),
+        "buy_lg_vol": fields.Integer(description="大单买入量"),
+        "buy_lg_amount": fields.Float(description="大单买入金额"),
+        "sell_lg_vol": fields.Integer(description="大单卖出量"),
+        "sell_lg_amount": fields.Float(description="大单卖出金额"),
+        "buy_elg_vol": fields.Integer(description="特大单买入量"),
+        "buy_elg_amount": fields.Float(description="特大单买入金额"),
+        "sell_elg_vol": fields.Integer(description="特大单卖出量"),
+        "sell_elg_amount": fields.Float(description="特大单卖出金额"),
+        "net_mf_vol": fields.Integer(description="净流入量"),
+        "net_mf_amount": fields.Float(description="净流入额"),
+        "net_lg_amount": fields.Float(description="大单净流入"),
+        "net_elg_amount": fields.Float(description="特大单净流入"),
+    },
+)
 
-industry_moneyflow_model = moneyflow_ns.model('IndustryMoneyflow', {
-    'trade_date': fields.String(description='交易日期'),
-    'level': fields.String(description='行业级别'),
-    'sw_l1': fields.String(description='一级行业'),
-    'sw_l2': fields.String(description='二级行业'),
-    'sw_l3': fields.String(description='三级行业'),
-    'index_code': fields.String(description='行业指数代码'),
-    'stock_count': fields.Integer(description='成分股数量'),
-    'up_count': fields.Integer(description='上涨股票数'),
-    'down_count': fields.Integer(description='下跌股票数'),
-    'limit_up_count': fields.Integer(description='涨停股票数'),
-    'limit_down_count': fields.Integer(description='跌停股票数'),
-    'net_mf_amount': fields.Float(description='净流入金额'),
-    'net_lg_amount': fields.Float(description='大单净流入'),
-    'net_elg_amount': fields.Float(description='特大单净流入'),
-    'buy_elg_amount': fields.Float(description='特大单买入'),
-    'sell_elg_amount': fields.Float(description='特大单卖出'),
-    'buy_lg_amount': fields.Float(description='大单买入'),
-    'sell_lg_amount': fields.Float(description='大单卖出'),
-    'avg_net_amount': fields.Float(description='平均净流入'),
-    'avg_net_lg_amount': fields.Float(description='平均大单净流入'),
-    'avg_net_elg_amount': fields.Float(description='平均特大单净流入'),
-})
+industry_moneyflow_model = moneyflow_ns.model(
+    "IndustryMoneyflow",
+    {
+        "trade_date": fields.String(description="交易日期"),
+        "level": fields.String(description="行业级别"),
+        "sw_l1": fields.String(description="一级行业"),
+        "sw_l2": fields.String(description="二级行业"),
+        "sw_l3": fields.String(description="三级行业"),
+        "index_code": fields.String(description="行业指数代码"),
+        "stock_count": fields.Integer(description="成分股数量"),
+        "up_count": fields.Integer(description="上涨股票数"),
+        "down_count": fields.Integer(description="下跌股票数"),
+        "limit_up_count": fields.Integer(description="涨停股票数"),
+        "limit_down_count": fields.Integer(description="跌停股票数"),
+        "net_mf_amount": fields.Float(description="净流入金额"),
+        "net_lg_amount": fields.Float(description="大单净流入"),
+        "net_elg_amount": fields.Float(description="特大单净流入"),
+        "buy_elg_amount": fields.Float(description="特大单买入"),
+        "sell_elg_amount": fields.Float(description="特大单卖出"),
+        "buy_lg_amount": fields.Float(description="大单买入"),
+        "sell_lg_amount": fields.Float(description="大单卖出"),
+        "avg_net_amount": fields.Float(description="平均净流入"),
+        "avg_net_lg_amount": fields.Float(description="平均大单净流入"),
+        "avg_net_elg_amount": fields.Float(description="平均特大单净流入"),
+    },
+)
 
 
-@moneyflow_ns.route('/stock')
+@moneyflow_ns.route("/stock")
 class StockMoneyflowResource(Resource):
     """个股资金流向"""
-    @moneyflow_ns.doc('get_stock_moneyflow',
-        description='''获取个股资金流向数据。
+
+    @moneyflow_ns.doc(
+        "get_stock_moneyflow",
+        description="""获取个股资金流向数据。
 
 **查询参数：**
 - **ts_code**: 股票代码（必需）
@@ -2791,32 +3431,35 @@ class StockMoneyflowResource(Resource):
   "count": 10
 }
 ```
-''')
-    @moneyflow_ns.param('ts_code', '股票代码', type='string', required=True)
-    @moneyflow_ns.param('start_date', '开始日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('end_date', '结束日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('limit', '返回数量', type='integer', default=100)
+""",
+    )
+    @moneyflow_ns.param("ts_code", "股票代码", type="string", required=True)
+    @moneyflow_ns.param("start_date", "开始日期 YYYY-MM-DD", type="string")
+    @moneyflow_ns.param("end_date", "结束日期 YYYY-MM-DD", type="string")
+    @moneyflow_ns.param("limit", "返回数量", type="integer", default=100)
     def get(self):
         """获取个股资金流向数据"""
         from flask import request
         from web.services.moneyflow_service import get_stock_moneyflow
 
-        ts_code = request.args.get('ts_code')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        limit = request.args.get('limit', 100, type=int)
+        ts_code = request.args.get("ts_code")
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+        limit = request.args.get("limit", 100, type=int)
 
         if not ts_code:
-            return {'error': '缺少 ts_code 参数'}, 400
+            return {"error": "缺少 ts_code 参数"}, 400
 
         return get_stock_moneyflow(ts_code, start_date, end_date, limit)
 
 
-@moneyflow_ns.route('/industry')
+@moneyflow_ns.route("/industry")
 class IndustryMoneyflowResource(Resource):
     """行业资金流向汇总"""
-    @moneyflow_ns.doc('get_industry_moneyflow',
-        description='''获取行业资金流向汇总数据。
+
+    @moneyflow_ns.doc(
+        "get_industry_moneyflow",
+        description="""获取行业资金流向汇总数据。
 
 **查询参数：**
 - **level**: 行业级别 L1/L2/L3（默认L1）
@@ -2833,31 +3476,36 @@ class IndustryMoneyflowResource(Resource):
   "count": 10
 }
 ```
-''')
-    @moneyflow_ns.param('level', '行业级别', type='string', enum=['L1', 'L2', 'L3'], default='L1')
-    @moneyflow_ns.param('industry_name', '行业名称', type='string')
-    @moneyflow_ns.param('start_date', '开始日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('end_date', '结束日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('limit', '返回数量', type='integer', default=100)
+""",
+    )
+    @moneyflow_ns.param(
+        "level", "行业级别", type="string", enum=["L1", "L2", "L3"], default="L1"
+    )
+    @moneyflow_ns.param("industry_name", "行业名称", type="string")
+    @moneyflow_ns.param("start_date", "开始日期 YYYY-MM-DD", type="string")
+    @moneyflow_ns.param("end_date", "结束日期 YYYY-MM-DD", type="string")
+    @moneyflow_ns.param("limit", "返回数量", type="integer", default=100)
     def get(self):
         """获取行业资金流向汇总"""
         from flask import request
         from web.services.moneyflow_service import get_industry_moneyflow
 
-        level = request.args.get('level', 'L1')
-        industry_name = request.args.get('industry_name')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        limit = request.args.get('limit', 100, type=int)
+        level = request.args.get("level", "L1")
+        industry_name = request.args.get("industry_name")
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+        limit = request.args.get("limit", 100, type=int)
 
         return get_industry_moneyflow(level, industry_name, start_date, end_date, limit)
 
 
-@moneyflow_ns.route('/industry/top')
+@moneyflow_ns.route("/industry/top")
 class TopIndustriesResource(Resource):
     """行业资金流向排名"""
-    @moneyflow_ns.doc('get_top_industries',
-        description='''获取净流入前N名的行业。
+
+    @moneyflow_ns.doc(
+        "get_top_industries",
+        description="""获取净流入前N名的行业。
 
 **查询参数：**
 - **level**: 行业级别 L1/L2/L3（默认L1）
@@ -2878,29 +3526,34 @@ class TopIndustriesResource(Resource):
   "trade_date": "2024-01-01"
 }
 ```
-''')
-    @moneyflow_ns.param('level', '行业级别', type='string', enum=['L1', 'L2', 'L3'], default='L1')
-    @moneyflow_ns.param('trade_date', '交易日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('top_n', '返回数量（不传则返回全部）', type='integer')
-    @moneyflow_ns.param('accumulate_days', '累计交易日数', type='integer', default=1)
+""",
+    )
+    @moneyflow_ns.param(
+        "level", "行业级别", type="string", enum=["L1", "L2", "L3"], default="L1"
+    )
+    @moneyflow_ns.param("trade_date", "交易日期 YYYY-MM-DD", type="string")
+    @moneyflow_ns.param("top_n", "返回数量（不传则返回全部）", type="integer")
+    @moneyflow_ns.param("accumulate_days", "累计交易日数", type="integer", default=1)
     def get(self):
         """获取净流入排名前N的行业"""
         from flask import request
         from web.services.moneyflow_service import get_top_industries_by_netflow
 
-        level = request.args.get('level', 'L1')
-        trade_date = request.args.get('trade_date')
-        top_n = request.args.get('top_n', type=int)
-        accumulate_days = request.args.get('accumulate_days', 1, type=int)
+        level = request.args.get("level", "L1")
+        trade_date = request.args.get("trade_date")
+        top_n = request.args.get("top_n", type=int)
+        accumulate_days = request.args.get("accumulate_days", 1, type=int)
 
         return get_top_industries_by_netflow(level, trade_date, top_n, accumulate_days)
 
 
-@moneyflow_ns.route('/industry/stocks')
+@moneyflow_ns.route("/industry/stocks")
 class IndustryStocksMoneyflowResource(Resource):
     """行业内个股资金流向"""
-    @moneyflow_ns.doc('get_industry_stocks_moneyflow',
-        description='''获取指定行业内所有股票的资金流向数据。
+
+    @moneyflow_ns.doc(
+        "get_industry_stocks_moneyflow",
+        description="""获取指定行业内所有股票的资金流向数据。
 
 **查询参数：**
 - **industry_name**: 行业名称（必需）
@@ -2918,36 +3571,44 @@ class IndustryStocksMoneyflowResource(Resource):
   "industry_name": "银行"
 }
 ```
-''')
-    @moneyflow_ns.param('industry_name', '行业名称', type='string', required=True)
-    @moneyflow_ns.param('level', '行业级别', type='string', enum=['L1', 'L2', 'L3'], default='L1')
-    @moneyflow_ns.param('trade_date', '交易日期 YYYY-MM-DD', type='string')
-    @moneyflow_ns.param('accumulate_days', '累计天数', type='integer', default=1)
+""",
+    )
+    @moneyflow_ns.param("industry_name", "行业名称", type="string", required=True)
+    @moneyflow_ns.param(
+        "level", "行业级别", type="string", enum=["L1", "L2", "L3"], default="L1"
+    )
+    @moneyflow_ns.param("trade_date", "交易日期 YYYY-MM-DD", type="string")
+    @moneyflow_ns.param("accumulate_days", "累计天数", type="integer", default=1)
     def get(self):
         """获取指定行业内所有股票的资金流向数据"""
         from flask import request
         from web.services.moneyflow_service import get_industry_stocks_moneyflow
 
-        industry_name = request.args.get('industry_name')
-        level = request.args.get('level', 'L1')
-        trade_date = request.args.get('trade_date')
-        accumulate_days = request.args.get('accumulate_days', 1, type=int)
+        industry_name = request.args.get("industry_name")
+        level = request.args.get("level", "L1")
+        trade_date = request.args.get("trade_date")
+        accumulate_days = request.args.get("accumulate_days", 1, type=int)
 
         if not industry_name:
-            return {'error': '缺少 industry_name 参数'}, 400
+            return {"error": "缺少 industry_name 参数"}, 400
 
-        return get_industry_stocks_moneyflow(industry_name, level, trade_date, accumulate_days)
+        return get_industry_stocks_moneyflow(
+            industry_name, level, trade_date, accumulate_days
+        )
 
 
 # ============================================================================
 # Dragon List Endpoints
 # ============================================================================
 
-@dragon_list_ns.route('/query')
+
+@dragon_list_ns.route("/query")
 class DragonListQueryResource(Resource):
     """龙虎榜数据查询"""
-    @dragon_list_ns.doc('query_dragon_list',
-        description='''查询龙虎榜数据
+
+    @dragon_list_ns.doc(
+        "query_dragon_list",
+        description="""查询龙虎榜数据
 
 **查询参数：**
 - trade_date: 交易日期 YYYY-MM-DD
@@ -2965,55 +3626,62 @@ class DragonListQueryResource(Resource):
   "count": 50
 }
 ```
-''')
-    @dragon_list_ns.param('trade_date', '交易日期 YYYY-MM-DD', type='string')
-    @dragon_list_ns.param('start_date', '开始日期 YYYY-MM-DD', type='string')
-    @dragon_list_ns.param('end_date', '结束日期 YYYY-MM-DD', type='string')
-    @dragon_list_ns.param('ts_code', '股票代码', type='string')
-    @dragon_list_ns.param('reason', '上榜理由', type='string')
-    @dragon_list_ns.param('limit', '返回数量', type='integer', default=100)
+""",
+    )
+    @dragon_list_ns.param("trade_date", "交易日期 YYYY-MM-DD", type="string")
+    @dragon_list_ns.param("start_date", "开始日期 YYYY-MM-DD", type="string")
+    @dragon_list_ns.param("end_date", "结束日期 YYYY-MM-DD", type="string")
+    @dragon_list_ns.param("ts_code", "股票代码", type="string")
+    @dragon_list_ns.param("reason", "上榜理由", type="string")
+    @dragon_list_ns.param("limit", "返回数量", type="integer", default=100)
     def get(self):
         """查询龙虎榜数据"""
         from web.services.dragon_list_service import query_dragon_list
 
-        trade_date = request.args.get('trade_date')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        ts_code = request.args.get('ts_code')
-        reason = request.args.get('reason')
-        limit = request.args.get('limit', 100, type=int)
+        trade_date = request.args.get("trade_date")
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+        ts_code = request.args.get("ts_code")
+        reason = request.args.get("reason")
+        limit = request.args.get("limit", 100, type=int)
 
-        return query_dragon_list(trade_date, start_date, end_date,
-                                  ts_code, reason, limit)
+        return query_dragon_list(
+            trade_date, start_date, end_date, ts_code, reason, limit
+        )
 
 
-@dragon_list_ns.route('/stock/<ts_code>')
+@dragon_list_ns.route("/stock/<ts_code>")
 class DragonListStockResource(Resource):
     """指定股票的龙虎榜历史"""
-    @dragon_list_ns.doc('get_dragon_list_by_stock',
-        description='''获取指定股票的龙虎榜历史记录
+
+    @dragon_list_ns.doc(
+        "get_dragon_list_by_stock",
+        description="""获取指定股票的龙虎榜历史记录
 
 **路径参数：**
 - ts_code: 股票代码
 
 **查询参数：**
 - limit: 返回数量（默认50）
-''')
-    @dragon_list_ns.param('limit', '返回数量', type='integer', default=50)
+""",
+    )
+    @dragon_list_ns.param("limit", "返回数量", type="integer", default=50)
     def get(self, ts_code):
         """获取指定股票的龙虎榜历史"""
         from web.services.dragon_list_service import get_dragon_list_by_stock
 
-        limit = request.args.get('limit', 50, type=int)
+        limit = request.args.get("limit", 50, type=int)
 
         return get_dragon_list_by_stock(ts_code, limit)
 
 
-@dragon_list_ns.route('/top')
+@dragon_list_ns.route("/top")
 class DragonListTopResource(Resource):
     """龙虎榜排名"""
-    @dragon_list_ns.doc('get_top_dragon_list',
-        description='''获取龙虎榜排名
+
+    @dragon_list_ns.doc(
+        "get_top_dragon_list",
+        description="""获取龙虎榜排名
 
 **查询参数：**
 - trade_date: 交易日期 YYYY-MM-DD（默认最新）
@@ -3023,26 +3691,35 @@ class DragonListTopResource(Resource):
   - l_amount: 龙虎榜成交额
   - amount: 总成交额
   - net_rate: 净买额占比
-''')
-    @dragon_list_ns.param('trade_date', '交易日期 YYYY-MM-DD', type='string')
-    @dragon_list_ns.param('top_n', '前N名', type='integer', default=10)
-    @dragon_list_ns.param('by', '排序字段', type='string', enum=['net_amount', 'l_amount', 'amount', 'net_rate'], default='net_amount')
+""",
+    )
+    @dragon_list_ns.param("trade_date", "交易日期 YYYY-MM-DD", type="string")
+    @dragon_list_ns.param("top_n", "前N名", type="integer", default=10)
+    @dragon_list_ns.param(
+        "by",
+        "排序字段",
+        type="string",
+        enum=["net_amount", "l_amount", "amount", "net_rate"],
+        default="net_amount",
+    )
     def get(self):
         """获取龙虎榜排名"""
         from web.services.dragon_list_service import get_top_dragon_list
 
-        trade_date = request.args.get('trade_date')
-        top_n = request.args.get('top_n', 10, type=int)
-        by = request.args.get('by', 'net_amount')
+        trade_date = request.args.get("trade_date")
+        top_n = request.args.get("top_n", 10, type=int)
+        by = request.args.get("by", "net_amount")
 
         return get_top_dragon_list(trade_date, top_n, by)
 
 
-@dragon_list_ns.route('/stats')
+@dragon_list_ns.route("/stats")
 class DragonListStatsResource(Resource):
     """龙虎榜统计"""
-    @dragon_list_ns.doc('get_dragon_list_stats',
-        description='''获取龙虎榜统计数据
+
+    @dragon_list_ns.doc(
+        "get_dragon_list_stats",
+        description="""获取龙虎榜统计数据
 
 **查询参数：**
 - trade_date: 交易日期 YYYY-MM-DD（默认最新）
@@ -3072,13 +3749,14 @@ class DragonListStatsResource(Resource):
   }
 }
 ```
-''')
-    @dragon_list_ns.param('trade_date', '交易日期 YYYY-MM-DD', type='string')
+""",
+    )
+    @dragon_list_ns.param("trade_date", "交易日期 YYYY-MM-DD", type="string")
     def get(self):
         """获取龙虎榜统计数据"""
         from web.services.dragon_list_service import get_dragon_list_stats
 
-        trade_date = request.args.get('trade_date')
+        trade_date = request.args.get("trade_date")
 
         return get_dragon_list_stats(trade_date)
 
@@ -3087,49 +3765,87 @@ class DragonListStatsResource(Resource):
 # Alpha Endpoints - 101 Formulaic Alphas
 # ============================================================================
 
-@alpha_ns.route('/list')
+
+@alpha_ns.route("/list")
 class AlphaList(Resource):
-    @alpha_ns.doc('list_alphas', description='列出所有可用的101个Alpha因子')
+    @alpha_ns.doc("list_alphas", description="列出所有可用的101个Alpha因子")
     def get(self):
         """列出所有Alpha因子"""
         from web.services.alpha_service import list_alphas
+
         return list_alphas()
 
 
-alpha_compute_model = alpha_ns.model('AlphaComputeRequest', {
-    'alpha_ids': fields.List(fields.Integer, description='Alpha因子编号列表 (1-101)', required=True, example=[1, 101]),
-    'symbols': fields.List(fields.String, description='股票代码列表', required=True, example=['600382', '000001']),
-    'start_date': fields.String(description='开始日期 YYYY-MM-DD', required=True, example='2025-01-01'),
-    'end_date': fields.String(description='结束日期 YYYY-MM-DD', required=True, example='2025-06-30'),
-    'price_type': fields.String(description='价格类型: qfq/hfq/空字符串', example='', enum=['qfq', 'hfq', ''])
-})
+alpha_compute_model = alpha_ns.model(
+    "AlphaComputeRequest",
+    {
+        "alpha_ids": fields.List(
+            fields.Integer,
+            description="Alpha因子编号列表 (1-101)",
+            required=True,
+            example=[1, 101],
+        ),
+        "symbols": fields.List(
+            fields.String,
+            description="股票代码列表",
+            required=True,
+            example=["600382", "000001"],
+        ),
+        "start_date": fields.String(
+            description="开始日期 YYYY-MM-DD", required=True, example="2025-01-01"
+        ),
+        "end_date": fields.String(
+            description="结束日期 YYYY-MM-DD", required=True, example="2025-06-30"
+        ),
+        "price_type": fields.String(
+            description="价格类型: qfq/hfq/空字符串",
+            example="",
+            enum=["qfq", "hfq", ""],
+        ),
+    },
+)
 
 
-@alpha_ns.route('/compute')
+@alpha_ns.route("/compute")
 class AlphaCompute(Resource):
-    @alpha_ns.doc('compute_alphas', description='计算指定Alpha因子')
+    @alpha_ns.doc("compute_alphas", description="计算指定Alpha因子")
     @alpha_ns.expect(alpha_compute_model)
     def post(self):
         """计算Alpha因子值"""
         from web.services.alpha_service import compute_alphas
+
         return compute_alphas()
 
 
-alpha_snapshot_model = alpha_ns.model('AlphaSnapshotRequest', {
-    'alpha_id': fields.Integer(description='Alpha因子编号 (1-101)', required=True, example=101),
-    'symbols': fields.List(fields.String, description='股票代码列表 (为空则使用全部)', example=['600382', '000001']),
-    'trade_date': fields.String(description='交易日期 YYYY-MM-DD', required=True, example='2025-06-30'),
-    'price_type': fields.String(description='价格类型', example='', enum=['qfq', 'hfq', ''])
-})
+alpha_snapshot_model = alpha_ns.model(
+    "AlphaSnapshotRequest",
+    {
+        "alpha_id": fields.Integer(
+            description="Alpha因子编号 (1-101)", required=True, example=101
+        ),
+        "symbols": fields.List(
+            fields.String,
+            description="股票代码列表 (为空则使用全部)",
+            example=["600382", "000001"],
+        ),
+        "trade_date": fields.String(
+            description="交易日期 YYYY-MM-DD", required=True, example="2025-06-30"
+        ),
+        "price_type": fields.String(
+            description="价格类型", example="", enum=["qfq", "hfq", ""]
+        ),
+    },
+)
 
 
-@alpha_ns.route('/snapshot')
+@alpha_ns.route("/snapshot")
 class AlphaSnapshot(Resource):
-    @alpha_ns.doc('alpha_snapshot', description='获取单日Alpha因子截面数据')
+    @alpha_ns.doc("alpha_snapshot", description="获取单日Alpha因子截面数据")
     @alpha_ns.expect(alpha_snapshot_model)
     def post(self):
         """获取Alpha因子截面快照"""
         from web.services.alpha_service import get_alpha_snapshot
+
         return get_alpha_snapshot()
 
 
@@ -3138,65 +3854,143 @@ class AlphaSnapshot(Resource):
 # ============================================================================
 
 # Risk Management Models
-risk_position_input_model = risk_ns.model('RiskPositionInput', {
-    'symbol': fields.String(description='股票代码', required=True, example='600382'),
-    'shares': fields.Integer(description='持股数量', required=True, example=10000),
-    'cost_price': fields.Float(description='成本价', required=True, example=42.0),
-    'current_price': fields.Float(description='当前价格', required=True, example=45.0),
-    'stop_loss_base': fields.Float(description='止损基数', required=True, example=45.0),
-    'stop_loss_percent': fields.Float(description='止损比例%', required=True, example=3.0)
-})
+risk_position_input_model = risk_ns.model(
+    "RiskPositionInput",
+    {
+        "symbol": fields.String(
+            description="股票代码", required=True, example="600382"
+        ),
+        "shares": fields.Integer(description="持股数量", required=True, example=10000),
+        "cost_price": fields.Float(description="成本价", required=True, example=42.0),
+        "current_price": fields.Float(
+            description="当前价格", required=True, example=45.0
+        ),
+        "stop_loss_base": fields.Float(
+            description="止损基数", required=True, example=45.0
+        ),
+        "stop_loss_percent": fields.Float(
+            description="止损比例%", required=True, example=3.0
+        ),
+    },
+)
 
-risk_portfolio_input_model = risk_ns.model('RiskPortfolioInput', {
-    'total_capital': fields.Float(description='总资金', required=True, example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
-    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表')
-})
+risk_portfolio_input_model = risk_ns.model(
+    "RiskPortfolioInput",
+    {
+        "total_capital": fields.Float(
+            description="总资金", required=True, example=650000
+        ),
+        "max_total_risk_percent": fields.Float(
+            description="总风险比例%", default=6.0, example=6.0
+        ),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", default=2.0, example=2.0
+        ),
+        "positions": fields.List(
+            fields.Nested(risk_position_input_model), description="持仓列表"
+        ),
+    },
+)
 
-risk_calculate_model = risk_ns.model('RiskCalculateRequest', {
-    'total_capital': fields.Float(description='总资金', required=True, example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
-    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表'),
-    'buy_price': fields.Float(description='买入价格', required=True, example=50.0),
-    'stop_loss_percent': fields.Float(description='止损比例%', required=True, example=5.0)
-})
+risk_calculate_model = risk_ns.model(
+    "RiskCalculateRequest",
+    {
+        "total_capital": fields.Float(
+            description="总资金", required=True, example=650000
+        ),
+        "max_total_risk_percent": fields.Float(
+            description="总风险比例%", default=6.0, example=6.0
+        ),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", default=2.0, example=2.0
+        ),
+        "positions": fields.List(
+            fields.Nested(risk_position_input_model), description="持仓列表"
+        ),
+        "buy_price": fields.Float(description="买入价格", required=True, example=50.0),
+        "stop_loss_percent": fields.Float(
+            description="止损比例%", required=True, example=5.0
+        ),
+    },
+)
 
-risk_sell_model = risk_ns.model('RiskSellRequest', {
-    'total_capital': fields.Float(description='总资金', required=True, example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
-    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表'),
-    'symbol': fields.String(description='卖出股票代码', required=True, example='600382'),
-    'sell_shares': fields.Integer(description='卖出数量', required=True, example=5000),
-    'sell_price': fields.Float(description='卖出价格', required=True, example=45.0)
-})
+risk_sell_model = risk_ns.model(
+    "RiskSellRequest",
+    {
+        "total_capital": fields.Float(
+            description="总资金", required=True, example=650000
+        ),
+        "max_total_risk_percent": fields.Float(
+            description="总风险比例%", default=6.0, example=6.0
+        ),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", default=2.0, example=2.0
+        ),
+        "positions": fields.List(
+            fields.Nested(risk_position_input_model), description="持仓列表"
+        ),
+        "symbol": fields.String(
+            description="卖出股票代码", required=True, example="600382"
+        ),
+        "sell_shares": fields.Integer(
+            description="卖出数量", required=True, example=5000
+        ),
+        "sell_price": fields.Float(description="卖出价格", required=True, example=45.0),
+    },
+)
 
-risk_adjust_stop_loss_model = risk_ns.model('RiskAdjustStopLossRequest', {
-    'position': fields.Nested(risk_position_input_model, description='持仓信息', required=True),
-    'new_stop_loss_base': fields.Float(description='新止损基数', required=True, example=45.0),
-    'new_stop_loss_percent': fields.Float(description='新止损比例%', required=True, example=3.0)
-})
+risk_adjust_stop_loss_model = risk_ns.model(
+    "RiskAdjustStopLossRequest",
+    {
+        "position": fields.Nested(
+            risk_position_input_model, description="持仓信息", required=True
+        ),
+        "new_stop_loss_base": fields.Float(
+            description="新止损基数", required=True, example=45.0
+        ),
+        "new_stop_loss_percent": fields.Float(
+            description="新止损比例%", required=True, example=3.0
+        ),
+    },
+)
 
-risk_add_position_model = risk_ns.model('RiskAddPositionRequest', {
-    'total_capital': fields.Float(description='总资金', required=True, example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', default=6.0, example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', default=2.0, example=2.0),
-    'positions': fields.List(fields.Nested(risk_position_input_model), description='持仓列表'),
-    'symbol': fields.String(description='股票代码', required=True, example='600382'),
-    'shares': fields.Integer(description='股数', required=True, example=4000),
-    'cost_price': fields.Float(description='成本价', required=True, example=50.0),
-    'current_price': fields.Float(description='当前价', required=True, example=50.0),
-    'stop_loss_percent': fields.Float(description='止损比例%', required=True, example=5.0)
-})
+risk_add_position_model = risk_ns.model(
+    "RiskAddPositionRequest",
+    {
+        "total_capital": fields.Float(
+            description="总资金", required=True, example=650000
+        ),
+        "max_total_risk_percent": fields.Float(
+            description="总风险比例%", default=6.0, example=6.0
+        ),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", default=2.0, example=2.0
+        ),
+        "positions": fields.List(
+            fields.Nested(risk_position_input_model), description="持仓列表"
+        ),
+        "symbol": fields.String(
+            description="股票代码", required=True, example="600382"
+        ),
+        "shares": fields.Integer(description="股数", required=True, example=4000),
+        "cost_price": fields.Float(description="成本价", required=True, example=50.0),
+        "current_price": fields.Float(
+            description="当前价", required=True, example=50.0
+        ),
+        "stop_loss_percent": fields.Float(
+            description="止损比例%", required=True, example=5.0
+        ),
+    },
+)
 
 
-@risk_ns.route('/calculate')
+@risk_ns.route("/calculate")
 class RiskCalculateResource(Resource):
     """计算新股可买股数"""
-    @risk_ns.doc('calculate_new_position',
-        description='''计算新股可买股数。
+
+    @risk_ns.doc(
+        "calculate_new_position",
+        description="""计算新股可买股数。
 
 核心规则：
 - 单笔交易风险不超过总资金的2%
@@ -3236,24 +4030,28 @@ class RiskCalculateResource(Resource):
   }
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_calculate_model)
     def post(self):
         """计算新股可买股数"""
         from web.services.risk_management_service import calculate_new_position
+
         data = request.get_json()
         return calculate_new_position(
             portfolio_data=data,
-            buy_price=data.get('buy_price'),
-            stop_loss_percent=data.get('stop_loss_percent')
+            buy_price=data.get("buy_price"),
+            stop_loss_percent=data.get("stop_loss_percent"),
         )
 
 
-@risk_ns.route('/sell')
+@risk_ns.route("/sell")
 class RiskSellResource(Resource):
     """卖出股票"""
-    @risk_ns.doc('sell_position',
-        description='''卖出股票，重新计算风险占用。
+
+    @risk_ns.doc(
+        "sell_position",
+        description="""卖出股票，重新计算风险占用。
 
 **请求示例：**
 ```json
@@ -3291,25 +4089,29 @@ class RiskSellResource(Resource):
   "portfolio": {...}
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_sell_model)
     def post(self):
         """卖出股票"""
         from web.services.risk_management_service import sell_position
+
         data = request.get_json()
         return sell_position(
             portfolio_data=data,
-            symbol=data.get('symbol'),
-            sell_shares=data.get('sell_shares'),
-            sell_price=data.get('sell_price')
+            symbol=data.get("symbol"),
+            sell_shares=data.get("sell_shares"),
+            sell_price=data.get("sell_price"),
         )
 
 
-@risk_ns.route('/adjust-stop-loss')
+@risk_ns.route("/adjust-stop-loss")
 class RiskAdjustStopLossResource(Resource):
     """调整止损参数"""
-    @risk_ns.doc('adjust_stop_loss',
-        description='''调整止损参数，释放或增加风险占用。
+
+    @risk_ns.doc(
+        "adjust_stop_loss",
+        description="""调整止损参数，释放或增加风险占用。
 
 **请求示例：**
 ```json
@@ -3342,24 +4144,28 @@ class RiskAdjustStopLossResource(Resource):
   "position": {...}
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_adjust_stop_loss_model)
     def post(self):
         """调整止损参数"""
         from web.services.risk_management_service import adjust_stop_loss
+
         data = request.get_json()
         return adjust_stop_loss(
-            position_data=data.get('position'),
-            new_stop_loss_base=data.get('new_stop_loss_base'),
-            new_stop_loss_percent=data.get('new_stop_loss_percent')
+            position_data=data.get("position"),
+            new_stop_loss_base=data.get("new_stop_loss_base"),
+            new_stop_loss_percent=data.get("new_stop_loss_percent"),
         )
 
 
-@risk_ns.route('/portfolio')
+@risk_ns.route("/portfolio")
 class RiskPortfolioResource(Resource):
     """获取投资组合状态"""
-    @risk_ns.doc('get_portfolio_state',
-        description='''获取投资组合状态，包括风险占用、剩余资金等。
+
+    @risk_ns.doc(
+        "get_portfolio_state",
+        description="""获取投资组合状态，包括风险占用、剩余资金等。
 
 **请求示例：**
 ```json
@@ -3392,21 +4198,28 @@ class RiskPortfolioResource(Resource):
   "positions": [...]
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_portfolio_input_model)
     def post(self):
         """获取投资组合状态"""
-        from web.services.risk_management_service import create_portfolio_from_dict, get_portfolio_state
+        from web.services.risk_management_service import (
+            create_portfolio_from_dict,
+            get_portfolio_state,
+        )
+
         data = request.get_json()
         portfolio = create_portfolio_from_dict(data)
         return get_portfolio_state(portfolio)
 
 
-@risk_ns.route('/add-position')
+@risk_ns.route("/add-position")
 class RiskAddPositionResource(Resource):
     """添加新持仓"""
-    @risk_ns.doc('add_position',
-        description='''添加新持仓到投资组合。
+
+    @risk_ns.doc(
+        "add_position",
+        description="""添加新持仓到投资组合。
 
 **请求示例：**
 ```json
@@ -3420,19 +4233,21 @@ class RiskAddPositionResource(Resource):
   "stop_loss_percent": 5
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_add_position_model)
     def post(self):
         """添加新持仓"""
         from web.services.risk_management_service import add_position
+
         data = request.get_json()
         return add_position(
             portfolio_data=data,
-            symbol=data.get('symbol'),
-            shares=data.get('shares'),
-            cost_price=data.get('cost_price'),
-            current_price=data.get('current_price'),
-            stop_loss_percent=data.get('stop_loss_percent')
+            symbol=data.get("symbol"),
+            shares=data.get("shares"),
+            cost_price=data.get("cost_price"),
+            current_price=data.get("current_price"),
+            stop_loss_percent=data.get("stop_loss_percent"),
         )
 
 
@@ -3441,78 +4256,130 @@ class RiskAddPositionResource(Resource):
 # ============================================================================
 
 # Database Models
-risk_portfolio_settings_model = risk_ns.model('RiskPortfolioSettings', {
-    'total_capital': fields.Float(description='总资金', example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', example=2.0),
-    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:00:00')
-})
+risk_portfolio_settings_model = risk_ns.model(
+    "RiskPortfolioSettings",
+    {
+        "total_capital": fields.Float(description="总资金", example=650000),
+        "max_total_risk_percent": fields.Float(description="总风险比例%", example=6.0),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", example=2.0
+        ),
+        "updated_at": fields.String(
+            description="更新时间", example="2024-01-01 10:00:00"
+        ),
+    },
+)
 
-risk_portfolio_settings_input_model = risk_ns.model('RiskPortfolioSettingsInput', {
-    'total_capital': fields.Float(description='总资金', required=True, example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', example=2.0)
-})
+risk_portfolio_settings_input_model = risk_ns.model(
+    "RiskPortfolioSettingsInput",
+    {
+        "total_capital": fields.Float(
+            description="总资金", required=True, example=650000
+        ),
+        "max_total_risk_percent": fields.Float(description="总风险比例%", example=6.0),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", example=2.0
+        ),
+    },
+)
 
-risk_stored_position_model = risk_ns.model('RiskStoredPosition', {
-    'symbol': fields.String(description='股票代码', required=True, example='600382'),
-    'shares': fields.Integer(description='持股数量', required=True, example=10000),
-    'cost_price': fields.Float(description='成本价', required=True, example=42.0),
-    'stop_loss_base': fields.Float(description='止损基数', required=True, example=45.0),
-    'stop_loss_percent': fields.Float(description='止损比例%', example=8.0)
-})
+risk_stored_position_model = risk_ns.model(
+    "RiskStoredPosition",
+    {
+        "symbol": fields.String(
+            description="股票代码", required=True, example="600382"
+        ),
+        "shares": fields.Integer(description="持股数量", required=True, example=10000),
+        "cost_price": fields.Float(description="成本价", required=True, example=42.0),
+        "stop_loss_base": fields.Float(
+            description="止损基数", required=True, example=45.0
+        ),
+        "stop_loss_percent": fields.Float(description="止损比例%", example=8.0),
+    },
+)
 
-risk_position_output_model = risk_ns.model('RiskPositionOutput', {
-    'symbol': fields.String(description='股票代码', example='600382'),
-    'name': fields.String(description='股票名称', example='广东明珠'),
-    'shares': fields.Integer(description='持股数量', example=10000),
-    'cost_price': fields.Float(description='成本价', example=42.0),
-    'current_price': fields.Float(description='当前价格（从行情表获取）', example=45.0),
-    'stop_loss_base': fields.Float(description='止损基数', example=45.0),
-    'stop_loss_percent': fields.Float(description='止损比例%', example=3.0),
-    'created_at': fields.String(description='创建时间', example='2024-01-01 10:00:00'),
-    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:00:00')
-})
+risk_position_output_model = risk_ns.model(
+    "RiskPositionOutput",
+    {
+        "symbol": fields.String(description="股票代码", example="600382"),
+        "name": fields.String(description="股票名称", example="广东明珠"),
+        "shares": fields.Integer(description="持股数量", example=10000),
+        "cost_price": fields.Float(description="成本价", example=42.0),
+        "current_price": fields.Float(
+            description="当前价格（从行情表获取）", example=45.0
+        ),
+        "stop_loss_base": fields.Float(description="止损基数", example=45.0),
+        "stop_loss_percent": fields.Float(description="止损比例%", example=3.0),
+        "created_at": fields.String(
+            description="创建时间", example="2024-01-01 10:00:00"
+        ),
+        "updated_at": fields.String(
+            description="更新时间", example="2024-01-01 10:00:00"
+        ),
+    },
+)
 
-risk_full_portfolio_model = risk_ns.model('RiskFullPortfolio', {
-    'total_capital': fields.Float(description='总资金', example=650000),
-    'max_total_risk_percent': fields.Float(description='总风险比例%', example=6.0),
-    'max_single_risk_percent': fields.Float(description='单笔风险比例%', example=2.0),
-    'positions': fields.List(fields.Nested(risk_position_output_model), description='持仓列表'),
-    'updated_at': fields.String(description='更新时间', example='2024-01-01 10:00:00')
-})
+risk_full_portfolio_model = risk_ns.model(
+    "RiskFullPortfolio",
+    {
+        "total_capital": fields.Float(description="总资金", example=650000),
+        "max_total_risk_percent": fields.Float(description="总风险比例%", example=6.0),
+        "max_single_risk_percent": fields.Float(
+            description="单笔风险比例%", example=2.0
+        ),
+        "positions": fields.List(
+            fields.Nested(risk_position_output_model), description="持仓列表"
+        ),
+        "updated_at": fields.String(
+            description="更新时间", example="2024-01-01 10:00:00"
+        ),
+    },
+)
 
-risk_positions_list_model = risk_ns.model('RiskPositionsList', {
-    'positions': fields.List(fields.Nested(risk_position_output_model), description='持仓列表')
-})
+risk_positions_list_model = risk_ns.model(
+    "RiskPositionsList",
+    {
+        "positions": fields.List(
+            fields.Nested(risk_position_output_model), description="持仓列表"
+        )
+    },
+)
 
-risk_position_update_model = risk_ns.model('RiskPositionUpdate', {
-    'shares': fields.Integer(description='持股数量', example=10000),
-    'cost_price': fields.Float(description='成本价', example=42.0),
-    'stop_loss_base': fields.Float(description='止损基数', example=45.0),
-    'stop_loss_percent': fields.Float(description='止损比例%', example=3.0)
-})
+risk_position_update_model = risk_ns.model(
+    "RiskPositionUpdate",
+    {
+        "shares": fields.Integer(description="持股数量", example=10000),
+        "cost_price": fields.Float(description="成本价", example=42.0),
+        "stop_loss_base": fields.Float(description="止损基数", example=45.0),
+        "stop_loss_percent": fields.Float(description="止损比例%", example=3.0),
+    },
+)
 
 
-@risk_ns.route('/portfolio/settings')
+@risk_ns.route("/portfolio/settings")
 class RiskPortfolioSettingsResource(Resource):
     """投资组合设置（持久化）"""
-    @risk_ns.doc('load_portfolio_settings',
-        description='''从数据库加载投资组合设置。
+
+    @risk_ns.doc(
+        "load_portfolio_settings",
+        description="""从数据库加载投资组合设置。
 
 **返回数据：**
 - total_capital: 总资金
 - max_total_risk_percent: 总风险比例
 - max_single_risk_percent: 单笔风险比例
 - updated_at: 更新时间
-''')
+""",
+    )
     def get(self):
         """加载投资组合设置"""
         from web.services.risk_management_service import load_portfolio_settings
+
         return load_portfolio_settings()
 
-    @risk_ns.doc('save_portfolio_settings',
-        description='''保存投资组合设置到数据库。
+    @risk_ns.doc(
+        "save_portfolio_settings",
+        description="""保存投资组合设置到数据库。
 
 **请求示例：**
 ```json
@@ -3522,20 +4389,24 @@ class RiskPortfolioSettingsResource(Resource):
   "max_single_risk_percent": 2.5
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_portfolio_settings_input_model)
     def put(self):
         """保存投资组合设置"""
         from web.services.risk_management_service import save_portfolio_settings
+
         data = request.get_json()
         return save_portfolio_settings(data)
 
 
-@risk_ns.route('/portfolio/full')
+@risk_ns.route("/portfolio/full")
 class RiskFullPortfolioResource(Resource):
     """完整投资组合（持久化+实时价格）"""
-    @risk_ns.doc('load_full_portfolio',
-        description='''从数据库加载完整投资组合，包含：
+
+    @risk_ns.doc(
+        "load_full_portfolio",
+        description="""从数据库加载完整投资组合，包含：
 - 投资组合设置（总资金、风险比例）
 - 所有持仓（从数据库加载）
 - 当前价格（从行情表实时获取）
@@ -3563,18 +4434,22 @@ class RiskFullPortfolioResource(Resource):
   "updated_at": "2024-01-01 10:00:00"
 }
 ```
-''')
+""",
+    )
     def get(self):
         """加载完整投资组合"""
         from web.services.risk_management_service import load_full_portfolio
+
         return load_full_portfolio()
 
 
-@risk_ns.route('/positions')
+@risk_ns.route("/positions")
 class RiskPositionsResource(Resource):
     """持仓管理（持久化）"""
-    @risk_ns.doc('load_positions',
-        description='''从数据库加载所有持仓，包含：
+
+    @risk_ns.doc(
+        "load_positions",
+        description="""从数据库加载所有持仓，包含：
 - 当前价格（从行情表实时获取）
 - 股票名称（从 stock_names 表获取）
 
@@ -3594,14 +4469,17 @@ class RiskPositionsResource(Resource):
   ]
 }
 ```
-''')
+""",
+    )
     def get(self):
         """加载所有持仓"""
         from web.services.risk_management_service import load_positions
-        return {'positions': load_positions()}
 
-    @risk_ns.doc('add_position_to_db',
-        description='''添加持仓到数据库。
+        return {"positions": load_positions()}
+
+    @risk_ns.doc(
+        "add_position_to_db",
+        description="""添加持仓到数据库。
 
 **注意：** 不需要传 current_price，后端会从行情表自动获取。
 
@@ -3615,20 +4493,24 @@ class RiskPositionsResource(Resource):
   "stop_loss_percent": 5
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_stored_position_model)
     def post(self):
         """添加持仓"""
         from web.services.risk_management_service import add_position_to_db
+
         data = request.get_json()
         return add_position_to_db(data)
 
 
-@risk_ns.route('/positions/<string:symbol>')
+@risk_ns.route("/positions/<string:symbol>")
 class RiskPositionDetailResource(Resource):
     """单个持仓管理（持久化）"""
-    @risk_ns.doc('update_position_in_db',
-        description='''更新持仓信息。
+
+    @risk_ns.doc(
+        "update_position_in_db",
+        description="""更新持仓信息。
 
 **请求示例：**
 ```json
@@ -3637,19 +4519,21 @@ class RiskPositionDetailResource(Resource):
   "stop_loss_percent": 3
 }
 ```
-''')
+""",
+    )
     @risk_ns.expect(risk_position_update_model)
     def put(self, symbol):
         """更新持仓"""
         from web.services.risk_management_service import update_position_in_db
+
         data = request.get_json()
         return update_position_in_db(symbol, data)
 
-    @risk_ns.doc('delete_position_from_db',
-        description='''从数据库删除持仓。''')
+    @risk_ns.doc("delete_position_from_db", description="""从数据库删除持仓。""")
     def delete(self, symbol):
         """删除持仓"""
         from web.services.risk_management_service import delete_position_from_db
+
         return delete_position_from_db(symbol)
 
 
@@ -3657,153 +4541,512 @@ class RiskPositionDetailResource(Resource):
 # 资金管理 API
 # ============================================================================
 
-risk_adjust_capital_model = risk_ns.model('AdjustCapitalRequest', {
-    'initial_capital': fields.Float(required=True, description='新的初始资金'),
-    'reason': fields.String(description='变动原因'),
-})
+risk_adjust_capital_model = risk_ns.model(
+    "AdjustCapitalRequest",
+    {
+        "initial_capital": fields.Float(required=True, description="新的初始资金"),
+        "reason": fields.String(description="变动原因"),
+    },
+)
 
-risk_capital_state_model = risk_ns.model('CapitalState', {
-    'initial_capital': fields.Float(description='初始总资金'),
-    'cumulative_pnl': fields.Float(description='累计盈亏'),
-    'current_capital': fields.Float(description='当前实际总资金'),
-    'positions_value': fields.Float(description='持仓市值'),
-    'cash': fields.Float(description='剩余现金'),
-    'floating_pnl': fields.Float(description='浮动盈亏'),
-})
+risk_capital_state_model = risk_ns.model(
+    "CapitalState",
+    {
+        "initial_capital": fields.Float(description="初始总资金"),
+        "cumulative_pnl": fields.Float(description="累计盈亏"),
+        "current_capital": fields.Float(description="当前实际总资金"),
+        "positions_value": fields.Float(description="持仓市值"),
+        "cash": fields.Float(description="剩余现金"),
+        "floating_pnl": fields.Float(description="浮动盈亏"),
+    },
+)
 
 
-@risk_ns.route('/capital/state')
+@risk_ns.route("/capital/state")
 class RiskCapitalStateResource(Resource):
     """资金状态"""
-    @risk_ns.doc('get_capital_state',
-        description='''获取当前资金状态，包括初始资金、累计盈亏、当前实际资金等。''')
+
+    @risk_ns.doc(
+        "get_capital_state",
+        description="""获取当前资金状态，包括初始资金、累计盈亏、当前实际资金等。""",
+    )
     @risk_ns.marshal_with(risk_capital_state_model)
     def get(self):
         """获取资金状态"""
         from web.services.risk_management_service import get_capital_state
+
         return get_capital_state()
 
 
-@risk_ns.route('/capital/initial')
+@risk_ns.route("/capital/initial")
 class RiskCapitalInitialResource(Resource):
     """初始资金管理"""
-    @risk_ns.doc('adjust_initial_capital',
-        description='''调整初始资金（追加投资或取出资金）。''')
+
+    @risk_ns.doc(
+        "adjust_initial_capital", description="""调整初始资金（追加投资或取出资金）。"""
+    )
     @risk_ns.expect(risk_adjust_capital_model)
     def put(self):
         """调整初始资金"""
         from web.services.risk_management_service import adjust_initial_capital
+
         data = request.get_json()
         return adjust_initial_capital(
-            data.get('initial_capital', 0),
-            data.get('reason', '')
+            data.get("initial_capital", 0), data.get("reason", "")
         )
 
 
-@risk_ns.route('/capital/cash')
+@risk_ns.route("/capital/cash")
 class RiskCapitalCashResource(Resource):
     """剩余现金管理"""
-    @risk_ns.doc('update_cash',
-        description='''更新剩余现金（手动校准资金池）。''')
-    @risk_ns.expect(risk_ns.model('UpdateCashRequest', {
-        'cash': fields.Float(required=True, description='新的剩余现金'),
-    }))
+
+    @risk_ns.doc("update_cash", description="""更新剩余现金（手动校准资金池）。""")
+    @risk_ns.expect(
+        risk_ns.model(
+            "UpdateCashRequest",
+            {
+                "cash": fields.Float(required=True, description="新的剩余现金"),
+            },
+        )
+    )
     def put(self):
         """更新剩余现金"""
         from web.services.risk_management_service import update_cash
+
         data = request.get_json()
-        return update_cash(data.get('cash', 0))
+        return update_cash(data.get("cash", 0))
 
 
 # ============================================================================
 # 月度快照 API
 # ============================================================================
 
-risk_monthly_snapshot_model = risk_ns.model('MonthlySnapshot', {
-    'id': fields.Integer(description='ID'),
-    'year_month': fields.String(description='月份'),
-    'month_start_capital': fields.Float(description='月初初始资金'),
-    'month_start_positions_value': fields.Float(description='月初持仓市值'),
-    'month_end_capital': fields.Float(description='月末实际资金'),
-    'month_end_positions_value': fields.Float(description='月末持仓市值'),
-    'month_end_cash': fields.Float(description='月末剩余现金'),
-    'month_pnl': fields.Float(description='本月盈亏金额'),
-    'month_pnl_percent': fields.Float(description='本月盈亏比例'),
-    'capital_change': fields.Float(description='资金变动'),
-    'capital_change_reason': fields.String(description='资金变动原因'),
-    'created_at': fields.String(description='创建时间'),
-    'updated_at': fields.String(description='更新时间'),
-})
+risk_monthly_snapshot_model = risk_ns.model(
+    "MonthlySnapshot",
+    {
+        "id": fields.Integer(description="ID"),
+        "year_month": fields.String(description="月份"),
+        "month_start_capital": fields.Float(description="月初初始资金"),
+        "month_start_positions_value": fields.Float(description="月初持仓市值"),
+        "month_end_capital": fields.Float(description="月末实际资金"),
+        "month_end_positions_value": fields.Float(description="月末持仓市值"),
+        "month_end_cash": fields.Float(description="月末剩余现金"),
+        "month_pnl": fields.Float(description="本月盈亏金额"),
+        "month_pnl_percent": fields.Float(description="本月盈亏比例"),
+        "capital_change": fields.Float(description="资金变动"),
+        "capital_change_reason": fields.String(description="资金变动原因"),
+        "created_at": fields.String(description="创建时间"),
+        "updated_at": fields.String(description="更新时间"),
+    },
+)
 
-risk_monthly_capital_change_model = risk_ns.model('MonthlyCapitalChangeRequest', {
-    'year_month': fields.String(required=True, description='月份'),
-    'amount': fields.Float(required=True, description='变动金额'),
-    'reason': fields.String(description='变动原因'),
-})
+risk_monthly_capital_change_model = risk_ns.model(
+    "MonthlyCapitalChangeRequest",
+    {
+        "year_month": fields.String(required=True, description="月份"),
+        "amount": fields.Float(required=True, description="变动金额"),
+        "reason": fields.String(description="变动原因"),
+    },
+)
 
 
-@risk_ns.route('/monthly/snapshots')
+@risk_ns.route("/monthly/snapshots")
 class RiskMonthlySnapshotsResource(Resource):
     """月度快照管理"""
-    @risk_ns.doc('get_monthly_snapshots',
-        description='''获取月度快照列表。''')
-    @risk_ns.param('start_month', '起始月份')
-    @risk_ns.param('end_month', '结束月份')
-    @risk_ns.param('limit', '最大返回数量', type=int, default=12)
+
+    @risk_ns.doc("get_monthly_snapshots", description="""获取月度快照列表。""")
+    @risk_ns.param("start_month", "起始月份")
+    @risk_ns.param("end_month", "结束月份")
+    @risk_ns.param("limit", "最大返回数量", type=int, default=12)
     @risk_ns.marshal_list_with(risk_monthly_snapshot_model)
     def get(self):
         """获取月度快照列表"""
         from web.services.risk_management_service import get_monthly_snapshots
-        start_month = request.args.get('start_month')
-        end_month = request.args.get('end_month')
-        limit = int(request.args.get('limit', 12))
+
+        start_month = request.args.get("start_month")
+        end_month = request.args.get("end_month")
+        limit = int(request.args.get("limit", 12))
         return get_monthly_snapshots(start_month, end_month, limit)
 
-    @risk_ns.doc('create_monthly_snapshot',
-        description='''创建当月快照。如果快照已存在则更新。''')
-    @risk_ns.param('year_month', '月份，默认为当前月')
+    @risk_ns.doc(
+        "create_monthly_snapshot",
+        description="""创建当月快照。如果快照已存在则更新。""",
+    )
+    @risk_ns.param("year_month", "月份，默认为当前月")
     @risk_ns.marshal_with(risk_monthly_snapshot_model)
     def post(self):
         """创建月度快照"""
         from web.services.risk_management_service import create_monthly_snapshot
-        year_month = request.args.get('year_month')
+
+        year_month = request.args.get("year_month")
         return create_monthly_snapshot(year_month)
 
 
-@risk_ns.route('/monthly/capital-change')
+@risk_ns.route("/monthly/capital-change")
 class RiskMonthlyCapitalChangeResource(Resource):
     """月度资金变动"""
-    @risk_ns.doc('update_monthly_capital_change',
-        description='''更新某月的资金追加/取出记录。''')
+
+    @risk_ns.doc(
+        "update_monthly_capital_change", description="""更新某月的资金追加/取出记录。"""
+    )
     @risk_ns.expect(risk_monthly_capital_change_model)
     def put(self):
         """更新月度资金变动"""
         from web.services.risk_management_service import update_monthly_capital_change
+
         data = request.get_json()
         return update_monthly_capital_change(
-            data.get('year_month', ''),
-            data.get('amount', 0),
-            data.get('reason', '')
+            data.get("year_month", ""), data.get("amount", 0), data.get("reason", "")
         )
 
 
-@risk_ns.route('/capital/realized-pnl')
+@risk_ns.route("/capital/realized-pnl")
 class RiskRealizedPnlResource(Resource):
     """已实现盈亏"""
-    @risk_ns.doc('add_realized_pnl',
-        description='''添加已实现盈亏到累计盈亏，并更新现金（卖出股票后调用）。''')
-    @risk_ns.expect(risk_ns.model('RealizedPnlRequest', {
-        'realized_profit': fields.Float(required=True, description='已实现盈亏金额'),
-        'sell_value': fields.Float(required=True, description='卖出金额（卖出价格 × 卖出股数）'),
-        'symbol': fields.String(description='股票代码'),
-    }))
+
+    @risk_ns.doc(
+        "add_realized_pnl",
+        description="""添加已实现盈亏到累计盈亏，并更新现金（卖出股票后调用）。""",
+    )
+    @risk_ns.expect(
+        risk_ns.model(
+            "RealizedPnlRequest",
+            {
+                "realized_profit": fields.Float(
+                    required=True, description="已实现盈亏金额"
+                ),
+                "sell_value": fields.Float(
+                    required=True, description="卖出金额（卖出价格 × 卖出股数）"
+                ),
+                "symbol": fields.String(description="股票代码"),
+            },
+        )
+    )
     def post(self):
         """添加已实现盈亏"""
         from web.services.risk_management_service import add_realized_pnl
+
         data = request.get_json()
         return add_realized_pnl(
-            data.get('realized_profit', 0),
-            data.get('sell_value', 0),
-            data.get('symbol', '')
+            data.get("realized_profit", 0),
+            data.get("sell_value", 0),
+            data.get("symbol", ""),
         )
 
+
+# ============================================================================
+# Valuation Resources
+# ============================================================================
+
+valuation_dcf_config_model = valuation_ns.model(
+    "DCFConfig",
+    {
+        "risk_profile": fields.String(
+            description="风险偏好 (conservative, balanced, aggressive)"
+        ),
+        "forecast_years": fields.Integer(description="预测年数"),
+        "terminal_growth": fields.Float(description="终值增长率"),
+        "risk_free_rate": fields.Float(description="无风险利率"),
+        "market_return": fields.Float(description="市场回报率"),
+        "growth_rate_cap": fields.Float(description="增长率上限"),
+        "wacc_min": fields.Float(description="WACC下限"),
+        "wacc_max": fields.Float(description="WACC上限"),
+    },
+)
+
+
+@valuation_ns.route("/summary/<symbol>")
+class ValuationSummaryResource(Resource):
+    """股票估值摘要"""
+
+    @valuation_ns.doc(
+        "get_valuation_summary",
+        description="""获取股票估值摘要。
+
+**路径参数：**
+- **symbol**: 股票代码 (如: 600382, 000001.SZ)
+
+**查询参数：**
+- **methods**: 估值方法，逗号分隔 (pe, pb, ps, peg, dcf, combined)
+- **date**: 估值日期 (YYYY-MM-DD 或 YYYYMMDD)
+- **combine_method**: 组合方式 (weighted, average, median, max_confidence)
+- **dcf_config**: DCF估值配置参数(JSON格式)
+
+**返回数据：**
+- symbol: 股票代码
+- date: 估值日期
+- fair_value: 合理价值
+- current_price: 当前价格
+- upside_downside: 涨跌空间
+- rating: 评级
+- confidence: 置信度
+- metrics: 估值指标
+- individual_results: 各模型结果
+""",
+    )
+    @valuation_ns.param(
+        "methods", "估值方法，逗号分隔 (pe, pb, ps, peg, dcf, combined)"
+    )
+    @valuation_ns.param("date", "估值日期/股价日期 (YYYY-MM-DD 或 YYYYMMDD)")
+    @valuation_ns.param(
+        "fiscal_date",
+        "财务数据截止报告期 (YYYY-MM-DD 或 YYYYMMDD)，如 2023-12-31 表示使用 2023 年报",
+    )
+    @valuation_ns.param(
+        "combine_method",
+        "组合方式 (weighted, average, median, max_confidence, bayesian, min_fair_value)",
+    )
+    @valuation_ns.param("dcf_config", "DCF估值配置参数(JSON格式)")
+    def get(self, symbol):
+        """获取股票估值摘要"""
+        from web.services.valuation_service import valuation_summary
+
+        methods = request.args.get("methods")
+        date = request.args.get("date")
+        fiscal_date = request.args.get("fiscal_date")
+        combine_method = request.args.get("combine_method", "weighted")
+        dcf_config_str = request.args.get("dcf_config")
+
+        dcf_config = None
+        if dcf_config_str:
+            import json
+
+            try:
+                dcf_config = json.loads(dcf_config_str)
+            except json.JSONDecodeError:
+                pass
+
+        data, status_code = valuation_summary(
+            symbol,
+            methods=methods,
+            date=date,
+            fiscal_date=fiscal_date,
+            combine_method=combine_method,
+            dcf_config=dcf_config,
+        )
+        return data, status_code
+
+
+@valuation_ns.route("/batch")
+class ValuationBatchResource(Resource):
+    """批量估值"""
+
+    @valuation_ns.doc(
+        "batch_valuation",
+        description="""批量获取股票估值。
+
+**请求体：**
+```json
+{
+  "symbols": "600382,000001.SZ",
+  "methods": "pe,pb,ps,peg",
+  "date": "2024-01-01",
+  "combine_method": "weighted"
+}
+```
+
+**参数说明：**
+- symbols: 股票代码，逗号分隔 (必填)
+- methods: 估值方法，逗号分隔
+- date: 估值日期
+- fiscal_date: 财务数据报告期
+- combine_method: 组合方式 (weighted, average, median, max_confidence, bayesian, min_fair_value)
+- dcf_config: DCF估值配置参数
+""",
+    )
+    @valuation_ns.expect(
+        valuation_ns.model(
+            "BatchValuationRequest",
+            {
+                "symbols": fields.String(
+                    required=True, description="股票代码，逗号分隔"
+                ),
+                "methods": fields.String(description="估值方法，逗号分隔"),
+                "date": fields.String(description="估值日期"),
+                "fiscal_date": fields.String(description="财务数据报告期"),
+                "combine_method": fields.String(description="组合方式"),
+                "dcf_config": fields.Nested(
+                    valuation_dcf_config_model, description="DCF估值配置参数"
+                ),
+            },
+        )
+    )
+    def post(self):
+        """批量获取股票估值"""
+        from web.services.valuation_service import batch_valuation
+
+        data = request.get_json()
+        symbols = data.get("symbols", "")
+        methods = data.get("methods")
+        date = data.get("date")
+        fiscal_date = data.get("fiscal_date")
+        combine_method = data.get("combine_method", "weighted")
+        dcf_config = data.get("dcf_config")
+
+        return batch_valuation(
+            symbols,
+            methods=methods,
+            date=date,
+            fiscal_date=fiscal_date,
+            combine_method=combine_method,
+            dcf_config=dcf_config,
+        )
+
+
+@valuation_ns.route("/compare")
+class ValuationCompareResource(Resource):
+    """估值对比"""
+
+    @valuation_ns.doc(
+        "compare_valuation",
+        description="""对比多只股票的估值。
+
+**请求体：**
+```json
+{
+  "symbols": "600382,000001.SZ,600519",
+  "method": "pe",
+  "date": "2024-01-01"
+}
+```
+""",
+    )
+    @valuation_ns.expect(
+        valuation_ns.model(
+            "CompareValuationRequest",
+            {
+                "symbols": fields.String(
+                    required=True, description="股票代码，逗号分隔"
+                ),
+                "method": fields.String(description="估值方法"),
+                "date": fields.String(description="估值日期"),
+            },
+        )
+    )
+    def post(self):
+        """对比多只股票的估值"""
+        from web.services.valuation_service import compare_valuation
+
+        data = request.get_json()
+        symbols = data.get("symbols", "")
+        method = data.get("method")
+        date = data.get("date")
+
+        return compare_valuation(symbols, method=method, date=date)
+
+
+@valuation_ns.route("/models")
+class ValuationModelsResource(Resource):
+    """可用估值模型"""
+
+    @valuation_ns.doc(
+        "get_valuation_models", description="""获取所有可用的估值模型列表。"""
+    )
+    def get(self):
+        """获取所有可用的估值模型"""
+        from web.services.valuation_service import list_models
+
+        data, status_code = list_models()
+        return data, status_code
+
+
+@valuation_ns.route("/dcf-presets")
+class ValuationDcfPresetsResource(Resource):
+    """DCF预设配置"""
+
+    @valuation_ns.doc(
+        "get_dcf_presets",
+        description="""获取DCF估值预设配置。
+
+**返回三种预设配置：**
+- conservative: 保守型 - 高折现率、低增长假设
+- balanced: 平衡型 - 中等参数
+- aggressive: 积极型 - 低折现率、高增长假设
+""",
+    )
+    def get(self):
+        """获取DCF预设配置"""
+        from web.services.valuation_service import get_dcf_config_presets
+
+        data, status_code = get_dcf_config_presets()
+        return data, status_code
+
+
+@valuation_ns.route("/prior-matrix/status")
+class ValuationPriorStatusResource(Resource):
+    """贝叶斯先验矩阵状态"""
+
+    @valuation_ns.doc(
+        "get_valuation_prior_status",
+        description="""查看贝叶斯估值先验矩阵的数据状态。
+
+返回各行业×估值方法的历史准确率、样本数量和更新时间。
+首次使用前需通过 POST /prior-matrix/refresh 触发计算。
+""",
+    )
+    def get(self):
+        """查看贝叶斯先验矩阵状态"""
+        try:
+            import os
+            from src.valuation.bayesian.prior_matrix import PriorMatrix
+
+            db_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "data", "tushare_data.db"
+            )
+            prior = PriorMatrix(db_path=db_path)
+            status = prior.get_status()
+            return {"success": True, "count": len(status), "data": status}, 200
+        except Exception as e:
+            return {"success": False, "error": str(e)}, 500
+
+
+@valuation_ns.route("/prior-matrix/refresh")
+class ValuationPriorRefreshResource(Resource):
+    """触发贝叶斯先验矩阵重新计算"""
+
+    @valuation_ns.doc(
+        "refresh_valuation_prior",
+        description="""触发后台重新计算贝叶斯估值先验矩阵。
+
+后台 Worker 会对历史季报期运行估值回测，计算各行业×方法的历史方向准确率。
+返回 task_id，可通过任务接口轮询进度。
+
+**请求体（可选）：**
+```json
+{
+  "years": 3,
+  "top_n": 15,
+  "level": "both",
+  "industry_codes": ["801780", "801150"],
+  "min_stocks": 15
+}
+```
+
+**参数说明：**
+- years: 回测年数（默认 3，范围 1-10）
+- top_n: 每行业取市值前N只股票（默认 15，范围 1-50）
+- level: 回测粒度（默认 "both"）
+  - "L1": 仅回测申万一级行业（31个，样本稳定）
+  - "L2": 仅回测申万二级行业（~100个有效，精度更高）
+  - "both": 同时回测L1和L2（推荐，贝叶斯估值优先使用L2数据）
+- industry_codes: 指定L1行业代码列表（默认 null=全部，仅对L1生效）
+- min_stocks: L2行业最少股票数过滤（默认 15）
+""",
+    )
+    def post(self):
+        """触发后台重新计算贝叶斯先验矩阵"""
+        from web.services.task_creation_service import create_task
+
+        data = request.get_json() or {}
+        return create_task(
+            {
+                "task_type": "update_valuation_prior",
+                "params": {
+                    "years": data.get("years", 3),
+                    "top_n": data.get("top_n", 15),
+                    "level": data.get("level", "both"),
+                    "industry_codes": data.get("industry_codes"),
+                    "min_stocks": data.get("min_stocks", 15),
+                },
+            }
+        )

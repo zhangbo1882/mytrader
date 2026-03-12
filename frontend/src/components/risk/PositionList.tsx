@@ -23,6 +23,11 @@ const PositionList: React.FC<PositionListProps> = ({
   onAdjustStopLoss,
   onSell
 }) => {
+  // 计算汇总
+  const totalMarketValue = positions.reduce((sum, p) => sum + (p.market_value || 0), 0);
+  const totalRisk = positions.reduce((sum, p) => sum + (p.total_risk || 0), 0);
+  const totalProfit = positions.reduce((sum, p) => sum + (p.total_profit || 0), 0);
+
   const columns: ColumnsType<PositionDetail> = [
     {
       title: '代码',
@@ -98,7 +103,11 @@ const PositionList: React.FC<PositionListProps> = ({
       key: 'total_risk',
       width: 100,
       align: 'right',
-      render: (val: number) => `¥${val.toLocaleString()}`,
+      render: (val: number) => (
+        <Tooltip title="从成本价到止损价的风险">
+          <span>¥{(val || 0).toLocaleString()}</span>
+        </Tooltip>
+      ),
     },
     {
       title: '盈亏',
@@ -179,6 +188,32 @@ const PositionList: React.FC<PositionListProps> = ({
       size="small"
       pagination={false}
       locale={{ emptyText: '暂无持仓' }}
+      summary={() => {
+        if (positions.length === 0) return null;
+        const profitColor = totalProfit >= 0 ? '#cf1322' : '#3f8600';
+        return (
+          <Table.Summary fixed>
+            <Table.Summary.Row>
+              <Table.Summary.Cell index={0} colSpan={5}>
+                <strong>合计</strong>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={5} align="right">
+                <strong>¥{totalMarketValue.toLocaleString()}</strong>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={6} colSpan={2} />
+              <Table.Summary.Cell index={8} align="right">
+                <Tag color="orange">¥{totalRisk.toLocaleString()}</Tag>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={9} align="right">
+                <span style={{ color: profitColor, fontWeight: 'bold' }}>
+                  ¥{totalProfit.toLocaleString()}
+                </span>
+              </Table.Summary.Cell>
+              <Table.Summary.Cell index={10} colSpan={2} />
+            </Table.Summary.Row>
+          </Table.Summary>
+        );
+      }}
     />
   );
 };

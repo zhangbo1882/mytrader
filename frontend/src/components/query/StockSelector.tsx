@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { AutoComplete, Spin, Tag, message } from 'antd';
+import { AutoComplete, Spin, Tag } from 'antd';
 import { LoadingOutlined, HistoryOutlined } from '@ant-design/icons';
 import { stockService } from '@/services';
 import type { Stock } from '@/types';
@@ -130,7 +130,7 @@ export function StockSelector({
   }, [searchText, history, selectedStock]);
 
   // 选择股票
-  const handleSelect = (value: string, option: any) => {
+  const handleSelect = (_value: string, option: any) => {
     // 只保留一只股票
     setSymbols([{ code: option.code, name: option.name }]);
 

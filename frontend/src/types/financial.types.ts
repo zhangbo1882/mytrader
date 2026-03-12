@@ -18,6 +18,7 @@ export interface FinancialReport {
   balance: FinancialDataItem[];
   cashflow: FinancialDataItem[];
   indicators: FinancialDataItem[];
+  valuation?: FinancialDataItem[];
 }
 
 export interface FinancialDataItem {

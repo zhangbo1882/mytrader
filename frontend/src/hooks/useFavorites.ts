@@ -42,6 +42,7 @@ export function useFavorites() {
         symbols: codes,
         startDate: '',
         endDate: '',
+        interval: '1d',
         priceType: 'qfq',
       };
     },

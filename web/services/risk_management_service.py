@@ -123,18 +123,12 @@ class Portfolio:
 
     @property
     def used_risk(self) -> float:
-        """已用风险 = 已亏损部分 + 潜在风险
+        """已用风险 = 所有持仓的初始风险之和
 
-        已亏损部分 = 初始资金 - 当前资金（正数表示亏损）
-        潜在风险 = Σ (当前价格 - 止损价) × 股数
+        初始风险 = Σ (成本价 - 止损价) × 股数
+        这是买入时设定的风险，即如果股票跌到止损价会亏损多少。
         """
-        # 1. 已亏损部分（正数表示亏损）
-        unrealized_loss = max(0, self.initial_capital - self.total_capital)
-
-        # 2. 潜在风险：每只股票从当前价格到止损价的风险
-        potential_risk = sum(p.current_potential_risk for p in self.positions)
-
-        return unrealized_loss + potential_risk
+        return sum(p.total_risk for p in self.positions)
 
     @property
     def available_risk(self) -> float:
@@ -155,19 +149,12 @@ class Portfolio:
         """获取投资组合状态"""
         risk_usage = self.used_risk / self.total_risk_budget * 100 if self.total_risk_budget > 0 else 0
 
-        # 计算已亏损部分（用于显示）
-        unrealized_loss = max(0, self.initial_capital - self.total_capital)
-        # 计算潜在风险（用于显示）
-        potential_risk = sum(p.current_potential_risk for p in self.positions)
-
         return {
             'initial_capital': round(self.initial_capital, 2),
             'total_capital': self.total_capital,
             'total_risk_budget': round(self.total_risk_budget, 2),
             'single_risk_budget': round(self.single_risk_budget, 2),
             'used_risk': round(self.used_risk, 2),
-            'unrealized_loss': round(unrealized_loss, 2),
-            'potential_risk': round(potential_risk, 2),
             'available_risk': round(self.available_risk, 2),
             'positions_value': round(self.positions_value, 2),
             'remaining_cash': round(self.remaining_cash, 2),

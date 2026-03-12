@@ -15,25 +15,30 @@ interface EquityCurveProps {
   result: BacktestResult;
 }
 
+interface CurvePoint {
+  date: string;
+  value: number;
+  benchmark_value?: number;
+}
+
 export function EquityCurve({ result }: EquityCurveProps) {
-  // Generate portfolio values from trades if not provided
-  const portfolioValues = result.portfolio_values || generatePortfolioValues(result);
+  const portfolioValues = generatePortfolioValues(result);
 
   const formatYAxis = (value: number) => {
     return `¥${(value / 10000).toFixed(1)}万`;
   };
 
-  const formatTooltip = (value: any, name: any) => {
-    if (name === 'portfolio_value') {
+  const formatTooltip = (value: number | string, name: string) => {
+    if (name === 'value' && typeof value === 'number') {
       return [`¥${value.toLocaleString()}`, '投资组合'];
     }
-    if (name === 'benchmark_value') {
+    if (name === 'benchmark_value' && typeof value === 'number') {
       return [`¥${value.toLocaleString()}`, '基准指数'];
     }
-    return [value, name];
+    return [String(value), name];
   };
 
-  const hasBenchmark = portfolioValues.some(v => v.benchmark_value !== undefined);
+  const hasBenchmark = portfolioValues.some((point) => point.benchmark_value !== undefined);
 
   return (
     <Card title="收益曲线">
@@ -43,7 +48,7 @@ export function EquityCurve({ result }: EquityCurveProps) {
           <XAxis
             dataKey="date"
             tick={{ fontSize: 12 }}
-            tickFormatter={(value) => value.substring(5)} // Show MM-DD only
+            tickFormatter={(value) => String(value).substring(5)}
           />
           <YAxis tickFormatter={formatYAxis} />
           <Tooltip formatter={formatTooltip} />
@@ -73,9 +78,8 @@ export function EquityCurve({ result }: EquityCurveProps) {
   );
 }
 
-// Helper function to generate portfolio values from trades
-function generatePortfolioValues(result: BacktestResult) {
-  const values: Array<{ date: string; value: number; benchmark_value?: number }> = [];
+function generatePortfolioValues(result: BacktestResult): CurvePoint[] {
+  const values: CurvePoint[] = [];
   const { trades, basic_info } = result;
 
   let cash = basic_info.initial_cash;
@@ -83,17 +87,16 @@ function generatePortfolioValues(result: BacktestResult) {
   const startDate = new Date(basic_info.start_date);
   const endDate = new Date(basic_info.end_date);
 
-  // Sort trades by buy date
   const sortedTrades = [...trades].sort((a, b) => a.buy_date.localeCompare(b.buy_date));
 
-  // Create a map of dates to portfolio values
   const tradeMap = new Map<string, { type: 'buy' | 'sell'; price: number; size: number }>();
-  sortedTrades.forEach(trade => {
+  sortedTrades.forEach((trade) => {
     tradeMap.set(trade.buy_date, { type: 'buy', price: trade.buy_price, size: trade.size });
-    tradeMap.set(trade.sell_date, { type: 'sell', price: trade.sell_price, size: trade.size });
+    if (trade.sell_date && trade.sell_price != null) {
+      tradeMap.set(trade.sell_date, { type: 'sell', price: trade.sell_price, size: trade.size });
+    }
   });
 
-  // Generate daily values
   let currentDate = new Date(startDate);
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
@@ -104,20 +107,18 @@ function generatePortfolioValues(result: BacktestResult) {
         const cost = trade.price * trade.size;
         cash -= cost;
         holdings = trade.size;
-      } else if (trade.type === 'sell') {
+      } else {
         const proceeds = trade.price * trade.size;
         cash += proceeds;
         holdings = 0;
       }
     }
 
-    // Calculate portfolio value (use last trade price if holding, or cash if not)
     let portfolioValue = cash;
     if (holdings > 0) {
-      // Find the most recent buy price
       const lastBuy = [...sortedTrades]
         .reverse()
-        .find(t => t.buy_date <= dateStr && t.sell_date > dateStr);
+        .find((item) => item.buy_date <= dateStr && (item.sell_date ?? '9999-12-31') > dateStr);
       if (lastBuy) {
         portfolioValue = cash + holdings * lastBuy.buy_price;
       }

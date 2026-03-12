@@ -21,8 +21,7 @@ import {
 } from '@ant-design/icons';
 import { Layout, Menu, theme } from 'antd';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { useUIStore } from '@/stores';
 
 const { Header, Sider, Content } = Layout;
 
@@ -54,19 +53,6 @@ type MenuItem = {
   icon: React.ReactNode;
   label: string;
 };
-
-// Simple UI store
-const useUIStore = create()(
-  persist(
-    (set: any) => ({
-      activeTab: 'query',
-      sidebarCollapsed: false,
-      setActiveTab: (tab: string) => set({ activeTab: tab }),
-      toggleSidebar: () => set((state: any) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-    }),
-    { name: 'mytrader-ui' }
-  )
-);
 
 function AppLayout() {
   const navigate = useNavigate();

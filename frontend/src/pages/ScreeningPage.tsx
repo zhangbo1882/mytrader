@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Typography, Card, Tabs, Alert, Spin, message, Button } from 'antd';
-import { FilterOutlined, SaveOutlined, HistoryOutlined } from '@ant-design/icons';
+import { Typography, Card, Tabs, Alert, Spin, message } from 'antd';
+import { FilterOutlined, HistoryOutlined } from '@ant-design/icons';
 import { PresetStrategySelector, CustomCriteriaBuilder, ScreeningResults, ScreeningHistory } from '@/components/screening';
 import { screeningService } from '@/services';
 import type { PresetStrategy, ScreeningConfig, ScreeningResult, Criteria } from '@/types';
@@ -193,7 +193,6 @@ function ScreeningPage() {
   const [error, setError] = useState('');
   const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
   const [presetTemplateConfig, setPresetTemplateConfig] = useState<ScreeningConfig | null>(null);
-  const [presetLoadedMessage, setPresetLoadedMessage] = useState<string>('');
 
   const handlePresetSubmit = async (strategy: PresetStrategy, config?: ScreeningConfig) => {
     // 预设策略作为模板：将配置加载到自定义构建器
@@ -203,24 +202,8 @@ function ScreeningPage() {
       currentConfig = config;
 
       // 设置提示消息
-      const strategyNames: Record<PresetStrategy, string> = {
-        liquidity: '流动性策略',
-        value: '价值投资策略',
-        growth: '成长股策略',
-        tech_growth: '科技成长策略',
-        quality: '质量策略',
-        dividend: '股息策略',
-        low_volatility: '低波动策略',
-        turnaround: '困境反转策略',
-        momentum_quality: '动量质量策略',
-        exclude_financials: '排除金融策略'
-      };
-      const strategyName = strategyNames[strategy] || strategy;
-      const message = `已加载 "${strategyName}" 的筛选条件作为模板，您可以在下方修改参数`;
-
       // Set all states
       setPresetTemplateConfig(config);
-      setPresetLoadedMessage(message);
 
       // Delay tab switch to ensure state is updated
       setTimeout(() => {
@@ -273,7 +256,7 @@ function ScreeningPage() {
 
       await screeningService.saveHistory(
         autoName,
-        configToSave,
+        configToSave as ScreeningConfig,
         result?.stocks
       );
 
@@ -325,13 +308,11 @@ function ScreeningPage() {
               label: '自定义筛选',
               children: (
                 <>
-                  {console.log('Rendering CustomCriteriaBuilder with presetTemplateConfig:', presetTemplateConfig, 'presetLoadedMessage:', presetLoadedMessage)}
                   <CustomCriteriaBuilder
                     key={presetTemplateConfig ? `preset-${Date.now()}` : 'default'}
                     onSubmit={handleCustomSubmit}
                     loading={loading}
-                    initialConfig={presetTemplateConfig}
-                    presetLoadedMessage={presetLoadedMessage}
+                    initialConfig={presetTemplateConfig ?? undefined}
                   />
                 </>
               ),

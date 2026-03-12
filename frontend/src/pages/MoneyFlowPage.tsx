@@ -27,7 +27,6 @@ import type { StockMoneyflow, IndustryMoneyflow, IndustryLevel } from '@/types/m
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
-const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 type TabKey = 'industry' | 'stock';
@@ -287,7 +286,7 @@ function MoneyFlowPage() {
 
       const response = await moneyflowService.getIndustryStocksMoneyflow(
         industryName!,
-        record.level,
+        record.level as IndustryLevel | undefined,
         tradeDate,
         accumulateDays
       );
@@ -477,7 +476,7 @@ function MoneyFlowPage() {
                             title: '净流入(万元)',
                             dataIndex: 'net_mf_amount',
                             key: 'net_mf_amount',
-                            render: (val: number, record: StockMoneyflow) => {
+                            render: (val: number) => {
                               const ratio = expandedRow.industryNetMfAmount && expandedRow.industryNetMfAmount !== 0
                                 ? (val / expandedRow.industryNetMfAmount * 100)
                                 : 0;

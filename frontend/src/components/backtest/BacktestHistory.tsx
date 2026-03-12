@@ -1,9 +1,14 @@
-import { useState, useEffect } from 'react';
-import { Table, Button, Input, Select, Modal, Space, message, Popconfirm, Card, Row, Col, Statistic, Tabs } from 'antd';
-import { DeleteOutlined, EyeOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import { Button, Card, Col, Input, message, Modal, Popconfirm, Row, Select, Space, Statistic, Table, Tabs } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import { DeleteOutlined, EyeOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { backtestService } from '@/services';
-import type { BacktestHistory, BacktestHistoryDetail, BacktestHistoryFilters } from '@/types';
-import { BasicInfoCards, TradeTable, HealthMetrics, EquityCurve, BenchmarkComparison } from '@/components/backtest';
+import type {
+  BacktestHistory as BacktestHistoryItem,
+  BacktestHistoryDetail,
+  BacktestHistoryFilters,
+} from '@/types';
+import { BasicInfoCards, BenchmarkComparison, EquityCurve, HealthMetrics, TradeTable } from '@/components/backtest';
 
 interface BacktestHistoryProps {
   refreshTrigger?: number;
@@ -11,24 +16,22 @@ interface BacktestHistoryProps {
 
 function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
   const [loading, setLoading] = useState(false);
-  const [histories, setHistories] = useState<BacktestHistory[]>([]);
+  const [histories, setHistories] = useState<BacktestHistoryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [filters, setFilters] = useState<BacktestHistoryFilters>({
     page: 1,
     page_size: 20,
     stock: '',
-    strategy: ''
+    strategy: '',
   });
-
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<BacktestHistoryDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Load history list
   const loadHistory = async () => {
     setLoading(true);
     try {
-      const response = await backtestService.getHistory(filters) as any;
+      const response = await backtestService.getHistory(filters);
       setHistories(response.history);
       setTotal(response.total);
     } catch (err) {
@@ -42,12 +45,11 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
     loadHistory();
   }, [refreshTrigger, filters.page, filters.page_size]);
 
-  // View detail
   const handleViewDetail = async (taskId: string) => {
     setDetailLoading(true);
     setDetailVisible(true);
     try {
-      const response = await backtestService.getHistoryDetail(taskId) as any;
+      const response = await backtestService.getHistoryDetail(taskId);
       if (response.success) {
         setSelectedDetail(response.detail);
       } else {
@@ -62,7 +64,6 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
     }
   };
 
-  // Delete history
   const handleDelete = async (taskId: string) => {
     try {
       await backtestService.deleteHistory(taskId);
@@ -73,9 +74,8 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
     }
   };
 
-  // Filter handling
-  const handleFilterChange = (key: string, value: any) => {
-    setFilters(prev => ({ ...prev, [key]: value, page: 1 }));
+  const handleFilterChange = <K extends keyof BacktestHistoryFilters>(key: K, value: BacktestHistoryFilters[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value, page: 1 }));
   };
 
   const handleSearch = () => {
@@ -86,71 +86,69 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
     setFilters({ page: 1, page_size: 20, stock: '', strategy: '' });
   };
 
-
-  // Table columns
-  const columns = [
+  const columns: ColumnsType<BacktestHistoryItem> = [
     {
       title: 'ID',
       dataIndex: 'task_id',
       width: 150,
-      ellipsis: true
+      ellipsis: true,
     },
     {
       title: '名称',
       dataIndex: 'name',
       width: 200,
-      ellipsis: true
+      ellipsis: true,
     },
     {
       title: '股票',
       dataIndex: 'stock',
-      width: 100
+      width: 100,
     },
     {
       title: '股票名称',
       dataIndex: 'stock_name',
       width: 150,
-      ellipsis: true
+      ellipsis: true,
     },
     {
       title: '策略',
       dataIndex: 'strategy_name',
       width: 200,
-      ellipsis: true
+      ellipsis: true,
     },
     {
       title: '收益率',
       dataIndex: 'total_return',
       width: 100,
       render: (value: number) => `${(value * 100).toFixed(2)}%`,
-      sorter: (a, b) => a.total_return - b.total_return
+      sorter: (a, b) => a.total_return - b.total_return,
     },
     {
       title: '夏普比率',
       dataIndex: 'sharpe_ratio',
       width: 100,
       render: (value: number) => value?.toFixed(2),
-      sorter: (a, b) => (a.sharpe_ratio || 0) - (b.sharpe_ratio || 0)
+      sorter: (a, b) => (a.sharpe_ratio || 0) - (b.sharpe_ratio || 0),
     },
     {
       title: '最大回撤',
       dataIndex: 'max_drawdown',
       width: 100,
       render: (value: number) => `${(value * 100).toFixed(2)}%`,
-      sorter: (a, b) => a.max_drawdown - b.max_drawdown
+      sorter: (a, b) => a.max_drawdown - b.max_drawdown,
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 180,
-      sorter: (a, b) => a.created_at.localeCompare(b.created_at)
+      sorter: (a, b) => a.created_at.localeCompare(b.created_at),
     },
     {
       title: '操作',
       key: 'actions',
       width: 150,
-      fixed: 'right' as const,
-      render: (_: any, record: BacktestHistory) => (
+      fixed: 'right',
+      render: (_, record) => (
         <Space>
           <Button
             type="link"
@@ -171,13 +169,12 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
             </Button>
           </Popconfirm>
         </Space>
-      )
-    }
+      ),
+    },
   ];
 
   return (
     <div>
-      {/* Filter bar */}
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={16}>
           <Col span={6}>
@@ -191,13 +188,13 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
           <Col span={6}>
             <Select
               placeholder="策略类型"
-              value={filters.strategy}
+              value={filters.strategy || undefined}
               onChange={(value) => handleFilterChange('strategy', value)}
               allowClear
               style={{ width: '100%' }}
               options={[
                 { value: 'sma_cross', label: '简单移动平均线交叉策略' },
-                { value: 'price_breakout', label: '价格突破策略' }
+                { value: 'price_breakout', label: '价格突破策略' },
               ]}
             />
           </Col>
@@ -217,7 +214,6 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
         </Row>
       </Card>
 
-      {/* Statistics cards */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
           <Card>
@@ -229,7 +225,7 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
             <Statistic
               title="平均收益率"
               value={histories.length > 0
-                ? (histories.reduce((sum, h) => sum + h.total_return, 0) / histories.length * 100).toFixed(2)
+                ? (histories.reduce((sum, history) => sum + history.total_return, 0) / histories.length * 100).toFixed(2)
                 : 0}
               suffix="%"
             />
@@ -240,7 +236,7 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
             <Statistic
               title="最佳收益率"
               value={histories.length > 0
-                ? (Math.max(...histories.map(h => h.total_return)) * 100).toFixed(2)
+                ? (Math.max(...histories.map((history) => history.total_return)) * 100).toFixed(2)
                 : 0}
               suffix="%"
             />
@@ -251,7 +247,7 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
             <Statistic
               title="最差收益率"
               value={histories.length > 0
-                ? (Math.min(...histories.map(h => h.total_return)) * 100).toFixed(2)
+                ? (Math.min(...histories.map((history) => history.total_return)) * 100).toFixed(2)
                 : 0}
               suffix="%"
             />
@@ -259,7 +255,6 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
         </Col>
       </Row>
 
-      {/* History list table */}
       <Table
         columns={columns}
         dataSource={histories}
@@ -271,16 +266,15 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
           pageSize: filters.page_size,
           pageSizeOptions: ['10', '20', '50', '100'],
           showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条记录`,
+          showTotal: (count) => `共 ${count} 条记录`,
           onChange: (page, pageSize) => {
-            setFilters(prev => ({ ...prev, page, page_size: pageSize }));
+            setFilters((prev) => ({ ...prev, page, page_size: pageSize }));
           },
           hideOnSinglePage: false,
         }}
         scroll={{ x: 1200 }}
       />
 
-      {/* Detail modal */}
       <Modal
         title="回测详情"
         open={detailVisible}
@@ -298,22 +292,22 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
               {
                 key: 'basic',
                 label: '基础信息',
-                children: <BasicInfoCards result={selectedDetail.result} />
+                children: <BasicInfoCards result={selectedDetail.result} />,
               },
               {
                 key: 'trades',
                 label: `交易明细 (${selectedDetail.result.trades.length})`,
-                children: <TradeTable trades={selectedDetail.result.trades} />
+                children: <TradeTable trades={selectedDetail.result.trades} />,
               },
               {
                 key: 'metrics',
                 label: '健康指标',
-                children: <HealthMetrics metrics={selectedDetail.result.health_metrics} />
+                children: <HealthMetrics metrics={selectedDetail.result.health_metrics} />,
               },
               {
                 key: 'curve',
                 label: '收益曲线',
-                children: <EquityCurve result={selectedDetail.result} />
+                children: <EquityCurve result={selectedDetail.result} />,
               },
               {
                 key: 'benchmark',
@@ -324,8 +318,8 @@ function BacktestHistory({ refreshTrigger = 0 }: BacktestHistoryProps) {
                   <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
                     未设置基准指数
                   </div>
-                )
-              }
+                ),
+              },
             ]}
           />
         ) : null}

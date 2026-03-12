@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
-import { Select, Spin, Alert } from 'antd';
+import { useEffect, useState } from 'react';
+import { Alert, Select, Spin } from 'antd';
 import { backtestService } from '@/services';
-import type { StrategySchema, StrategySelectorValue } from '@/types';
+import type { StrategyParamField, StrategySchema, StrategySelectorValue } from '@/types';
 import { DynamicParamsForm } from './DynamicParamsForm';
 
 interface StrategySelectorProps {
   value: StrategySelectorValue;
   onChange: (value: StrategySelectorValue) => void;
+  disabled?: boolean;
 }
 
-export function StrategySelector({ value, onChange }: StrategySelectorProps) {
+export function StrategySelector({ value, onChange, disabled = false }: StrategySelectorProps) {
   const [strategies, setStrategies] = useState<StrategySchema[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +18,7 @@ export function StrategySelector({ value, onChange }: StrategySelectorProps) {
   useEffect(() => {
     const loadStrategies = async () => {
       try {
-        const response = await backtestService.getStrategies() as any;
+        const response = await backtestService.getStrategies();
         setStrategies(response.strategies);
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载策略列表失败');
@@ -25,10 +26,11 @@ export function StrategySelector({ value, onChange }: StrategySelectorProps) {
         setLoading(false);
       }
     };
+
     loadStrategies();
   }, []);
 
-  const selectedStrategy = strategies.find(s => s.strategy_type === value.strategy);
+  const selectedStrategy = strategies.find((strategy) => strategy.strategy_type === value.strategy);
 
   if (loading) {
     return <Spin tip="加载策略列表..." />;
@@ -42,20 +44,21 @@ export function StrategySelector({ value, onChange }: StrategySelectorProps) {
     <div>
       <Select
         value={value.strategy}
+        disabled={disabled}
         onChange={(strategy) => {
-          const schema = strategies.find(s => s.strategy_type === strategy);
-          const defaultParams: Record<string, any> = {};
+          const schema = strategies.find((item) => item.strategy_type === strategy);
+          const defaultParams: StrategySelectorValue['strategy_params'] = {};
           if (schema?.params_schema?.properties) {
-            Object.entries(schema.params_schema.properties).forEach(([key, prop]) => {
+            Object.entries(schema.params_schema.properties).forEach(([key, prop]: [string, StrategyParamField]) => {
               defaultParams[key] = prop.default;
             });
           }
           onChange({ strategy, strategy_params: defaultParams });
         }}
-        options={strategies.map(s => ({
-          value: s.strategy_type,
-          label: s.name,
-          title: s.description,
+        options={strategies.map((strategy) => ({
+          value: strategy.strategy_type,
+          label: strategy.name,
+          title: strategy.description,
         }))}
         style={{ width: '100%' }}
         placeholder="选择策略"

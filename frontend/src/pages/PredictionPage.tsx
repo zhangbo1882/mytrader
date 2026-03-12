@@ -5,7 +5,6 @@ import {
   Divider,
   Tabs,
   Modal,
-  Button,
   Descriptions,
   Tag,
   Row,
@@ -18,15 +17,13 @@ import {
 import {
   BulbOutlined,
   LineChartOutlined,
-  BarChartOutlined,
-  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { ModelTrainingForm } from '@/components/ml/ModelTrainingForm';
 import { ModelList } from '@/components/ml/ModelList';
 import { PredictionResults } from '@/components/ml/PredictionResults';
 import type { MLModel, PredictionResult } from '@/types';
 import { mlService } from '@/services';
-import { formatDate, formatPercent, formatNumber } from '@/utils';
+import { formatDate, formatNumber } from '@/utils';
 
 const { Title, Text } = Typography;
 
@@ -62,7 +59,7 @@ function PredictionPage() {
   const handleTrain = async (params: any) => {
     setTrainingLoading(true);
     try {
-      const result = await mlService.train(params);
+      await mlService.train(params);
       message.success('模型训练已启动，请在任务历史中查看进度');
       loadModels();
     } catch (error) {
@@ -94,7 +91,7 @@ function PredictionPage() {
     try {
       const fullModel = await mlService.getModel(model.id);
       if (fullModel) {
-        setSelectedModel(fullModel);
+        setSelectedModel(prev => ({ ...prev, ...fullModel } as MLModel));
       }
     } catch (error) {
       console.error('Failed to load full model details:', error);

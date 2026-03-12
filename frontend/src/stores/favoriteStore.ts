@@ -9,6 +9,13 @@ export interface FavoriteStock extends Stock {
   fundamentalRating: string | null;
   entryPrice: number | null;
   urgency: number | null;
+  swL1?: string;
+  swL2?: string;
+  swL3?: string;
+  fairValue?: number | null;
+  upsideDownside?: number | null;
+  valuationDate?: string | null;
+  valuationConfidence?: number | null;
 }
 
 interface FavoriteState {
@@ -36,6 +43,13 @@ const toFavoriteStock = (item: FavoriteItem): FavoriteStock => ({
   fundamentalRating: item.fundamental_rating,
   entryPrice: item.entry_price,
   urgency: item.urgency,
+  swL1: item.sw_l1,
+  swL2: item.sw_l2,
+  swL3: item.sw_l3,
+  fairValue: item.fair_value,
+  upsideDownside: item.upside_downside,
+  valuationDate: item.valuation_date,
+  valuationConfidence: item.valuation_confidence,
 });
 
 export const useFavoriteStore = create<FavoriteState>()((set, get) => ({

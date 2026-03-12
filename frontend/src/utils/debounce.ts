@@ -48,7 +48,6 @@ export function debounceAsync<T extends (...args: any[]) => Promise<any>>(
   wait: number
 ): (...args: Parameters<T>) => Promise<ReturnType<T>> {
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  let pendingPromise: Promise<ReturnType<T>> | null = null;
 
   return function (this: any, ...args: Parameters<T>): Promise<ReturnType<T>> {
     if (timeout !== null) {

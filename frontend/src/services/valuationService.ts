@@ -1,12 +1,12 @@
 import api from './api';
 import type {
-  ValuationRequest,
   ValuationResponse,
   BatchValuationRequest,
   BatchValuationResponse,
   CompareValuationRequest,
   CompareValuationResponse,
   ValuationMethod,
+  CombineMethod,
   DCFConfig
 } from '@/types';
 
@@ -15,11 +15,10 @@ export const valuationService = {
   getSummary: (symbol: string, params?: {
     methods?: ValuationMethod[];
     date?: string;
-    combine_method?: 'weighted' | 'average' | 'median' | 'max_confidence';
+    fiscal_date?: string;
+    combine_method?: CombineMethod;
     dcf_config?: DCFConfig;
   }) => {
-    // Build query params as a plain object (not URLSearchParams)
-    // This ensures axios correctly serializes complex values like dcf_config JSON
     const queryParams: Record<string, string> = {};
     if (params?.methods && params.methods.length > 0) {
       queryParams.methods = params.methods.join(',');
@@ -27,11 +26,13 @@ export const valuationService = {
     if (params?.date) {
       queryParams.date = params.date;
     }
+    if (params?.fiscal_date) {
+      queryParams.fiscal_date = params.fiscal_date;
+    }
     if (params?.combine_method) {
       queryParams.combine_method = params.combine_method;
     }
     if (params?.dcf_config) {
-      // Convert dcf_config to JSON string for proper transmission
       queryParams.dcf_config = JSON.stringify(params.dcf_config);
     }
 
@@ -43,7 +44,7 @@ export const valuationService = {
   // Batch valuation
   batch: (request: BatchValuationRequest) => {
     const body: any = {
-      symbols: request.symbols,
+      symbols: request.symbols.join(','),  // 后端期望逗号分隔的字符串
     };
     if (request.methods) {
       body.methods = request.methods.join(',');
@@ -76,5 +77,18 @@ export const valuationService = {
   // Get available models list
   getModels: () => {
     return api.get<{ success: boolean; models: string[] }>('/valuation/models');
-  }
+  },
+
+  // Bayesian prior matrix
+  getPriorMatrixStatus: () => {
+    return api.get<any>('/valuation/prior-matrix/status');
+  },
+
+  refreshPriorMatrix: (params: {
+    years?: number;
+    level?: 'L1' | 'L2' | 'both';
+    min_stocks?: number;
+  }) => {
+    return api.post<any>('/valuation/prior-matrix/refresh', params);
+  },
 };

@@ -4,10 +4,7 @@
 import React from 'react';
 import { Card, Descriptions, Tag, Space, Alert, Statistic, Row, Col } from 'antd';
 import {
-  CheckCircleOutlined,
-  WarningOutlined,
   InfoCircleOutlined,
-  DollarOutlined,
   WarningFilled
 } from '@ant-design/icons';
 import type { CalculateResponse } from '../../types/risk.types';

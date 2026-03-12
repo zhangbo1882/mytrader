@@ -186,7 +186,7 @@ class BaseValuationModel(ABC):
             标准格式的估值结果
         """
         # 计算涨跌幅空间
-        if current_price > 0:
+        if current_price is not None and current_price > 0:
             upside_downside = (fair_value - current_price) / current_price * 100
         else:
             upside_downside = 0
@@ -279,9 +279,20 @@ class BaseValuationModel(ABC):
         if not symbol:
             return False, 'Symbol cannot be empty'
 
-        # 标准化股票代码
-        symbol_clean = symbol.replace('.SH', '').replace('.SZ', '')
-        if not symbol_clean.isdigit() or len(symbol_clean) != 6:
-            return False, f'Invalid symbol format: {symbol}'
+        # 港股：5位数字代码（如00700）或带.HK后缀
+        if symbol.endswith('.HK'):
+            code_part = symbol[:-3]
+            if code_part.isdigit() and len(code_part) in (4, 5):
+                return True, None
+            return False, f'Invalid HK symbol format: {symbol}'
 
-        return True, None
+        # A股：标准化后必须是6位数字
+        symbol_clean = symbol.replace('.SH', '').replace('.SZ', '')
+        if symbol_clean.isdigit() and len(symbol_clean) == 6:
+            return True, None
+
+        # 纯5位数字也视为港股代码（如 00700）
+        if symbol.isdigit() and len(symbol) in (4, 5):
+            return True, None
+
+        return False, f'Invalid symbol format: {symbol}'

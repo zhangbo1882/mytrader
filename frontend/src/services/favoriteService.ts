@@ -10,6 +10,13 @@ export interface FavoriteItem {
   fundamental_rating: string | null;
   entry_price: number | null;
   urgency: number | null;
+  sw_l1?: string;
+  sw_l2?: string;
+  sw_l3?: string;
+  fair_value?: number | null;
+  upside_downside?: number | null;
+  valuation_date?: string | null;
+  valuation_confidence?: number | null;
 }
 
 export interface FavoriteListResponse {
@@ -28,10 +35,12 @@ export interface BatchAddResult {
   success: boolean;
   error?: string;
   skipped?: boolean;
+  updated?: boolean;
 }
 
 export interface BatchAddResponse {
   success: number;
+  updated?: number;
   failed: number;
   skipped?: number;
   total: number;
@@ -44,6 +53,10 @@ export interface UpdateFavoriteData {
   entry_price?: number;
   urgency?: number;
   notes?: string;
+  fair_value?: number | null;
+  upside_downside?: number | null;
+  valuation_date?: string | null;
+  valuation_confidence?: number | null;
 }
 
 export interface StockImportData {
@@ -121,4 +134,5 @@ export const favoriteService = {
     api.delete<{ message: string }>('/favorites/clear', {
       params: { user_id: userId }
     }),
+
 };

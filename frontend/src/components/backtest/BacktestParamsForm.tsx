@@ -1,14 +1,21 @@
-import { useState, useEffect } from 'react';
-import { Button, Form, InputNumber, Card, Space, message, Select, AutoComplete, Tag, Input, Spin, Alert } from 'antd';
-import { PlayCircleOutlined, LoadingOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { stockService, backtestService } from '@/services';
+import { useEffect, useState } from 'react';
+import { Alert, AutoComplete, Button, Card, Form, Input, InputNumber, message, Space, Spin, Tag } from 'antd';
 import { DatePicker } from 'antd';
+import { CheckCircleOutlined, LoadingOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { StrategySelector } from './StrategySelector';
 import { IntervalSelector } from '@/components/query/IntervalSelector';
-import type { BacktestRequest, StrategySelectorValue, Stock } from '@/types';
+import { stockService, backtestService } from '@/services';
+import type { BacktestRequest, Stock, StrategySelectorValue } from '@/types';
+import { StrategySelector } from './StrategySelector';
 
 const { RangePicker } = DatePicker;
+
+type StockOption = {
+  value: string;
+  label: string;
+  code: string;
+  name: string;
+};
 
 interface BacktestParamsFormProps {
   onSubmit: (params: BacktestRequest) => void;
@@ -16,11 +23,11 @@ interface BacktestParamsFormProps {
 }
 
 export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProps) {
-  const [stock, setStock] = useState<string>('');
-  const [stockOptions, setStockOptions] = useState<{ value: string; label: string; code: string; name: string }[]>([]);
+  const [stock, setStock] = useState('');
+  const [stockOptions, setStockOptions] = useState<StockOption[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
   const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
-  const [interval, setInterval] = useState<string>('1d');
+  const [interval, setInterval] = useState('1d');
   const [capital, setCapital] = useState(1000000);
   const [commission, setCommission] = useState(0.0002);
   const [benchmark, setBenchmark] = useState('');
@@ -31,7 +38,6 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
   const [optimizedParamsLoading, setOptimizedParamsLoading] = useState(false);
   const [hasOptimizedParams, setHasOptimizedParams] = useState(false);
 
-  // 当股票代码变化时，自动加载最优参数
   useEffect(() => {
     const loadOptimizedParams = async () => {
       if (!stock || stock.length < 4) {
@@ -41,18 +47,13 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
 
       setOptimizedParamsLoading(true);
       try {
-        // 检查是否有优化参数
         const hasParamsResponse = await backtestService.hasOptimizedParams(stock);
         if (hasParamsResponse.has_params) {
-          // 获取最优参数
           const paramsResponse = await backtestService.getOptimizedParams(stock);
-
-          // 更新策略参数
           setStrategy({
-            strategy: 'price_breakout',
-            strategy_params: paramsResponse.strategy_params || {}
+            strategy: paramsResponse.strategy || 'price_breakout',
+            strategy_params: paramsResponse.strategy_params || {},
           });
-
           setHasOptimizedParams(true);
           message.success(`已加载 ${stock} 的最优参数（更新于 ${paramsResponse.updated_at}）`);
         } else {
@@ -69,7 +70,6 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
     loadOptimizedParams();
   }, [stock]);
 
-  // 搜索股票
   const handleStockSearch = async (searchText: string) => {
     if (!searchText || searchText.length < 2) {
       setStockOptions([]);
@@ -79,15 +79,14 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
     setStockLoading(true);
     try {
       const result = await stockService.search(searchText);
-      // 处理两种响应格式：{stocks: [...]} 或直接的数组
       const stockList = Array.isArray(result) ? result : (result?.stocks || []);
 
       setStockOptions(
-        stockList.map((stock: Stock) => ({
-          value: stock.code,
-          label: `${stock.code} ${stock.name}`,
-          code: stock.code,
-          name: stock.name,
+        stockList.map((item: Stock) => ({
+          value: item.code,
+          label: `${item.code} ${item.name}`,
+          code: item.code,
+          name: item.name,
         }))
       );
     } catch (error) {
@@ -98,13 +97,8 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
     }
   };
 
-  // 选择股票
-  const handleStockSelect = (value: string, option: any) => {
+  const handleStockSelect = (value: string) => {
     setStock(value);
-    // 同时更新股票名称显示
-    if (option && option.name) {
-      // 可以在这里添加股票名称显示
-    }
   };
 
   const handleSubmit = () => {
@@ -133,18 +127,17 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
   const handleDateChange = (dates: null | [dayjs.Dayjs | null, dayjs.Dayjs | null]) => {
     if (dates && dates[0] && dates[1]) {
       setDateRange([dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')]);
-    } else {
-      setDateRange(['', '']);
+      return;
     }
+    setDateRange(['', '']);
   };
 
-  // 根据搜索选项过滤标签显示
   const getSelectedStockName = () => {
-    if (stock) {
-      const selected = stockOptions.find(opt => opt.code === stock);
-      return selected ? selected.name : '';
+    if (!stock) {
+      return '';
     }
-    return '';
+    const selected = stockOptions.find((option) => option.code === stock);
+    return selected ? selected.name : '';
   };
 
   return (
@@ -157,7 +150,7 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
               options={stockOptions}
               onSearch={handleStockSearch}
               onSelect={handleStockSelect}
-              onChange={(value) => setStock(value)}
+              onChange={setStock}
               placeholder="输入股票代码或名称搜索（如：00941 或 中国移动）"
               style={{ width: '100%' }}
               notFoundContent={stockLoading ? <Spin indicator={<LoadingOutlined spin />} /> : '未找到股票'}
@@ -165,7 +158,6 @@ export function BacktestParamsForm({ onSubmit, loading }: BacktestParamsFormProp
               allowClear
             />
 
-            {/* 已选择的股票标签 */}
             {stock && (
               <Tag color="blue" closable onClose={() => setStock('')} style={{ marginTop: 4 }}>
                 <strong>{stock}</strong> {getSelectedStockName()}

@@ -1,4 +1,4 @@
-import { DateRange, PriceType, IntervalType } from './common.types';
+import { PriceType, IntervalType } from './common.types';
 
 export interface Stock {
   code: string;

@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Card, Input, Button, Space, Empty, Spin, Typography } from 'antd';
+import { Input, Button, Space, Empty, Typography } from 'antd';
 import { SendOutlined, ClearOutlined, LoadingOutlined } from '@ant-design/icons';
 import { MessageBubble } from './MessageBubble';
 import { Suggestions, DEFAULT_SUGGESTIONS } from './Suggestions';
 import { useChatStore } from '@/stores';
 import { stockService } from '@/services';
-import type { ChatMessage, Stock } from '@/types';
+import type { ChatMessage } from '@/types';
 
 const { TextArea } = Input;
 const { Text } = Typography;

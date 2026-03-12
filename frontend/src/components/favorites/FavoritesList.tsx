@@ -1,11 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Table, Button, Space, Popconfirm, Input, message, Tag, Typography, Modal, Form, Select, InputNumber, Tooltip, Rate } from 'antd';
-import { DeleteOutlined, SearchOutlined, StarOutlined, EditOutlined, FilterOutlined } from '@ant-design/icons';
+import { Table, Button, Space, Popconfirm, Input, message, Tag, Typography, Modal, Form, Select, InputNumber, Tooltip, Rate, Progress } from 'antd';
+import { DeleteOutlined, SearchOutlined, StarOutlined, EditOutlined, WalletOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { FavoriteStock } from '@/stores/favoriteStore';
 import { useFavoriteStore } from '@/stores';
 import { formatDate } from '@/utils';
-import { stockService } from '@/services';
+import { stockService, favoriteService, valuationService } from '@/services';
+import { loadPositions as loadRiskPositions } from '@/services/riskService';
+import type { PositionOutput } from '@/types/risk.types';
+import type { ValuationMethod, CombineMethod, DCFConfig } from '@/types';
 
 const { Text } = Typography;
 
@@ -13,6 +16,11 @@ interface FavoritesListProps {
   selectedRowKeys?: string[];
   onSelectionChange?: (selectedRowKeys: string[]) => void;
   showSelection?: boolean;
+  valuationMethods: ValuationMethod[];
+  valuationDate: string;
+  valuationFiscalDate: string;
+  combineMethod: CombineMethod;
+  dcfConfig: DCFConfig;
 }
 
 interface PriceData {
@@ -43,20 +51,32 @@ export function FavoritesList({
   selectedRowKeys = [],
   onSelectionChange,
   showSelection = false,
+  valuationMethods,
+  valuationDate,
+  valuationFiscalDate,
+  combineMethod,
+  dcfConfig,
 }: FavoritesListProps) {
-  const { favorites, removeFavorite, updateFavorite, isInFavorites } = useFavoriteStore();
+  const { favorites, removeFavorite, updateFavorite, loadFavorites } = useFavoriteStore();
   const [searchText, setSearchText] = useState('');
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 50 });
   const [priceMap, setPriceMap] = useState<Record<string, PriceData>>({});
+  const [positionMap, setPositionMap] = useState<Map<string, PositionOutput>>(new Map());
   const [loadingPrices, setLoadingPrices] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingStock, setEditingStock] = useState<FavoriteStock | null>(null);
   const [editForm] = Form.useForm();
 
+  // 批量更新估值状态
+  const [batchUpdating, setBatchUpdating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0, success: 0, failed: 0 });
+
   // 过滤条件
   const [safetyFilter, setSafetyFilter] = useState<string[]>([]);
   const [fundamentalFilter, setFundamentalFilter] = useState<string[]>([]);
   const [urgencyFilter, setUrgencyFilter] = useState<number[]>([]);
+  const [showOnlyHolding, setShowOnlyHolding] = useState(false);
+  const [marketFilter, setMarketFilter] = useState<'all' | 'A' | 'HK'>('all');
 
   // 获取最新价格
   const loadLatestPrices = async () => {
@@ -101,9 +121,128 @@ export function FavoritesList({
     }
   };
 
-  // 当收藏列表变化时加载价格
+  // 加载持仓数据
+  const loadPositionsData = async () => {
+    try {
+      const response = await loadRiskPositions();
+      const map = new Map(response.positions.map(p => [p.symbol, p]));
+      setPositionMap(map);
+    } catch (error) {
+      console.error('Failed to load positions:', error);
+    }
+  };
+
+  // 刷新单只股票的估值
+  const refreshSingleValuation = async (stockCode: string, stockName: string) => {
+    if (valuationMethods.length === 0) {
+      message.warning('请先选择至少一种估值方法');
+      return;
+    }
+
+    const hide = message.loading(`正在刷新 ${stockName} 的估值...`, 0);
+    try {
+      // 调用估值API获取该股票的估值，保持与收藏页批量刷新一致
+      const response = await valuationService.getSummary(stockCode, {
+        methods: valuationMethods,
+        date: valuationDate || undefined,
+        fiscal_date: valuationFiscalDate || undefined,
+        combine_method: combineMethod,
+        dcf_config: dcfConfig
+      }) as any;
+      
+      if (response.success && response.valuation) {
+        const valuation = response.valuation;
+        
+        // 更新收藏列表中的估值数据
+        await favoriteService.update(stockCode, {
+          fair_value: valuation.fair_value,
+          upside_downside: valuation.upside_downside,
+          valuation_date: valuation.date,
+          valuation_confidence: valuation.confidence
+        });
+        
+        // 重新加载收藏列表
+        await loadFavorites();
+        
+        message.success(`${stockName} 估值已更新: ¥${valuation.fair_value.toFixed(2)}`);
+      } else {
+        message.error('获取估值失败');
+      }
+    } catch (error) {
+      console.error('Failed to refresh valuation:', error);
+      message.error(`刷新 ${stockName} 估值失败`);
+    } finally {
+      hide();
+    }
+  };
+
+
+  // 批量更新选中股票的估值（逐只串行，避免超时）
+  const refreshBatchValuation = async () => {
+    if (valuationMethods.length === 0) {
+      message.warning('请先选择至少一种估值方法');
+      return;
+    }
+
+    if (!selectedRowKeys || selectedRowKeys.length === 0) return;
+
+    const selected = favorites.filter(f => selectedRowKeys.includes(f.code));
+    const total = selected.length;
+    setBatchProgress({ done: 0, total, success: 0, failed: 0 });
+    setBatchUpdating(true);
+
+    let success = 0;
+    let failed = 0;
+    const failedNames: string[] = [];
+
+    for (let i = 0; i < selected.length; i++) {
+      const stock = selected[i];
+      try {
+        const response = await valuationService.getSummary(stock.code, {
+          methods: valuationMethods,
+          date: valuationDate || undefined,
+          fiscal_date: valuationFiscalDate || undefined,
+          combine_method: combineMethod,
+          dcf_config: dcfConfig,
+        }) as any;
+
+        if (response.success && response.valuation) {
+          const v = response.valuation;
+          await favoriteService.update(stock.code, {
+            fair_value: v.fair_value,
+            upside_downside: v.upside_downside,
+            valuation_date: v.date,
+            valuation_confidence: v.confidence,
+          });
+          success++;
+        } else {
+          failed++;
+          failedNames.push(stock.name || stock.code);
+        }
+      } catch {
+        failed++;
+        failedNames.push(stock.name || stock.code);
+      }
+
+      setBatchProgress({ done: i + 1, total, success, failed });
+    }
+
+    await loadFavorites();
+    setBatchUpdating(false);
+
+    if (failed === 0) {
+      message.success(`已成功更新 ${success} 只股票的估值`);
+    } else {
+      message.warning(
+        `更新完成：成功 ${success} 只，失败 ${failed} 只（${failedNames.slice(0, 3).join('、')}${failedNames.length > 3 ? '等' : ''}）`
+      );
+    }
+  };
+
+  // 当收藏列表变化时加载价格和持仓
   useEffect(() => {
     loadLatestPrices();
+    loadPositionsData();
   }, [favorites.map(f => f.code).join(',')]);
 
   // 计算差距百分比
@@ -118,6 +257,12 @@ export function FavoritesList({
     return `${priceData.close.toFixed(2)} (${priceData.date})`;
   };
 
+  // 判断股票市场类型
+  const getStockMarket = (code: string): 'A' | 'HK' => {
+    if (code.includes('.HK')) return 'HK';
+    return 'A';
+  };
+
   // 过滤和排序后的收藏列表
   const filteredFavorites = useMemo(() => {
     let result = favorites.filter((f) => {
@@ -125,6 +270,14 @@ export function FavoritesList({
       if (searchText) {
         const search = searchText.toLowerCase();
         if (!f.code.toLowerCase().includes(search) && !f.name.toLowerCase().includes(search)) {
+          return false;
+        }
+      }
+
+      // 市场过滤
+      if (marketFilter !== 'all') {
+        const market = getStockMarket(f.code);
+        if (market !== marketFilter) {
           return false;
         }
       }
@@ -144,11 +297,16 @@ export function FavoritesList({
         return false;
       }
 
+      // 持仓过滤
+      if (showOnlyHolding && !positionMap.has(f.code)) {
+        return false;
+      }
+
       return true;
     });
 
     return result;
-  }, [favorites, searchText, safetyFilter, fundamentalFilter, urgencyFilter]);
+  }, [favorites, searchText, marketFilter, safetyFilter, fundamentalFilter, urgencyFilter, showOnlyHolding, positionMap]);
 
   // 清除所有过滤条件
   const clearFilters = () => {
@@ -156,10 +314,12 @@ export function FavoritesList({
     setSafetyFilter([]);
     setFundamentalFilter([]);
     setUrgencyFilter([]);
+    setShowOnlyHolding(false);
+    setMarketFilter('all');
   };
 
   // 是否有活动的过滤条件
-  const hasActiveFilters = searchText || safetyFilter.length > 0 || fundamentalFilter.length > 0 || urgencyFilter.length > 0;
+  const hasActiveFilters = searchText || safetyFilter.length > 0 || fundamentalFilter.length > 0 || urgencyFilter.length > 0 || showOnlyHolding || marketFilter !== 'all';
 
   // 删除收藏
   const handleRemove = (code: string, name: string) => {
@@ -232,15 +392,43 @@ export function FavoritesList({
       width: 100,
       fixed: 'left',
       sorter: (a, b) => a.code.localeCompare(b.code),
-      render: (code) => <Text strong>{code}</Text>,
+      render: (code) => {
+        const position = positionMap.get(code);
+        return (
+          <Space size={4}>
+            {position && (
+              <Tooltip title={`已持仓 ${position.shares} 股，成本 ¥${position.cost_price.toFixed(2)}`}>
+                <WalletOutlined style={{ color: '#52c41a', fontSize: 12 }} />
+              </Tooltip>
+            )}
+            <Text strong>{code}</Text>
+          </Space>
+        );
+      },
     },
     {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
-      width: 100,
+      width: 180,
       sorter: (a, b) => a.name.localeCompare(b.name),
-      render: (name) => <Text>{name}</Text>,
+      render: (name, record) => {
+        const hasIndustry = record.swL1 || record.swL2 || record.swL3;
+        if (!hasIndustry) {
+          return <div>{name}</div>;
+        }
+        return (
+          <Tooltip title={
+            <div>
+              {record.swL1 && <div><Tag color="blue" style={{ marginBottom: 2, fontSize: 11 }}>L1: {record.swL1}</Tag></div>}
+              {record.swL2 && <div><Tag color="green" style={{ marginBottom: 2, fontSize: 11 }}>L2: {record.swL2}</Tag></div>}
+              {record.swL3 && <div><Tag color="orange" style={{ marginBottom: 2, fontSize: 11 }}>L3: {record.swL3}</Tag></div>}
+            </div>
+          }>
+            <div>{name}</div>
+          </Tooltip>
+        );
+      },
     },
     {
       title: '安全性',
@@ -280,15 +468,6 @@ export function FavoritesList({
       ) : '-',
     },
     {
-      title: '进场价',
-      dataIndex: 'entryPrice',
-      key: 'entryPrice',
-      width: 90,
-      align: 'right',
-      sorter: (a, b) => (a.entryPrice || 0) - (b.entryPrice || 0),
-      render: (price) => price ? <Text>{price.toFixed(2)}</Text> : '-',
-    },
-    {
       title: '最新收盘价',
       key: 'latestClose',
       width: 150,
@@ -297,6 +476,45 @@ export function FavoritesList({
         const priceData = priceMap[record.code];
         return loadingPrices ? '加载中...' : formatPriceDisplay(priceData);
       },
+    },
+    {
+      title: '合理价格',
+      key: 'fairValue',
+      width: 100,
+      align: 'right',
+      sorter: (a, b) => (a.fairValue || 0) - (b.fairValue || 0),
+      render: (_, record) => {
+        if (!record.fairValue) {
+          return <Text type="secondary">-</Text>;
+        }
+        
+        // 根据合理价格与当前价格的差距设置颜色
+        const priceData = priceMap[record.code];
+        if (priceData) {
+          const diff = record.fairValue - priceData.close;
+          // 合理价格 > 当前价格 → 红色（高估，可能下跌）
+          // 合理价格 < 当前价格 → 绿色（低估，可能上涨）
+          const color = diff > 0 ? '#ff4d4f' : diff < 0 ? '#52c41a' : '#666';
+          return (
+            <Tooltip title={record.valuationDate ? `估值日期: ${record.valuationDate}` : ''}>
+              <Text strong style={{ color }}>
+                ¥{record.fairValue.toFixed(2)}
+              </Text>
+            </Tooltip>
+          );
+        }
+        
+        return <Text strong>¥{record.fairValue.toFixed(2)}</Text>;
+      },
+    },
+    {
+      title: '进场价',
+      dataIndex: 'entryPrice',
+      key: 'entryPrice',
+      width: 90,
+      align: 'right',
+      sorter: (a, b) => (a.entryPrice || 0) - (b.entryPrice || 0),
+      render: (price) => price ? <Text>{price.toFixed(2)}</Text> : '-',
     },
     {
       title: '差距%',
@@ -351,10 +569,17 @@ export function FavoritesList({
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 180,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
+          <Tooltip title="刷新估值">
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => refreshSingleValuation(record.code, record.name)}
+            />
+          </Tooltip>
           <Tooltip title="编辑">
             <Button
               size="small"
@@ -440,6 +665,35 @@ export function FavoritesList({
             <Select.Option value={1}>1星</Select.Option>
           </Select>
 
+          <Button
+            type={showOnlyHolding ? 'primary' : 'default'}
+            icon={<WalletOutlined />}
+            onClick={() => setShowOnlyHolding(!showOnlyHolding)}
+          >
+            {showOnlyHolding ? '显示全部' : '仅持仓'}
+          </Button>
+
+          <Space.Compact>
+            <Button
+              type={marketFilter === 'all' ? 'primary' : 'default'}
+              onClick={() => setMarketFilter('all')}
+            >
+              全部
+            </Button>
+            <Button
+              type={marketFilter === 'A' ? 'primary' : 'default'}
+              onClick={() => setMarketFilter('A')}
+            >
+              A股
+            </Button>
+            <Button
+              type={marketFilter === 'HK' ? 'primary' : 'default'}
+              onClick={() => setMarketFilter('HK')}
+            >
+              港股
+            </Button>
+          </Space.Compact>
+
           {hasActiveFilters && (
             <Button onClick={clearFilters}>
               清除筛选
@@ -454,11 +708,20 @@ export function FavoritesList({
           <Button onClick={loadLatestPrices} loading={loadingPrices}>
             刷新价格
           </Button>
+
         </Space>
 
         {showSelection && selectedRowKeys.length > 0 && (
-          <Space style={{ marginLeft: 16 }}>
+          <Space style={{ marginTop: 10 }} wrap>
             <Text>已选 {selectedRowKeys.length} 只</Text>
+            <Button
+              icon={<SyncOutlined spin={batchUpdating} />}
+              loading={batchUpdating}
+              onClick={refreshBatchValuation}
+              disabled={batchUpdating}
+            >
+              更新估值
+            </Button>
             <Popconfirm
               title="确认删除"
               description={`确定要删除选中的 ${selectedRowKeys.length} 只股票吗？`}
@@ -472,6 +735,20 @@ export function FavoritesList({
             </Popconfirm>
           </Space>
         )}
+
+        {/* 批量更新进度条 */}
+        {batchUpdating && (
+          <div style={{ marginTop: 10 }}>
+            <Progress
+              percent={Math.round((batchProgress.done / batchProgress.total) * 100)}
+              status="active"
+              size="small"
+              format={() =>
+                `${batchProgress.done}/${batchProgress.total}（成功 ${batchProgress.success}${batchProgress.failed > 0 ? `，失败 ${batchProgress.failed}` : ''}）`
+              }
+            />
+          </div>
+        )}
       </div>
 
       {/* 收藏列表 */}
@@ -483,7 +760,7 @@ export function FavoritesList({
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,
-          pageSizeOptions: ['20', '50', '100', '200'],
+          pageSizeOptions: ['50', '100', '200'],
           showSizeChanger: true,
           showTotal: (total) => `共 ${total} 只`,
           hideOnSinglePage: false,
@@ -492,7 +769,7 @@ export function FavoritesList({
           },
         }}
         size="small"
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1380 }}
       />
 
       {/* 空状态提示 */}

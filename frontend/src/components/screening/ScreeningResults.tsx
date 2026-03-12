@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, Table, Typography, Statistic, Row, Col, Tag, Button, Space } from 'antd';
+import { Card, Table, Typography, Statistic, Row, Col, Tag, Button } from 'antd';
 import { CheckCircleOutlined, StockOutlined, SaveOutlined } from '@ant-design/icons';
 import type { ScreeningResult } from '@/types';
 

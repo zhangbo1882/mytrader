@@ -1,14 +1,8 @@
 """
-Market Regime Service - 牛熊市判断服务 (v2.0)
+Market Regime Service - 牛熊市判断服务 (v3.0)
 
-基于五个正交维度对单只A股进行牛熊状态评分：
-1. 趋势分 (30分): EMA多空排列 + SMA方向锚
-2. 动能分 (25分): 两期ROC加速度（与趋势分正交）
-3. 量价分 (20分): 20日涨跌日量比 + 量价背离检测
-4. 换手率分 (15分): 5日换手率 vs 历史均值（仅正分）
-5. 波动分 (10分): ATR百分位，与趋势方向联动
-
-支持多周期配置：短周期(EMA3/5/10+SMA20)、中周期(EMA5/10/20+SMA60)、长周期(EMA10/20/40+SMA120)
+本模块是 RegimeCalculator 的 API 封装层，专门用于处理 REST API 请求。
+所有计算逻辑统一在 RegimeCalculator 中实现，确保 API 和回测结果一致。
 
 设计文档参见 src/market/MARKET_REGIME_RULES.md
 """
@@ -16,6 +10,13 @@ Market Regime Service - 牛熊市判断服务 (v2.0)
 import pandas as pd
 from typing import List, Dict, Any, Optional
 import logging
+import sys
+import os
+
+# 添加项目根目录到路径，确保能导入 src 模块
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from src.market.regime_calculator import RegimeCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,12 @@ def get_all_cycle_configs() -> dict:
 
 
 class MarketRegimeService:
-    """牛熊市判断服务 (v2.0)"""
+    """
+    牛熊市判断服务 (v3.0)
+
+    本类是 RegimeCalculator 的 API 适配器。
+    所有计算逻辑委托给 RegimeCalculator，确保与回测计算结果一致。
+    """
 
     def __init__(self, config: Dict = None, cycle: str = None):
         """
@@ -153,33 +159,26 @@ class MarketRegimeService:
                 volume_list = window_df['volume'].tolist()
                 turnover_list = window_df['turnover_rate'].tolist() if has_turnover else None
 
-                trend_score, _ = self._calculate_trend_score(close_list)
-                momentum_score, _ = self._calculate_momentum_score(close_list, high_list, low_list)
-                volume_score, _ = self._calculate_volume_score(close_list, volume_list)
-                turnover_score, _ = self._calculate_turnover_score(turnover_list)
-                volatility_score, _ = self._calculate_volatility_score(
-                    close_list, high_list, low_list, trend_score
+                # 调用统一的计算器
+                result = RegimeCalculator.calculate_regime(
+                    close=close_list,
+                    high=high_list,
+                    low=low_list,
+                    volume=volume_list,
+                    turnover_rate=turnover_list,
+                    config=self.config
                 )
-
-                total_score = trend_score + momentum_score + volume_score + turnover_score + volatility_score
-
-                if total_score >= self.config['bull_threshold']:
-                    regime = 'bull'
-                elif total_score <= self.config['bear_threshold']:
-                    regime = 'bear'
-                else:
-                    regime = 'neutral'
 
                 results.append({
                     'date': str(date),
                     'close': close_price,
-                    'regime': regime,
-                    'total_score': total_score,
-                    'trend_score': trend_score,
-                    'momentum_score': momentum_score,
-                    'volume_score': volume_score,
-                    'turnover_score': turnover_score,
-                    'volatility_score': volatility_score,
+                    'regime': result.regime,
+                    'total_score': result.total_score,
+                    'trend_score': result.trend_score,
+                    'momentum_score': result.momentum_score,
+                    'volume_score': result.volume_score,
+                    'turnover_score': result.turnover_score,
+                    'volatility_score': result.volatility_score,
                 })
 
             except Exception as e:
@@ -213,259 +212,3 @@ class MarketRegimeService:
                 results[cycle] = cycle_results
 
         return results
-
-    # -------------------------------------------------------------------------
-    # EMA 计算工具
-    # -------------------------------------------------------------------------
-
-    def _calculate_ema(self, prices: List[float], period: int) -> float:
-        """计算指数移动平均（EMA）"""
-        if len(prices) < period:
-            return sum(prices) / len(prices) if prices else 0
-        k = 2.0 / (period + 1)
-        ema = sum(prices[:period]) / period
-        for price in prices[period:]:
-            ema = price * k + ema * (1 - k)
-        return ema
-
-    # -------------------------------------------------------------------------
-    # 维度1：趋势分（±30分）
-    # -------------------------------------------------------------------------
-
-    def _calculate_trend_score(self, close: List[float]) -> tuple:
-        """趋势分（EMA多空排列 + SMA方向锚）"""
-        ma_short = self.config['ma_short']
-        ma_medium = self.config['ma_medium']
-        ma_long = self.config['ma_long']
-        ma_anchor = self.config.get('ma_anchor', 60)
-
-        ema_s = self._calculate_ema(close, ma_short)
-        ema_m = self._calculate_ema(close, ma_medium)
-        ema_l = self._calculate_ema(close, ma_long)
-
-        anchor_window = close[-ma_anchor:] if len(close) >= ma_anchor else close
-        sma_anchor = sum(anchor_window) / len(anchor_window)
-        above_anchor = close[-1] > sma_anchor
-
-        if ema_s > ema_m > ema_l:
-            score = 30 if above_anchor else 15
-        elif ema_s > ema_m:
-            score = 10 if above_anchor else 5
-        elif ema_s < ema_m < ema_l:
-            score = -30 if not above_anchor else -15
-        elif ema_s < ema_m:
-            score = -10 if not above_anchor else -5
-        else:
-            score = 0
-
-        return score, {'ema_short': ema_s, 'ema_medium': ema_m, 'ema_long': ema_l, 'sma_anchor': sma_anchor}
-
-    # -------------------------------------------------------------------------
-    # 维度2：动能分（±25分）
-    # -------------------------------------------------------------------------
-
-    def _calculate_momentum_score(self, close: List[float], high: List[float], low: List[float]) -> tuple:
-        """动能分（四象限加速度评分，区分涨跌方向）"""
-        roc_period = self.config['roc_period']
-        atr_period = self.config.get('atr_period', roc_period)
-
-        min_required = 2 * roc_period + 1
-        if len(close) < min_required:
-            return 0, {'acceleration': 0, 'momentum_type': '数据不足'}
-
-        current_roc = (close[-1] - close[-roc_period - 1]) / close[-roc_period - 1] * 100
-        prev_roc = (close[-roc_period - 1] - close[-2 * roc_period - 1]) / close[-2 * roc_period - 1] * 100
-        acceleration = current_roc - prev_roc
-
-        atr_window = max(atr_period, 2)
-        atr = self._calculate_atr(high[-atr_window:], low[-atr_window:], close[-atr_window:])
-        atr_pct = atr / close[-1] * 100 if close[-1] > 0 else 0
-        dynamic_threshold = self.config['roc_dynamic_multiplier'] * atr_pct
-
-        # 四象限：当前方向（current_roc）为主，加速度为修正
-        if current_roc > 0:
-            if acceleration > dynamic_threshold:      score = 25
-            elif acceleration >= 0:                   score = 15
-            elif acceleration >= -dynamic_threshold:  score = 10
-            else:                                     score = -5
-        else:
-            if acceleration > dynamic_threshold:      score = 5
-            elif acceleration >= 0:                   score = -5
-            elif acceleration >= -dynamic_threshold:  score = -15
-            else:                                     score = -25
-
-        return score, {'current_roc': current_roc, 'prev_roc': prev_roc, 'acceleration': acceleration}
-
-    # -------------------------------------------------------------------------
-    # 维度3：量价分（0~+20分）
-    # -------------------------------------------------------------------------
-
-    def _calculate_volume_score(self, close: List[float], volume: List[float]) -> tuple:
-        """量价分（20日涨跌日量比 + 量价背离检测）"""
-        lookback = self.config.get('volume_lookback', 20)
-        actual_lookback = min(lookback, len(close) - 1)
-
-        up_days_volume = []
-        down_days_volume = []
-        for i in range(-actual_lookback, 0):
-            if close[i] > close[i - 1]:
-                up_days_volume.append(volume[i])
-            elif close[i] < close[i - 1]:
-                down_days_volume.append(volume[i])
-
-        if up_days_volume and down_days_volume:
-            avg_up = sum(up_days_volume) / len(up_days_volume)
-            avg_down = sum(down_days_volume) / len(down_days_volume)
-            volume_ratio = avg_up / avg_down if avg_down > 0 else 2.0
-        elif up_days_volume:
-            avg_up = sum(up_days_volume) / len(up_days_volume)
-            avg_down = 0
-            volume_ratio = 2.0
-        else:
-            avg_up = 0
-            avg_down = sum(down_days_volume) / len(down_days_volume) if down_days_volume else 0
-            volume_ratio = 0.3
-
-        if volume_ratio > 2.0:
-            base_score = 18
-        elif volume_ratio > 1.5:
-            base_score = 14
-        elif volume_ratio > 1.0:
-            base_score = 10
-        elif volume_ratio > 0.8:
-            base_score = 5
-        else:
-            base_score = 0
-
-        # 量价背离检测
-        if len(close) >= 5 and len(volume) >= actual_lookback > 0:
-            price_at_5d_high = close[-1] >= max(close[-5:])
-            recent_avg_vol = sum(volume[-5:]) / 5
-            baseline_avg_vol = sum(volume[-actual_lookback:]) / actual_lookback
-            volume_shrinking = recent_avg_vol < baseline_avg_vol * 0.8
-            if price_at_5d_high and volume_shrinking:
-                base_score = max(0, base_score - 5)
-
-        obv_new_high = len(close) >= 4 and close[-1] > close[-4]
-        obv_bonus = 2 if (obv_new_high and base_score > 0) else 0
-        final_score = min(base_score + obv_bonus, 20)
-
-        return final_score, {'volume_ratio': volume_ratio}
-
-    # -------------------------------------------------------------------------
-    # 维度4：换手率分（0~+15分）
-    # -------------------------------------------------------------------------
-
-    def _calculate_turnover_score(self, turnover_rate: Optional[List[float]]) -> tuple:
-        """换手率/情绪分（仅正分，捕捉散户参与热度）"""
-        if not turnover_rate:
-            return 0, {'turnover_ratio': None}
-
-        short_period = self.config.get('turnover_lookback_short', 5)
-        long_period = self.config.get('turnover_lookback_long', 60)
-
-        valid = [t for t in turnover_rate if t is not None and t > 0]
-        if len(valid) < short_period:
-            return 0, {'turnover_ratio': None}
-
-        short_avg = sum(valid[-short_period:]) / short_period
-        actual_long = min(long_period, len(valid))
-        long_avg = sum(valid[-actual_long:]) / actual_long
-
-        if long_avg <= 0:
-            return 0, {'turnover_ratio': None}
-
-        ratio = short_avg / long_avg
-
-        if 1.5 <= ratio <= 3.0:
-            score = 15
-        elif ratio > 3.0:
-            score = 8
-        elif 1.0 <= ratio < 1.5:
-            score = 10
-        elif 0.5 <= ratio < 1.0:
-            score = 5
-        elif 0.3 <= ratio < 0.5:
-            score = 3
-        else:
-            score = 0
-
-        return score, {'turnover_ratio': ratio}
-
-    # -------------------------------------------------------------------------
-    # 维度5：波动分（±10分，与趋势联动）
-    # -------------------------------------------------------------------------
-
-    def _calculate_volatility_score(
-        self, close: List[float], high: List[float], low: List[float], trend_score: int = 0
-    ) -> tuple:
-        """波动分（ATR百分位，与趋势方向联动）"""
-        atr_period = self.config.get('atr_period', 5)
-        history_length = min(len(close), 40)
-
-        atr_history = []
-        for i in range(history_length, atr_period, -1):
-            start_idx = len(high) - i
-            end_idx = len(high) - i + atr_period
-            if start_idx >= 0 and end_idx <= len(high):
-                atr = self._calculate_atr(high[start_idx:end_idx], low[start_idx:end_idx], close[start_idx:end_idx])
-                if atr > 0:
-                    atr_history.append(atr)
-
-        if not atr_history:
-            return 0, {'percentile': 50}
-
-        current_atr = self._calculate_atr(high[-atr_period:], low[-atr_period:], close[-atr_period:])
-        percentile = (sum(x < current_atr for x in atr_history) / len(atr_history)) * 100
-
-        low_thr = self.config['volatility_percentile_low']
-        high_thr = self.config['volatility_percentile_high']
-
-        if trend_score > 0:
-            if percentile < low_thr:
-                score = 10
-            elif percentile < 70:
-                score = 5
-            else:
-                score = -5
-        elif trend_score < 0:
-            if percentile > high_thr:
-                score = 5
-            elif percentile > low_thr:
-                score = -5
-            else:
-                score = -10
-        else:
-            score = 0
-
-        return score, {'percentile': percentile}
-
-    # -------------------------------------------------------------------------
-    # ATR 计算工具
-    # -------------------------------------------------------------------------
-
-    def _calculate_atr(self, high: List[float], low: List[float], close: List[float]) -> float:
-        """计算 ATR"""
-        if len(high) < 2:
-            return 0
-        tr_list = []
-        for i in range(1, len(high)):
-            tr = max(
-                high[i] - low[i],
-                abs(high[i] - close[i - 1]),
-                abs(low[i] - close[i - 1])
-            )
-            tr_list.append(tr)
-        return sum(tr_list) / len(tr_list) if tr_list else 0
-
-
-# 单例
-_market_regime_service: Optional[MarketRegimeService] = None
-
-
-def get_market_regime_service() -> MarketRegimeService:
-    """获取牛熊市判断服务实例"""
-    global _market_regime_service
-    if _market_regime_service is None:
-        _market_regime_service = MarketRegimeService()
-    return _market_regime_service

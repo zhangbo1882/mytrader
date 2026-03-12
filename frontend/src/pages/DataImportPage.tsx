@@ -9,7 +9,6 @@ import {
   Space,
   Typography,
   Tag,
-  Progress,
   Modal,
   Form,
   Select,
@@ -26,7 +25,7 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { dataImportService, type ImportResult, type TableInfo, type SheetInfo } from '@/services/dataImportService';
+import { dataImportService, type ImportResult, type TableInfo } from '@/services/dataImportService';
 
 const { Title, Text, Paragraph } = Typography;
 const { Dragger } = Upload;

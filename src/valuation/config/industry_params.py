@@ -6,15 +6,16 @@
 - 典型估值倍数范围
 - ROE/增长率基准
 - 行业特性
+- 行业权重配置（用于分层加权估值）
 """
 
 from typing import Dict, List, Optional, Any
 
 
-# 行业参数配置
+# 行业参数配置（使用正确的申万一级行业代码）
 INDUSTRY_PARAMS = {
-    # 银行
-    '801010': {
+    # 银行 801780
+    '801780': {
         'name': '银行',
         'primary_method': 'pb',  # 银行主要用PB估值
         'secondary_methods': ['pe'],
@@ -23,6 +24,9 @@ INDUSTRY_PARAMS = {
         'pb_range': (0.5, 1.5),
         'pe_range': (4, 12),
         'characteristics': ['周期性', '高杠杆', '价值型'],
+        'method_weights': {
+            'pe': 0.30, 'pb': 0.60, 'ps': 0.00, 'peg': 0.00, 'dcf': 0.10
+        },
         'adjustments': {
             'state_owned': 0.8,  # 国有银行折价
             'joint_stock': 1.0,  # 股份制正常
@@ -30,7 +34,7 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 医药生物
+    # 医药生物 801150
     '801150': {
         'name': '医药生物',
         'primary_method': 'pe',
@@ -40,6 +44,9 @@ INDUSTRY_PARAMS = {
         'pe_range': (20, 60),
         'ps_range': (3, 10),
         'characteristics': ['成长性', '防御性', '创新驱动'],
+        'method_weights': {
+            'pe': 0.50, 'pb': 0.10, 'ps': 0.20, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'innovation_drug': 1.5,  # 创新药溢价
             'generic_drug': 0.8,  # 仿制药折价
@@ -48,7 +55,7 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 电子
+    # 电子 801080
     '801080': {
         'name': '电子',
         'primary_method': 'ps',  # 电子行业常用PS（尤其半导体）
@@ -58,6 +65,9 @@ INDUSTRY_PARAMS = {
         'ps_range': (2, 8),
         'pe_range': (20, 50),
         'characteristics': ['高成长', '高波动', '周期性'],
+        'method_weights': {
+            'pe': 0.30, 'pb': 0.10, 'ps': 0.40, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'semiconductor': 1.3,  # 半导体溢价
             'consumer_electronics': 1.0,  # 消费电子中性
@@ -66,7 +76,7 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 房地产
+    # 房地产 801180
     '801180': {
         'name': '房地产',
         'primary_method': 'nav',  # NAV估值
@@ -76,6 +86,9 @@ INDUSTRY_PARAMS = {
         'pe_range': (5, 15),
         'pb_range': (0.5, 1.2),
         'characteristics': ['强周期', '高杠杆', '政策敏感'],
+        'method_weights': {
+            'pe': 0.20, 'pb': 0.50, 'ps': 0.10, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'tier1_city': 1.3,  # 一线城市溢价
             'commercial': 1.1,  # 商业地产溢价
@@ -83,7 +96,7 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 食品饮料
+    # 食品饮料 801120
     '801120': {
         'name': '食品饮料',
         'primary_method': 'pe',
@@ -93,6 +106,9 @@ INDUSTRY_PARAMS = {
         'pe_range': (20, 50),
         'ps_range': (2, 8),
         'characteristics': ['消费', '品牌', '防御性'],
+        'method_weights': {
+            'pe': 0.50, 'pb': 0.10, 'ps': 0.10, 'peg': 0.00, 'dcf': 0.30
+        },
         'adjustments': {
             'liquor': 1.5,  # 白酒溢价
             'dairy': 1.0,  # 乳制品中性
@@ -101,8 +117,8 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 汽车
-    '801010': {
+    # 汽车 801880
+    '801880': {
         'name': '汽车',
         'primary_method': 'pe',
         'secondary_methods': ['pb'],
@@ -111,6 +127,9 @@ INDUSTRY_PARAMS = {
         'pe_range': (8, 25),
         'pb_range': (0.8, 2.5),
         'characteristics': ['周期性', '竞争激烈'],
+        'method_weights': {
+            'pe': 0.40, 'pb': 0.30, 'ps': 0.10, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'nev': 1.5,  # 新能源汽车溢价
             'traditional': 0.8,  # 传统汽车折价
@@ -118,7 +137,7 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 基础化工
+    # 基础化工 801030
     '801030': {
         'name': '基础化工',
         'primary_method': 'pe',
@@ -128,6 +147,9 @@ INDUSTRY_PARAMS = {
         'pe_range': (10, 30),
         'pb_range': (1.0, 3.0),
         'characteristics': ['周期性', '原材料敏感'],
+        'method_weights': {
+            'pe': 0.20, 'pb': 0.50, 'ps': 0.10, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'new_materials': 1.3,  # 新材料溢价
             'chemical_fiber': 0.9,  # 化纤折价
@@ -135,8 +157,8 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 计算机
-    '801010': {
+    # 计算机 801750
+    '801750': {
         'name': '计算机',
         'primary_method': 'ps',
         'secondary_methods': ['pe'],
@@ -145,6 +167,9 @@ INDUSTRY_PARAMS = {
         'ps_range': (3, 12),
         'pe_range': (25, 60),
         'characteristics': ['高成长', '人才驱动'],
+        'method_weights': {
+            'pe': 0.30, 'pb': 0.10, 'ps': 0.40, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'software': 1.3,  # 软件溢价
             'hardware': 0.9,  # 硬件折价
@@ -152,8 +177,8 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 传媒
-    '801010': {
+    # 传媒 801760
+    '801760': {
         'name': '传媒',
         'primary_method': 'pe',
         'secondary_methods': ['ps'],
@@ -162,6 +187,9 @@ INDUSTRY_PARAMS = {
         'pe_range': (15, 40),
         'ps_range': (2, 6),
         'characteristics': ['内容', 'IP', '政策敏感'],
+        'method_weights': {
+            'pe': 0.40, 'pb': 0.10, 'ps': 0.30, 'peg': 0.00, 'dcf': 0.20
+        },
         'adjustments': {
             'gaming': 1.2,  # 游戏溢价
             'advertising': 0.9,  # 广告折价
@@ -169,8 +197,8 @@ INDUSTRY_PARAMS = {
         }
     },
 
-    # 电力设备
-    '801010': {
+    # 电力设备 801730
+    '801730': {
         'name': '电力设备',
         'primary_method': 'pe',
         'secondary_methods': ['pb'],
@@ -179,14 +207,66 @@ INDUSTRY_PARAMS = {
         'pe_range': (15, 40),
         'pb_range': (1.5, 4.0),
         'characteristics': ['政策驱动', '周期性'],
+        'method_weights': {
+            'pe': 0.40, 'pb': 0.20, 'ps': 0.10, 'peg': 0.00, 'dcf': 0.30
+        },
         'adjustments': {
             'renewable_energy': 1.4,  # 新能源发电溢价
             'grid_equipment': 1.0,  # 电网设备中性
             'traditional_power': 0.7  # 传统火电折价
         }
-    }
+    },
+
+    # 钢铁 801040
+    '801040': {
+        'name': '钢铁',
+        'primary_method': 'pb',
+        'secondary_methods': ['pe'],
+        'roe_baseline': 8.0,
+        'growth_baseline': 3.0,
+        'pb_range': (0.5, 1.5),
+        'pe_range': (5, 15),
+        'characteristics': ['强周期', '资产重'],
+        'method_weights': {
+            'pe': 0.20, 'pb': 0.50, 'ps': 0.10, 'peg': 0.00, 'dcf': 0.20
+        },
+    },
+
+    # 非银金融 801190
+    '801190': {
+        'name': '非银金融',
+        'primary_method': 'pb',
+        'secondary_methods': ['pe'],
+        'roe_baseline': 12.0,
+        'growth_baseline': 10.0,
+        'pb_range': (1.0, 3.0),
+        'pe_range': (10, 25),
+        'characteristics': ['金融', '监管敏感'],
+        'method_weights': {
+            'pe': 0.35, 'pb': 0.45, 'ps': 0.00, 'peg': 0.00, 'dcf': 0.20
+        },
+    },
+
+    # 通信 801770
+    '801770': {
+        'name': '通信',
+        'primary_method': 'pe',
+        'secondary_methods': ['ps'],
+        'roe_baseline': 10.0,
+        'growth_baseline': 10.0,
+        'pe_range': (15, 35),
+        'ps_range': (2, 6),
+        'characteristics': ['基础设施', '稳定性'],
+        'method_weights': {
+            'pe': 0.40, 'pb': 0.10, 'ps': 0.30, 'peg': 0.00, 'dcf': 0.20
+        },
+    },
 }
 
+# 默认行业权重（未匹配到具体行业时使用）
+DEFAULT_METHOD_WEIGHTS = {
+    'pe': 0.40, 'pb': 0.20, 'ps': 0.20, 'peg': 0.00, 'dcf': 0.20
+}
 
 # A股市场特色调整参数
 MARKET_ADJUSTMENTS = {
@@ -198,16 +278,16 @@ MARKET_ADJUSTMENTS = {
         'recession': 0.6  # 衰退期大折价
     },
 
-    # 大小盘溢价
+    # 大小盘溢价（修正后）
     'market_cap': {
         'small_cap': 50,  # 小于50亿
         'mid_cap': 500,  # 50-500亿
         'large_cap': 1000  # 大于500亿
     },
     'market_cap_premium': {
-        'small': 1.2,  # 小盘股溢价
+        'small': 1.1,  # 小盘股溢价（修正：原1.2过高）
         'mid': 1.0,  # 中盘股中性
-        'large': 0.9  # 大盘股折价
+        'large': 1.0  # 大盘股中性（修正：原0.9，核心资产时代不一定折价）
     },
 
     # 成长性溢价
@@ -243,7 +323,7 @@ def get_industry_params(industry_code: str) -> Optional[Dict[str, Any]]:
 
 def get_industry_params_by_name(industry_name: str) -> Optional[Dict[str, Any]]:
     """
-    根据行业名称获取参数
+    根据行业名称获取参数（模糊匹配）
 
     Args:
         industry_name: 申万行业名称
@@ -251,10 +331,34 @@ def get_industry_params_by_name(industry_name: str) -> Optional[Dict[str, Any]]:
     Returns:
         行业参数字典，如果不存在返回None
     """
+    if not industry_name:
+        return None
     for code, params in INDUSTRY_PARAMS.items():
-        if params['name'] == industry_name:
+        if params['name'] == industry_name or params['name'] in industry_name:
             return params
     return None
+
+
+def get_industry_method_weights(industry_code: str = None, industry_name: str = None) -> Dict[str, float]:
+    """
+    获取行业估值方法权重
+
+    Args:
+        industry_code: 申万行业代码
+        industry_name: 行业名称（如果代码未匹配，用名称查找）
+
+    Returns:
+        各方法的权重字典 {method: weight}
+    """
+    params = None
+    if industry_code:
+        params = get_industry_params(industry_code)
+    if params is None and industry_name:
+        params = get_industry_params_by_name(industry_name)
+
+    if params and 'method_weights' in params:
+        return params['method_weights']
+    return DEFAULT_METHOD_WEIGHTS.copy()
 
 
 def get_market_cap_premium(market_cap: float) -> float:

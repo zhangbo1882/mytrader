@@ -35,15 +35,16 @@ export function useBacktestPolling(taskId: string | null): UseBacktestPollingRes
     setIsPolling(true);
     errorCountRef.current = 0;
     setError(null);
+    setResult(null);
+    setStatus(null);
 
     const poll = async () => {
       try {
-        const statusRes = await backtestService.getStatus(taskId) as any;
+        const statusRes = await backtestService.getStatus(taskId);
         setStatus(statusRes);
 
         if (statusRes.status === 'completed') {
-          // Get full result
-          const resultRes = await backtestService.getResult(taskId) as any;
+          const resultRes = await backtestService.getResult(taskId);
           setResult(resultRes.result);
           setIsPolling(false);
           return;
@@ -55,7 +56,6 @@ export function useBacktestPolling(taskId: string | null): UseBacktestPollingRes
           return;
         }
 
-        // Continue polling
         timeoutRef.current = setTimeout(poll, POLLING_INTERVAL);
       } catch (err) {
         errorCountRef.current++;

@@ -1,9 +1,9 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Table, Card, Tabs, Empty, Spin, Tag, Radio } from 'antd';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Area, Bar, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Area, ReferenceLine } from 'recharts';
 import type { ColumnsType } from 'antd/es/table';
 import type { StockData } from '@/types';
-import { formatNumber, formatPercent, formatVolume, formatDate } from '@/utils';
+import { formatNumber, formatVolume } from '@/utils';
 import api from '@/services/api';
 
 interface QueryResultsProps {
@@ -39,7 +39,10 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
     stockCodes.forEach((code) => {
       results[code].forEach((item) => {
         // 后端返回 datetime 字段，前端期望 date 字段
-        allDates.add(item.date || item.datetime);
+        const dateValue = item.date || item.datetime;
+        if (dateValue) {
+          allDates.add(dateValue);
+        }
       });
     });
 
@@ -54,7 +57,7 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
       };
 
       stockCodes.forEach((code) => {
-        const data = results[code].find((d) => d.date === date);
+        const data = results[code].find((d) => (d.date || d.datetime) === date);
         if (data) {
           row[`${code}_open`] = data.open;
           row[`${code}_high`] = data.high;
@@ -174,7 +177,10 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
     stockCodes.forEach((code) => {
       results[code].forEach((item) => {
         // 后端返回 datetime 字段，前端期望 date 字段
-        allDates.add(item.date || item.datetime);
+        const dateValue = item.date || item.datetime;
+        if (dateValue) {
+          allDates.add(dateValue);
+        }
       });
     });
 
@@ -240,8 +246,8 @@ export function QueryResults({ results, loading }: QueryResultsProps) {
 
           console.log(`[牛熊市] ${code} 响应:`, response);
 
-          // axios 拦截器已经解包，response 就是后端响应体 { symbol: ..., data: [...] }
-          const regimeResponseData = response.data;
+          // axios 拦截器已经解包，response 是后端响应体 { symbol: ..., cycle: ..., data: [...] }
+          const regimeResponseData = response?.data || response;
           if (regimeResponseData && Array.isArray(regimeResponseData) && regimeResponseData.length > 0) {
             newRegimeData[code] = regimeResponseData;
             console.log(`[牛熊市] ${code} 成功: ${regimeResponseData.length} 条`);

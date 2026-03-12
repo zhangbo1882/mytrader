@@ -446,13 +446,24 @@ def execute_update_financial_reports(tm, task_id, params):
             # Update financial data
             if include_reports:
                 # Update main financial reports (income, balance sheet, cash flow)
-                db.save_all_financial(ts_code, include_indicators=include_indicators)
+                financial_result = db.save_all_financial(
+                    ts_code, include_indicators=include_indicators
+                )
+                backfill_stats = financial_result.get('cashflow_backfill') or {}
             elif include_indicators:
                 # Only update financial indicators
                 db.save_fina_indicator(ts_code)
+                backfill_stats = {}
+            else:
+                backfill_stats = {}
 
             stats['success'] += 1
             tm.increment_stats(task_id, 'success')
+            if backfill_stats:
+                print(
+                    f"[Financial-{task_id[:8]}] 💰 {stock_code} end_bal_cash 回填 "
+                    f"{backfill_stats.get('filled', 0)}/{backfill_stats.get('missing_candidates', 0)}"
+                )
             print(f"[Financial-{task_id[:8]}] ✓ {stock_code} updated successfully")
 
         except Exception as e:
@@ -1624,6 +1635,205 @@ def execute_update_hk_batch(tm, task_id, params):
         )
 
 
+
+def execute_update_valuation_prior(tm, task_id, params):
+    """
+    后台计算贝叶斯先验矩阵
+
+    对历史季报期运行估值并回测，计算各行业×方法的历史方向准确率，
+    写入 SQLite valuation_prior_matrix 表。
+
+    Args:
+        tm: TaskManager 实例
+        task_id: 任务标识符
+        params: 任务参数:
+            - years: 回测年数（默认: 3）
+            - industry_codes: 行业代码列表（默认: None=全部，仅L1有效）
+            - level: 回测粒度 ('L1'|'L2'|'both'，默认: 'both')
+            - min_stocks: L2行业最少股票数（默认: 15）
+    """
+    import os
+    import sys
+
+    # 确保项目根目录在 sys.path
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    from src.valuation.bayesian.backtest_engine import BayesianBacktestEngine
+    from src.valuation.bayesian.prior_matrix import PriorMatrix
+    from src.valuation.config.industry_params import INDUSTRY_PARAMS
+
+    years = params.get('years', 3)
+    industry_codes = params.get('industry_codes')  # None = 全部行业（L1）
+    level = params.get('level', 'both')             # 'L1', 'L2', 'both'
+    min_stocks = params.get('min_stocks', 15)       # L2最少股票数
+
+    # 获取数据库路径
+    db_path = os.path.join(project_root, 'data', 'tushare_data.db')
+
+    # 确定L1行业列表
+    if industry_codes:
+        l1_industries = [(code, INDUSTRY_PARAMS[code]['name'])
+                         for code in industry_codes
+                         if code in INDUSTRY_PARAMS]
+    else:
+        l1_industries = [(code, params_['name'])
+                         for code, params_ in INDUSTRY_PARAMS.items()]
+
+    # 根据 level 确定总任务数（用于进度）
+    run_l1 = level in ('L1', 'both')
+    run_l2 = level in ('L2', 'both')
+
+    # 预估L2数量（先查询，用于进度显示）
+    engine_tmp = None
+    l2_industries = []
+    if run_l2:
+        try:
+            engine_tmp = BayesianBacktestEngine(db_path=db_path)
+            l2_industries = engine_tmp._get_l2_industries(min_stocks=min_stocks)
+        except Exception as e:
+            logger.warning(f"[ValuationPrior-{task_id[:8]}] 获取L2行业列表失败: {e}")
+
+    l1_count = len(l1_industries) if run_l1 else 0
+    l2_count = len(l2_industries) if run_l2 else 0
+    total = l1_count + l2_count
+
+    logger.info(
+        f"[ValuationPrior-{task_id[:8]}] 开始更新贝叶斯先验矩阵，"
+        f"level={level}, L1={l1_count}个行业, L2={l2_count}个行业"
+    )
+
+    tm.update_task(
+        task_id,
+        status='running',
+        message=f'开始计算贝叶斯先验矩阵（{level}），共{total}个行业...',
+        progress=0
+    )
+
+    try:
+        engine = engine_tmp or BayesianBacktestEngine(db_path=db_path)
+        prior = PriorMatrix(db_path=db_path)
+        prior.ensure_table()
+
+        success_count = 0
+        failed_industries = []
+        completed = 0
+
+        # ── L1 回测 ──────────────────────────────────────────────────
+        if run_l1:
+            for i, (ind_code, ind_name) in enumerate(l1_industries):
+                completed += 1
+                progress = int((completed / total) * 100) if total > 0 else 0
+                msg = f'[L1] 回测行业 {i+1}/{l1_count}: {ind_name}({ind_code})'
+                logger.info(f"[ValuationPrior-{task_id[:8]}] {msg}")
+                tm.update_task(task_id, progress=progress, message=msg)
+
+                try:
+                    accuracies, counts, stock_count = engine.run_industry_backtest(
+                        ind_code, ind_name,
+                        years=years,
+                        level='L1'
+                    )
+
+                    for method, acc in accuracies.items():
+                        prior.upsert(
+                            industry_code=ind_code,
+                            industry_name=ind_name,
+                            method=method,
+                            accuracy=acc,
+                            sample_count=counts.get(method, 0),
+                            stock_count=stock_count,
+                            level='L1'
+                        )
+                        logger.info(
+                            f"[ValuationPrior-{task_id[:8]}]   {ind_name}/{method}: "
+                            f"accuracy={acc:.3f}"
+                        )
+
+                    success_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"[ValuationPrior-{task_id[:8]}] 回测L1行业 {ind_name} 失败: {e}"
+                    )
+                    failed_industries.append(f"L1:{ind_name}")
+
+        # ── L2 回测 ──────────────────────────────────────────────────
+        if run_l2 and l2_industries:
+            for i, (idx_code, ind_code, ind_name) in enumerate(l2_industries):
+                completed += 1
+                progress = int((completed / total) * 100) if total > 0 else 0
+                msg = f'[L2] 回测行业 {i+1}/{l2_count}: {ind_name}({ind_code})'
+                logger.info(f"[ValuationPrior-{task_id[:8]}] {msg}")
+                tm.update_task(task_id, progress=progress, message=msg)
+
+                try:
+                    accuracies, counts, stock_count = engine.run_industry_backtest(
+                        industry_code=ind_code,
+                        industry_name=ind_name,
+                        years=years,
+                        index_code=idx_code,
+                        level='L2'
+                    )
+
+                    for method, acc in accuracies.items():
+                        prior.upsert(
+                            industry_code=ind_code,
+                            industry_name=ind_name,
+                            method=method,
+                            accuracy=acc,
+                            sample_count=counts.get(method, 0),
+                            stock_count=stock_count,
+                            level='L2'
+                        )
+                        logger.info(
+                            f"[ValuationPrior-{task_id[:8]}]   [L2]{ind_name}/{method}: "
+                            f"accuracy={acc:.3f}"
+                        )
+
+                    success_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"[ValuationPrior-{task_id[:8]}] 回测L2行业 {ind_name} 失败: {e}"
+                    )
+                    failed_industries.append(f"L2:{ind_name}")
+
+        final_msg = (
+            f'贝叶斯先验矩阵更新完成（{level}）: '
+            f'{success_count}/{total}个行业成功'
+        )
+        if failed_industries:
+            final_msg += f'，失败: {", ".join(failed_industries[:5])}'
+
+        logger.info(f"[ValuationPrior-{task_id[:8]}] {final_msg}")
+
+        tm.update_task(
+            task_id,
+            status='completed',
+            progress=100,
+            message=final_msg,
+            result={
+                'success_count': success_count,
+                'total_count': total,
+                'l1_count': l1_count,
+                'l2_count': l2_count,
+                'failed_industries': failed_industries
+            }
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        tm.update_task(
+            task_id,
+            status='failed',
+            message=f'贝叶斯先验矩阵更新失败: {str(e)}',
+            error=str(e)
+        )
+
+
 # Task type to handler mapping
 TASK_HANDLERS = {
     'update_stock_prices': execute_update_stock_prices,
@@ -1639,6 +1849,7 @@ TASK_HANDLERS = {
     'update_dragon_list': execute_update_dragon_list,  # 龙虎榜数据更新
     'test_handler': execute_test_handler,
     'backtest': execute_backtest,  # 回测任务
+    'update_valuation_prior': execute_update_valuation_prior,  # 贝叶斯先验矩阵更新
     # Backward compatibility for old task types
     'update_all_stocks': execute_update_stock_prices,
     'update_favorites': execute_update_stock_prices,

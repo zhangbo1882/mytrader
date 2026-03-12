@@ -50,7 +50,7 @@ export function ModelComparisonChart({ results }: ModelComparisonChartProps) {
             formatter={(value: any, name: any) => {
               if (name === 'upside') return [`${value.toFixed(2)}%`, '上下空间'];
               if (name === 'confidence') return [`${value.toFixed(0)}%`, '置信度'];
-              return [`¥${value.toFixed(2)}`, name === 'fairValue' ? '合理价值' : '当前价格'];
+              return [`¥${value.toFixed(2)}`, name === '合理价值' ? '合理价值' : '当前价格'];
             }}
           />
           <Legend />

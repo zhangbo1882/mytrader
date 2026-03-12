@@ -12,7 +12,8 @@ export type CriteriaType =
   | 'TurnoverColumn'  // Turnover column {period, min_val/max_val/threshold}
   | 'PositiveDays'     // Positive days {period, threshold, min_positive_ratio}
   | 'MarketFilter'     // Market filter {markets[], mode}
-  | 'BearToBull';     // Bear-to-bull transition {period, cycle}
+  | 'BearToBull'       // Bear-to-bull transition {period, cycle}
+  | 'ValuationUpside'; // Valuation upside {min_upside, max_upside, min_confidence, methods}
 
 export interface Criteria {
   type: CriteriaType;
@@ -22,6 +23,11 @@ export interface Criteria {
   min_positive_ratio?: number; // For PositiveDays: minimum positive day ratio (0-1)
   start_date?: string;  // Optional start date YYYYMMDD (alternative to period)
   end_date?: string;    // Optional end date YYYYMMDD (alternative to period)
+  // Valuation screening parameters
+  min_upside?: number;  // Minimum upside percentage for ValuationUpside
+  max_upside?: number;  // Maximum upside percentage for ValuationUpside
+  min_confidence?: number; // Minimum confidence threshold (0-1) for ValuationUpside
+  methods?: string[];   // Valuation methods ['pe', 'pb', 'ps', 'peg'] for ValuationUpside
   [key: string]: any;
 }
 

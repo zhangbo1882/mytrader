@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Card,
   Typography,
@@ -24,7 +24,6 @@ import {
 import {
   SyncOutlined,
   PlusOutlined,
-  StarOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
   PauseCircleOutlined,
@@ -54,19 +53,6 @@ const computeStartDate = (dateRange: string, customStartDate?: string): string |
   const match = dateRange.match(/^(\d+)y$/);
   if (match) return dayjs().subtract(parseInt(match[1]), 'year').format('YYYY-MM-DD');
   return undefined;
-};
-
-// Task status color mapping
-const getStatusColor = (status: string) => {
-  const colors: Record<string, string> = {
-    pending: 'warning',
-    running: 'processing',
-    paused: 'default',
-    completed: 'success',
-    failed: 'error',
-    stopped: 'default',
-  };
-  return colors[status] || 'default';
 };
 
 // Human-readable cron expression parser

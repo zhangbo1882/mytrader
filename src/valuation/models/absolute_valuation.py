@@ -49,20 +49,20 @@ class DCFValuationModel(BaseValuationModel):
         """
         super().__init__('DCF', config)
         self.forecast_years = config.get('forecast_years', 5) if config else 5
-        # 终值增长率2%（接近GDP增长率的保守估计）
-        self.terminal_growth = config.get('terminal_growth', 0.02) if config else 0.02
-        # 无风险利率2.5%
-        self.risk_free_rate = config.get('risk_free_rate', 0.025) if config else 0.025
-        # 市场回报率9%（A股合理水平，考虑品牌溢价）
+        # 终值增长率2.5%（中国名义GDP增长约4-5%，保守取2.5%）
+        self.terminal_growth = config.get('terminal_growth', 0.025) if config else 0.025
+        # 无风险利率2.3%（当前10年国债约2.3%）
+        self.risk_free_rate = config.get('risk_free_rate', 0.023) if config else 0.023
+        # 市场回报率9%（A股合理水平）
         self.market_return = config.get('market_return', 0.09) if config else 0.09
 
         # 新增可配置参数
         self.tax_rate = config.get('tax_rate', 0.25) if config else 0.25
         # 信用利差2.5%
         self.credit_spread = config.get('credit_spread', 0.025) if config else 0.025
-        # 增长率上限6%（优质公司的合理水平）
+        # 增长率上限6%
         self.growth_rate_cap = config.get('growth_rate_cap', 0.06) if config else 0.06
-        # WACC下限7%（考虑品牌护城河）
+        # WACC下限7%
         self.wacc_min = config.get('wacc_min', 0.07) if config else 0.07
         # WACC上限12%
         self.wacc_max = config.get('wacc_max', 0.12) if config else 0.12
@@ -136,6 +136,17 @@ class DCFValuationModel(BaseValuationModel):
                 'date': date,
                 'error': 'Insufficient data: capital_structure data is missing. '
                        'Please ensure balancesheet table has data for this stock.'
+            }
+
+        # 4. 检查现金及现金等价物数据
+        cash_date_used = data.get('cash_date_used')
+        cash_equivalents = data.get('cash_equivalents')
+        if cash_date_used is None or cash_equivalents is None:
+            return {
+                'symbol': symbol,
+                'date': date,
+                'error': 'Insufficient data: cash_equivalents data is missing. '
+                       'Please ensure cashflow.end_bal_cash exists for the selected report period.'
             }
 
         # 获取当前价格
@@ -283,27 +294,29 @@ class DCFValuationModel(BaseValuationModel):
             growth_rate = 0.10  # 默认10%增长
         else:
             # 数据库中 FCF 以元为单位，需要转换为亿元
-            valid_fcf = [record.get('free_cashflow', 0) for record in fcf_history if record.get('free_cashflow') and record.get('free_cashflow') > 0]
+            # 使用所有年份（含负值）的FCF计算平均值，避免系统性高估
+            all_fcf = [record.get('free_cashflow', 0) for record in fcf_history if record.get('free_cashflow') is not None]
 
-            if not valid_fcf:
-                base_fcf = 100  # 默认基准
+            if not all_fcf:
+                base_fcf = 100
             else:
-                # 使用近3年或5年平均FCF作为基准，平滑年度波动（如分红变化）
-                # 对于成熟公司，多年平均更能反映真实盈利能力
-                avg_years = min(5, len(valid_fcf))  # 最多5年，最少2年
-                fcf_to_avg = valid_fcf[:avg_years]
+                avg_years = min(5, len(all_fcf))
+                fcf_to_avg = all_fcf[:avg_years]
                 base_fcf_raw = np.mean(fcf_to_avg)
-                base_fcf = base_fcf_raw / 100000000  # 元 -> 亿元
+
+                if base_fcf_raw <= 0:
+                    # 平均FCF为负，DCF不适用
+                    base_fcf = 0  # 后续会产生0估值，触发警告
+                else:
+                    base_fcf = base_fcf_raw / 100000000  # 元 -> 亿元
 
             # 计算历史增长率
             growth_history = data.get('revenue_growth', [])
             if growth_history:
                 growth_rate = np.mean(growth_history)
-                # 对于DCF估值，使用可配置的增长率上限
-                # 成熟公司的增长通常接近GDP增长率，默认限制在5%以内
                 growth_rate = max(0.0, min(growth_rate, self.growth_rate_cap))
             else:
-                growth_rate = self.growth_rate_cap  # 使用可配置的默认值
+                growth_rate = self.growth_rate_cap
 
         # 预测未来FCF（增长率逐年递减）
         fcf_forecast = []
@@ -363,15 +376,33 @@ class DCFValuationModel(BaseValuationModel):
         net_cash: float = 0
     ) -> Dict[str, Any]:
         """
-        获取详细指标
+        获取详细指标（包含DCF置信度所需字段）
         """
         capital_structure = data.get('capital_structure', {})
-        # 使用实际计算的beta（优先用户指定的）
         beta = self.user_beta if self.user_beta is not None else data.get('beta', 1.0)
 
-        # 获取现金和债务信息用于显示
         cash_equivalents = data.get('cash_equivalents', 0) / 100000000  # 元 -> 亿元
         interest_bearing_debt = capital_structure.get('interest_bearing_debt', 0) or 0
+
+        # 计算FCF变异系数（用于置信度）
+        fcf_history = data.get('free_cash_flow', [])
+        fcf_cv = None
+        fcf_years = 0
+        if fcf_history:
+            all_fcf = [r.get('free_cashflow', 0) for r in fcf_history if r.get('free_cashflow') is not None]
+            fcf_years = len(all_fcf)
+            if len(all_fcf) >= 2:
+                fcf_mean = abs(np.mean(all_fcf))
+                if fcf_mean > 0:
+                    fcf_cv = np.std(all_fcf) / fcf_mean
+
+        # FCF/净利润比率
+        net_income = data.get('net_income', 0)
+        fcf_to_ni_ratio = None
+        if fcf_history and net_income and net_income > 0:
+            latest_fcf = fcf_history[0].get('free_cashflow', 0) if fcf_history else 0
+            if latest_fcf is not None:
+                fcf_to_ni_ratio = latest_fcf / net_income
 
         return {
             'wacc': round(wacc, 4),
@@ -389,6 +420,9 @@ class DCFValuationModel(BaseValuationModel):
             'cash_equivalents_billions': round(cash_equivalents, 2),
             'interest_bearing_debt_billions': round(interest_bearing_debt / 100000000, 2),
             'net_cash_billions': round(net_cash, 2),
+            'fcf_cv': round(fcf_cv, 3) if fcf_cv is not None else None,
+            'fcf_years': fcf_years,
+            'fcf_to_ni_ratio': round(fcf_to_ni_ratio, 3) if fcf_to_ni_ratio is not None else None,
         }
 
     def _get_assumptions(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -397,18 +431,61 @@ class DCFValuationModel(BaseValuationModel):
         """
         beta = self.user_beta if self.user_beta is not None else data.get('beta', 1.0)
 
-        return {
+        # FCF 数据的报告期范围
+        fcf_history = data.get('free_cash_flow', [])
+        fcf_dates = sorted([r['end_date'] for r in fcf_history if r.get('end_date')])
+        fcf_date_range = None
+        if fcf_dates:
+            def fmt(d):
+                d = str(d)
+                return f"{d[:4]}-{d[4:6]}-{d[6:]}"
+            fcf_date_range = f"{fmt(fcf_dates[0])} ~ {fmt(fcf_dates[-1])}"
+
+        # 资本结构（资产负债表）使用的报告期
+        capital_structure = data.get('capital_structure', {})
+        bs_date = capital_structure.get('end_date')
+        bs_date_str = None
+        if bs_date:
+            bs_date = str(bs_date)
+            bs_date_str = f"{bs_date[:4]}-{bs_date[4:6]}-{bs_date[6:]}"
+
+        # 现金数据使用的报告期
+        cash_date = data.get('cash_date_used')
+        cash_date_str = None
+        if cash_date:
+            cash_date = str(cash_date)
+            cash_date_str = f"{cash_date[:4]}-{cash_date[4:6]}-{cash_date[6:]}"
+
+        result = {
             'forecast_years': self.forecast_years,
             'terminal_growth_rate': f'{self.terminal_growth * 100}%',
             'wacc': f'{self._calculate_wacc(data) * 100}%',
             'risk_free_rate': f'{self.risk_free_rate * 100}%',
             'market_return': f'{self.market_return * 100}%',
             'beta': beta,
-            'growth_assumption': 'Based on historical revenue growth',
+            'growth_assumption': '基于历史营收增长率',
             'tax_rate': f'{self.tax_rate * 100}%',
             'credit_spread': f'{self.credit_spread * 100}%',
             'growth_rate_cap': f'{self.growth_rate_cap * 100}%',
+            'fcf_date_range': fcf_date_range,
+            'balance_sheet_date': bs_date_str,
+            'cash_date': cash_date_str,
         }
+
+        # 最新一年 FCFF 拆解，供用户理解数据来源
+        if fcf_history:
+            latest = fcf_history[0]
+            interest = latest.get('interest_expense', 0) or 0
+            tax = latest.get('tax_rate', 0.25) or 0.25
+            result['fcf_latest_breakdown'] = {
+                'operating_cf': latest.get('operating_cashflow'),
+                'interest_add_back': round(interest * (1 - tax), 2),
+                'capex': latest.get('capex'),
+                'fcff': latest.get('free_cashflow'),
+                'tax_rate_used': round(tax, 4),
+            }
+
+        return result
 
     def _get_warnings(self, data: Dict[str, Any]) -> List[str]:
         """
@@ -417,26 +494,35 @@ class DCFValuationModel(BaseValuationModel):
         warnings = []
 
         if not data.get('free_cash_flow'):
-            warnings.append('No historical FCF data available, using default assumptions')
+            warnings.append('无历史FCFF数据，使用默认假设')
 
         capital_structure = data.get('capital_structure', {})
         if not capital_structure:
-            warnings.append('No capital structure data available')
+            warnings.append('无资本结构数据')
 
         fcf_history = data.get('free_cash_flow', [])
         if fcf_history and len(fcf_history) < 3:
-            warnings.append('Limited historical FCF data (< 3 years), forecast may be unreliable')
+            warnings.append('历史FCFF数据不足3年，预测结果可靠性较低')
 
-        # 检查现金数据来源是否与请求的fiscal_date不同
-        cash_date_used = data.get('cash_date_used')
-        if cash_date_used and self.data_loader._use_fiscal_date():
-            # 标准化日期格式进行比较
-            fiscal_date_db = self.data_loader.fiscal_date.replace('-', '')
-            if cash_date_used != fiscal_date_db:
-                warnings.append(
-                    f'现金数据来自{cash_date_used[:4]}-{cash_date_used[4:6]}-{cash_date_used[6:]}年度报告 '
-                    f'(请求的{self.data_loader.fiscal_date}季度报告无现金余额数据)'
-                )
+        # 检查是否存在负值FCF
+        if fcf_history:
+            all_fcf = [r.get('free_cashflow', 0) for r in fcf_history if r.get('free_cashflow') is not None]
+            neg_count = sum(1 for v in all_fcf if v < 0)
+            if neg_count > 0:
+                avg_fcf = np.mean(all_fcf) if all_fcf else 0
+                if avg_fcf <= 0:
+                    warnings.append(f'平均FCF为负（含{neg_count}年负值），DCF估值结果不可靠，建议参考PE/PB估值')
+                else:
+                    warnings.append(f'存在{neg_count}年负FCF，已含入均值计算')
+
+        # 检查利息数据是否真正缺失（fin_exp_int_exp 和 fin_exp 均为 NULL）
+        if fcf_history:
+            missing_interest = sum(
+                1 for r in fcf_history
+                if r.get('interest_data_missing', 0)
+            )
+            if missing_interest > 0:
+                warnings.append(f'利息数据缺失（{missing_interest}年），FCFF中利息加回=0（使用简化FCF）')
 
         # 检查FCF/净利润比率，识别高分红公司
         net_income = data.get('net_income', 0)
@@ -451,7 +537,71 @@ class DCFValuationModel(BaseValuationModel):
                         f'建议同时参考PE估值。'
                     )
 
+        # 检查三个财报日期的一致性
+        capital_structure = data.get('capital_structure', {})
+        bs_date = str(capital_structure.get('end_date', '')) if capital_structure.get('end_date') else None
+        cash_date_used = data.get('cash_date_used')
+        fcf_latest_date = str(fcf_history[0]['end_date']) if fcf_history and fcf_history[0].get('end_date') else None
+
+        if bs_date and cash_date_used and bs_date != str(cash_date_used):
+            bs_fmt = f"{bs_date[:4]}-{bs_date[4:6]}-{bs_date[6:]}"
+            cash_fmt = f"{str(cash_date_used)[:4]}-{str(cash_date_used)[4:6]}-{str(cash_date_used)[6:]}"
+            warnings.append(f'资产负债表日期（{bs_fmt}）与现金数据日期（{cash_fmt}）不一致，资本结构与现金数据来自不同报告期')
+
+        if bs_date and fcf_latest_date:
+            bs_year = int(bs_date[:4])
+            fcf_year = int(fcf_latest_date[:4])
+            gap = bs_year - fcf_year
+            if gap >= 2:
+                bs_fmt = f"{bs_date[:4]}-{bs_date[4:6]}-{bs_date[6:]}"
+                fcf_fmt = f"{fcf_latest_date[:4]}-{fcf_latest_date[4:6]}-{fcf_latest_date[6:]}"
+                warnings.append(f'FCF历史数据最新至{fcf_fmt}，距资产负债表日期（{bs_fmt}）已超过{gap}年，现金流预测基准可能过时')
+
         return warnings
+
+    def _calculate_confidence(self, metrics: Dict, assumptions: Dict) -> float:
+        """
+        DCF差异化置信度计算
+
+        基础0.5 + FCF稳定性 + FCF/净利润质量 + 增长合理性
+        """
+        confidence = 0.5
+
+        # FCF稳定性（变异系数）
+        fcf_cv = metrics.get('fcf_cv')
+        if fcf_cv is not None:
+            if fcf_cv < 0.3:
+                confidence += 0.15
+            elif fcf_cv < 0.5:
+                confidence += 0.08
+            elif fcf_cv > 1.0:
+                confidence -= 0.15
+
+        # FCF/净利润质量
+        fcf_to_ni_ratio = metrics.get('fcf_to_ni_ratio')
+        if fcf_to_ni_ratio is not None:
+            if fcf_to_ni_ratio > 0.8:
+                confidence += 0.10
+            elif fcf_to_ni_ratio < 0:
+                confidence -= 0.15  # 负FCF/正净利润，质量差
+
+        # 增长合理性：历史增长vs预测增长
+        growth_rate_cap = metrics.get('growth_rate_cap', 0.06)
+        if growth_rate_cap <= 0.04:
+            confidence += 0.05  # 保守预测更可靠
+        elif growth_rate_cap >= 0.08:
+            confidence -= 0.05  # 激进预测风险高
+
+        # 数据年数
+        fcf_years = metrics.get('fcf_years', 0)
+        if fcf_years >= 5:
+            confidence += 0.08
+        elif fcf_years >= 3:
+            confidence += 0.04
+        elif fcf_years < 2:
+            confidence -= 0.10
+
+        return max(0.3, min(confidence, 0.9))
 
     def _standardize_code(self, symbol: str) -> str:
         """标准化股票代码"""

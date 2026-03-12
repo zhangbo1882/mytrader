@@ -19,6 +19,7 @@ export const TASK_STATUS_MAP = {
   running: { text: '运行中', color: 'processing' },
   paused: { text: '已暂停', color: 'warning' },
   completed: { text: '已完成', color: 'success' },
+  completed_with_errors: { text: '已完成(有错误)', color: 'warning' },
   failed: { text: '失败', color: 'error' },
   stopped: { text: '已停止', color: 'default' },
 } as const;

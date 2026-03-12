@@ -53,6 +53,8 @@ def create_task(request_data):
         return handle_update_a_share_batch(params)
     elif task_type == 'update_hk_batch':
         return handle_update_hk_batch(params)
+    elif task_type == 'update_valuation_prior':
+        return handle_update_valuation_prior(params)
     elif task_type == 'update':
         # 通用更新任务，根据 params.content_type 分发
         content_type = params.get('content_type', 'stock')
@@ -341,9 +343,14 @@ def handle_update_financial_reports(params):
         'include_reports': include_reports
     }
 
-    # If favorites, get favorites list
+    # If favorites, use the custom_stocks passed from frontend (actual favorites list)
     if stock_range == 'favorites':
-        task_params['stocks'] = ["600382", "600711", "000001"]  # Default favorites
+        # Frontend passes the actual favorites list in custom_stocks
+        # Only use default if no stocks were provided
+        if custom_stocks:
+            task_params['stocks'] = custom_stocks
+        else:
+            task_params['stocks'] = ["600382", "600711", "000001"]  # Fallback defaults
 
     # Create task with status='pending' - Worker will pick it up
     tm = get_task_manager()
@@ -852,3 +859,50 @@ def handle_update_hk_batch(params):
         'message': f'港股批量更新任务已创建，days_back={days_back}'
     }, 201
 
+
+def handle_update_valuation_prior(params):
+    """
+    处理贝叶斯估值先验矩阵更新任务创建
+
+    Args:
+        params: 任务参数:
+            - years: 回测年数（默认: 3）
+            - level: 回测粒度 ('L1'|'L2'|'both'，默认: 'both')
+            - industry_codes: 行业代码列表（默认: None=全部，仅L1）
+            - min_stocks: L2行业最少股票数（默认: 15）
+
+    Returns:
+        tuple: (response_dict, status_code)
+    """
+    years = params.get('years', 3)
+    level = params.get('level', 'both')
+    industry_codes = params.get('industry_codes')
+    min_stocks = params.get('min_stocks', 15)
+
+    # 参数验证
+    if not isinstance(years, int) or years <= 0 or years > 10:
+        return {'error': 'years 必须是 1-10 之间的整数'}, 400
+    if level not in ('L1', 'L2', 'both'):
+        return {'error': "level 必须是 'L1'、'L2' 或 'both'"}, 400
+
+    task_params = {
+        'years': years,
+        'level': level,
+        'industry_codes': industry_codes,
+        'min_stocks': min_stocks,
+    }
+
+    tm = get_task_manager()
+    task_id = tm.create_task(
+        task_type='update_valuation_prior',
+        params=task_params
+    )
+    tm.update_task(task_id, message='贝叶斯先验矩阵更新任务已创建，等待Worker执行...')
+
+    ind_desc = f'{len(industry_codes)}个行业' if industry_codes else '全部行业'
+    return {
+        'success': True,
+        'task_id': task_id,
+        'status': 'pending',
+        'message': f'贝叶斯先验矩阵更新任务已创建，{ind_desc}，years={years}'
+    }, 201

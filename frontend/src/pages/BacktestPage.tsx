@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Typography, Tabs, Button, Space, Alert } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { TaskProgress } from '@/components/tasks/TaskProgress';
@@ -30,21 +30,23 @@ function BacktestPage() {
 
   const { status, result, error, isPolling } = useBacktestPolling(taskId);
 
-  // Update view when result is available
-  if (view === 'running' && result && !isPolling) {
-    setView('result');
-  }
+  useEffect(() => {
+    if (view === 'running' && result && !isPolling) {
+      setView('result');
+    }
+  }, [view, result, isPolling]);
 
-  // Update view when error occurs
-  if (view === 'running' && error && !isPolling) {
-    setView('error');
-    setErrorMsg(error);
-  }
+  useEffect(() => {
+    if (view === 'running' && error && !isPolling) {
+      setView('error');
+      setErrorMsg(error);
+    }
+  }, [view, error, isPolling]);
 
   const handleSubmit = async (params: BacktestRequest) => {
     setSubmitting(true);
     try {
-      const response = await backtestService.run(params) as any;
+      const response = await backtestService.run(params);
       setTaskId(response.task_id);
       setView('running');
       setErrorMsg('');
@@ -62,15 +64,13 @@ function BacktestPage() {
     setErrorMsg('');
   };
 
-  // Handle tab change
   const handleTabChange = (key: string) => {
     setActiveTab(key as TabKey);
     if (key === 'history') {
-      setHistoryRefreshTrigger(prev => prev + 1);
+      setHistoryRefreshTrigger((prev) => prev + 1);
     }
   };
 
-  // Render backtest execution content
   const renderBacktestContent = () => {
     if (view === 'params') {
       return <BacktestParamsForm onSubmit={handleSubmit} loading={submitting} />;

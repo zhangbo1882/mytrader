@@ -12,7 +12,7 @@ interface TaskState {
   setRunningTask: (task: Task | null) => void;
 }
 
-export const useTaskStore = create<TaskState>((set, get) => ({
+export const useTaskStore = create<TaskState>((set) => ({
   tasks: [],
   runningTask: null,
 

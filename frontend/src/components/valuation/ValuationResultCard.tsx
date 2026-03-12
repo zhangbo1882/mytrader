@@ -165,29 +165,61 @@ export function ValuationResultCard({ result }: ValuationResultCardProps) {
             估值假设
           </div>
           <Card size="small" style={{ background: '#fafafa' }}>
-            {Object.entries(result.assumptions).map(([key, value]) => (
-              <div key={key} style={{ marginBottom: 8 }}>
-                <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 4 }}>
-                  {key}
-                </div>
-                {typeof value === 'object' && value !== null ? (
-                  <div style={{ marginLeft: 16 }}>
-                    {Object.entries(value).map(([subKey, subValue]) => (
-                      <div key={subKey} style={{ marginBottom: 2, fontSize: 13 }}>
-                        <span style={{ color: '#666' }}>{subKey}:</span>{' '}
-                        <span style={{ color: '#333' }}>
-                          {typeof subValue === 'object' && subValue !== null
-                            ? JSON.stringify(subValue)
-                            : String(subValue)}
-                        </span>
+            {(() => {
+              const isCombined = result.model.startsWith('Combined');
+              
+              if (isCombined) {
+                return Object.entries(result.assumptions).map(([methodName, methodAssumptions]) => {
+                  if (typeof methodAssumptions !== 'object' || methodAssumptions === null) {
+                    return null;
+                  }
+                  
+                  return (
+                    <div key={methodName} style={{ marginBottom: 16 }}>
+                      <div style={{ fontWeight: 'bold', color: '#1890ff', marginBottom: 8, fontSize: 14 }}>
+                        {methodName} 估值参数
                       </div>
-                    ))}
+                      <div style={{ marginLeft: 16 }}>
+                        {Object.entries(methodAssumptions as Record<string, any>).map(([key, value]) => (
+                          <div key={key} style={{ marginBottom: 2, fontSize: 13 }}>
+                            <span style={{ color: '#666' }}>{key}:</span>{' '}
+                            <span style={{ color: '#333' }}>
+                              {typeof value === 'object' && value !== null
+                                ? JSON.stringify(value)
+                                : String(value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                });
+              } else {
+                return Object.entries(result.assumptions).map(([key, value]) => (
+                  <div key={key} style={{ marginBottom: 8 }}>
+                    <div style={{ fontWeight: 'bold', color: '#333', marginBottom: 4 }}>
+                      {key}
+                    </div>
+                    {typeof value === 'object' && value !== null ? (
+                      <div style={{ marginLeft: 16 }}>
+                        {Object.entries(value).map(([subKey, subValue]) => (
+                          <div key={subKey} style={{ marginBottom: 2, fontSize: 13 }}>
+                            <span style={{ color: '#666' }}>{subKey}:</span>{' '}
+                            <span style={{ color: '#333' }}>
+                              {typeof subValue === 'object' && subValue !== null
+                                ? JSON.stringify(subValue)
+                                : String(subValue)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: '#333' }}>{String(value)}</span>
+                    )}
                   </div>
-                ) : (
-                  <span style={{ color: '#333' }}>{String(value)}</span>
-                )}
-              </div>
-            ))}
+                ));
+              }
+            })()}
           </Card>
         </>
       )}

@@ -6,4 +6,4 @@ export { TradeTable } from './TradeTable';
 export { HealthMetrics } from './HealthMetrics';
 export { EquityCurve } from './EquityCurve';
 export { BenchmarkComparison } from './BenchmarkComparison';
-export { default as BacktestHistory } from './BacktestHistory';
+export { default as BacktestHistory } from './BacktestHistory.tsx';

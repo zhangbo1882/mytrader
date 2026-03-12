@@ -1,12 +1,28 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Button, message, AutoComplete, Divider, Upload, Modal, Table, Alert, Space } from 'antd';
+import type { DefaultOptionType } from 'antd/es/select';
+import type { UploadProps } from 'antd';
 import { PlusOutlined, UploadOutlined, FileTextOutlined } from '@ant-design/icons';
-import type { UploadFile } from 'antd/es/upload/interface';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { stockService, favoriteService } from '@/services';
 import { useFavoriteStore } from '@/stores';
-import type { StockImportData } from '@/services/favoriteService';
+import type { StockImportData, BatchAddResult } from '@/services/favoriteService';
+
+interface StockOption extends DefaultOptionType {
+  value: string;
+  label: string | ReactNode;
+  code: string;
+  name: string;
+}
+
+interface CsvCellLike {
+  toString(): string;
+}
+
+type CsvRow = Array<CsvCellLike | undefined>;
+type SheetRow = Array<string | number | undefined>;
 
 interface ParsedStock extends StockImportData {
   name?: string;
@@ -14,9 +30,7 @@ interface ParsedStock extends StockImportData {
 
 export function AddFavorite() {
   const [searchText, setSearchText] = useState('');
-  const [options, setOptions] = useState<{ value: string; label: string | React.ReactNode; code: string; name: string }[]>(
-    []
-  );
+  const [options, setOptions] = useState<StockOption[]>([]);
   const [loading, setLoading] = useState(false);
   const { addFavorite, isInFavorites } = useFavoriteStore();
   const [importModalVisible, setImportModalVisible] = useState(false);
@@ -38,7 +52,7 @@ export function AddFavorite() {
       const stockList = response.stocks || [];
 
       setOptions(
-        stockList.map((stock: any) => ({
+        stockList.map((stock: { code: string; name: string }) => ({
           value: `${stock.code} ${stock.name}`,
           code: stock.code,
           name: stock.name,
@@ -64,7 +78,7 @@ export function AddFavorite() {
   };
 
   // 选择股票
-  const handleSelect = (_value: string, option: any) => {
+  const handleSelect = (_value: string, option: StockOption) => {
     if (isInFavorites(option.code)) {
       message.warning('该股票已在收藏列表中');
       return;
@@ -95,7 +109,7 @@ export function AddFavorite() {
   };
 
   // 处理文件上传
-  const handleFileUpload = (file: UploadFile) => {
+  const handleFileUpload: UploadProps['beforeUpload'] = (file) => {
     console.log('File uploaded:', file);
 
     const fileType = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
@@ -105,7 +119,7 @@ export function AddFavorite() {
       return false;
     }
 
-    const fileToRead = file.originFileObj || (file as any);
+    const fileToRead = file;
     const reader = new FileReader();
 
     reader.onload = (e) => {
@@ -124,27 +138,27 @@ export function AddFavorite() {
             skipEmptyLines: true,
           });
 
-          const headers = (parsed.data[0] as string[]).map(h => h?.trim() || '');
+          const headers = (parsed.data[0] as string[]).map((h) => h?.trim() || '');
           console.log('CSV headers:', headers);
 
           // 查找各列的索引
-          const stockCodeIndex = headers.findIndex(h =>
+          const stockCodeIndex = headers.findIndex((h) =>
             h && (h.includes('股票代码') || h.includes('证券代码') || h.includes('代码'))
           );
-          const safetyIndex = headers.findIndex(h =>
+          const safetyIndex = headers.findIndex((h) =>
             h && (h.includes('安全性') || h === '安全评级')
           );
-          const fundamentalIndex = headers.findIndex(h =>
+          const fundamentalIndex = headers.findIndex((h) =>
             h && (h.includes('基本面') || h === '基本面评级')
           );
-          const entryPriceIndex = headers.findIndex(h =>
+          const entryPriceIndex = headers.findIndex((h) =>
             h && (h.includes('进场价格') || h.includes('进场价') || h === '价格')
           );
 
           console.log('Column indices:', { stockCodeIndex, safetyIndex, fundamentalIndex, entryPriceIndex });
 
           if (stockCodeIndex >= 0) {
-            stocks = (parsed.data as any[][])
+            stocks = (parsed.data as CsvRow[])
               .slice(1)
               .map((row) => {
                 let code = row[stockCodeIndex]?.toString().trim() || '';
@@ -157,13 +171,13 @@ export function AddFavorite() {
                   code,
                   safety_rating: safetyIndex >= 0 ? row[safetyIndex]?.toString().trim() || undefined : undefined,
                   fundamental_rating: fundamentalIndex >= 0 ? row[fundamentalIndex]?.toString().trim() || undefined : undefined,
-                  entry_price: entryPriceIndex >= 0 ? parseFloat(row[entryPriceIndex]) || undefined : undefined,
+                  entry_price: entryPriceIndex >= 0 && row[entryPriceIndex] ? parseFloat(String(row[entryPriceIndex])) || undefined : undefined,
                 };
               })
               .filter((s) => s.code && s.code.length > 0);
           } else {
             // 没有找到表头，使用第一列
-            stocks = (parsed.data as any[][])
+            stocks = (parsed.data as CsvRow[])
               .map((row) => {
                 let code = row[0]?.toString().trim() || '';
                 if (/\.(SH|SZ|sh|sz)$/.test(code)) {
@@ -180,27 +194,27 @@ export function AddFavorite() {
           const jsonData = XLSX.utils.sheet_to_json(firstSheet, {
             header: 1,
             defval: ''
-          }) as any[][];
+          }) as SheetRow[];
 
           if (jsonData.length === 0) {
             message.error('文件为空');
             return;
           }
 
-          const headers = (jsonData[0] as string[]).map(h => h?.toString().trim() || '');
+          const headers = (jsonData[0] as string[]).map((h) => h?.toString().trim() || '');
           console.log('Excel headers:', headers);
 
           // 查找各列的索引
-          const stockCodeIndex = headers.findIndex(h =>
+          const stockCodeIndex = headers.findIndex((h) =>
             h && (h.includes('股票代码') || h.includes('证券代码') || h.includes('代码'))
           );
-          const safetyIndex = headers.findIndex(h =>
+          const safetyIndex = headers.findIndex((h) =>
             h && (h.includes('安全性') || h === '安全评级')
           );
-          const fundamentalIndex = headers.findIndex(h =>
+          const fundamentalIndex = headers.findIndex((h) =>
             h && (h.includes('基本面') || h === '基本面评级')
           );
-          const entryPriceIndex = headers.findIndex(h =>
+          const entryPriceIndex = headers.findIndex((h) =>
             h && (h.includes('进场价格') || h.includes('进场价') || h === '价格')
           );
 
@@ -220,7 +234,7 @@ export function AddFavorite() {
                   code,
                   safety_rating: safetyIndex >= 0 && row[safetyIndex] ? row[safetyIndex].toString().trim() : undefined,
                   fundamental_rating: fundamentalIndex >= 0 && row[fundamentalIndex] ? row[fundamentalIndex].toString().trim() : undefined,
-                  entry_price: entryPriceIndex >= 0 && row[entryPriceIndex] ? parseFloat(row[entryPriceIndex]) : undefined,
+                  entry_price: entryPriceIndex >= 0 && row[entryPriceIndex] ? parseFloat(String(row[entryPriceIndex])) : undefined,
                 };
               })
               .filter((s) => s.code && s.code.length > 0);
@@ -242,7 +256,7 @@ export function AddFavorite() {
 
         // 去重（按代码）
         const seen = new Set<string>();
-        stocks = stocks.filter(s => {
+        stocks = stocks.filter((s) => {
           if (seen.has(s.code)) return false;
           seen.add(s.code);
           return true;
@@ -297,8 +311,8 @@ export function AddFavorite() {
       if (data.failed === 0) {
         message.success(`导入完成：新增 ${data.success} 只，更新 ${data.updated || 0} 只`);
       } else if (totalCount === 0 && data.failed > 0) {
-        const failedResults = data.results.filter((r: any) => !r.success);
-        const errorDetails = failedResults.slice(0, 3).map((r: any) =>
+        const failedResults = data.results.filter((r: BatchAddResult) => !r.success);
+        const errorDetails = failedResults.slice(0, 3).map((r: BatchAddResult) =>
           `${r.stock_code}: ${r.error || '未知错误'}`
         ).join('；');
 

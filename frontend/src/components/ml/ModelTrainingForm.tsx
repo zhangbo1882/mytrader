@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Form, Input, Select, DatePicker, Button, Switch, Space, Card, Typography, Alert, Divider } from 'antd';
 import { RocketOutlined, StockOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import type { ModelTrainingParams, ModelType, PredictionTarget } from '@/types';
+import type { ModelTrainingParams, PredictionTarget } from '@/types';
 import { useFavoriteStore } from '@/stores';
 
 const { Title, Text } = Typography;

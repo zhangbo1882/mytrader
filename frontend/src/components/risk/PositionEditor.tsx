@@ -79,8 +79,8 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
       const hasStopLossChange = values.new_stop_loss_base !== position.stop_loss_base ||
                                  values.new_stop_loss_percent !== position.stop_loss_percent;
 
-      // 如果有股数或成本价变化，先更新数据库
-      if (hasSharesChange || hasCostPriceChange) {
+      // 只要有任何变化，就更新数据库
+      if (hasSharesChange || hasCostPriceChange || hasStopLossChange) {
         const updateResult = await updatePositionInDb(position.symbol, {
           shares: values.shares,
           cost_price: values.cost_price,
@@ -95,7 +95,7 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
         }
       }
 
-      // 如果有止损变化，调用止损调整API获取预览结果
+      // 如果有止损变化，调用止损调整API获取预览结果用于显示
       if (hasStopLossChange) {
         const response = await adjustStopLoss({
           position: {
@@ -208,9 +208,12 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
             precision={2}
             placeholder="成本价"
             formatter={(value) => `¥ ${value}`}
+            // @ts-ignore
             parser={(displayValue) => {
-              const parsed = parseFloat(displayValue?.replace('¥', '').replace(',', '') || '0');
-              return parsed;
+              if (!displayValue) return 0;
+              const cleaned = displayValue.replace('¥', '').replace(',', '');
+              const parsed = parseFloat(cleaned);
+              return isNaN(parsed) ? 0 : parsed;
             }}
           />
         </Form.Item>
@@ -229,9 +232,12 @@ const PositionEditor: React.FC<PositionEditorProps> = ({
             precision={2}
             placeholder="止损基数价格"
             formatter={(value) => `¥ ${value}`}
+            // @ts-ignore
             parser={(displayValue) => {
-              const parsed = parseFloat(displayValue?.replace('¥', '').replace(',', '') || '0');
-              return parsed;
+              if (!displayValue) return 0;
+              const cleaned = displayValue.replace('¥', '').replace(',', '');
+              const parsed = parseFloat(cleaned);
+              return isNaN(parsed) ? 0 : parsed;
             }}
           />
         </Form.Item>
